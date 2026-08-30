@@ -1313,6 +1313,22 @@ class TestFacetRefinement(unittest.TestCase):
             with self.subTest(family=family):
                 self.assertIn('facetPool("%s")' % family, body)
 
+    def test_render_wires_facets_chips_and_bar(self):
+        """A misplaced edit deleted the render() call block for the facet rail, header
+        chips and filter bar; every other test still passed because they assert the
+        pieces, not the wiring. render() must compute the counts and render all three
+        surfaces, in that order, on every pass."""
+        body = _fn_body("render()")
+        self.assertIn("categoryTree()", body)
+        self.assertIn("facetCounts()", body)
+        self.assertIn("renderFacets(tree, counts);", body)
+        self.assertIn("renderChips(counts);", body)
+        self.assertIn("renderFilterBar();", body)
+        for call in ("renderFacets(tree, counts);", "renderChips(counts);",
+                     "renderFilterBar();"):
+            self.assertLess(body.index("facetCounts()"), body.index(call),
+                            "%s must run after counts are computed" % call)
+
 
 class TestSortOptions(unittest.TestCase):
     def test_rating_sort_exists(self):

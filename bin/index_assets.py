@@ -683,7 +683,7 @@ def emit_review_queue(data, path):
     return len(dups)
 
 
-HTML_TEMPLATE = """<!doctype html>
+HTML_TEMPLATE = r"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -692,112 +692,218 @@ HTML_TEMPLATE = """<!doctype html>
 <title>Unity Asset Index</title>
 <style>
 :root{
---bg:#fbfbfc;--surface:#fff;--sunk:#f4f4f6;
---ink:#18181b;--ink-2:#52525b;--ink-3:#6b6b75;
+--bg:#fafafa;--surface:#ffffff;--sunk:#f4f4f5;
+--ink:#18181b;--ink-2:#52525b;--ink-3:#71717a;
 --line:#e4e4e7;--accent:#2563eb;--warn:#b45309;
---r:6px;--r-sm:4px}
+--head:rgba(250,250,250,.82);--shadow:0 10px 30px rgba(24,24,27,.10);
+--r:8px;--r-sm:5px;--eo:cubic-bezier(.23,1,.32,1)}
 @media(prefers-color-scheme:dark){:root{
---bg:#0c0c0e;--surface:#151518;--sunk:#0a0a0b;
---ink:#fafafa;--ink-2:#a1a1aa;--ink-3:#80808a;
---line:#27272a;--accent:#3b82f6;--warn:#d97706}}
+--bg:#0c0c0e;--surface:#161619;--sunk:#09090b;
+--ink:#fafafa;--ink-2:#a1a1bb;--ink-3:#8b8b98;
+--line:#27272a;--accent:#3b82f6;--warn:#d97706;
+--head:rgba(12,12,14,.80);--shadow:0 10px 30px rgba(0,0,0,.50)}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.5 ui-sans-serif,-apple-system,"SF Pro Text",system-ui,sans-serif}
-:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:10px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-h1{font:600 15px/1 inherit;margin:0;letter-spacing:.01em}
-#q{flex:1;min-width:220px;padding:6px 9px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface);color:var(--ink);font:inherit}
+::focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);
+padding:10px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+@supports((backdrop-filter:blur(4px)) or (-webkit-backdrop-filter:blur(4px))){
+header{background:var(--head);backdrop-filter:blur(10px) saturate(1.4);-webkit-backdrop-filter:blur(10px) saturate(1.4)}}
+h1{font:600 15px/1 inherit;margin:0;letter-spacing:.01em;white-space:nowrap}
+#q{flex:1;min-width:200px;height:30px;padding:0 10px;border:1px solid var(--line);border-radius:var(--r-sm);
+background:var(--surface);color:var(--ink);font:inherit;transition:border-color .15s var(--eo),box-shadow .15s var(--eo)}
+#q:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.15)}
 .count{color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap}
 .stamp{color:var(--ink-3);font-size:11px;white-space:nowrap;font-variant-numeric:tabular-nums}
 .stamp.stale{color:var(--warn);font-weight:600}
-button,select{font:inherit;font-size:12px;padding:5px 9px;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:var(--r-sm);cursor:pointer}
-button.on{background:var(--accent);border-color:var(--accent);color:var(--bg)}
-main{display:flex;gap:14px;align-items:flex-start;padding:14px}
-#facets{width:220px;flex:0 0 220px;position:sticky;top:56px;max-height:calc(100vh - 72px);overflow-y:auto}
+.controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%}
+.controls .sep{flex:1}
+button,select{font:inherit;font-size:12px;padding:5px 10px;border:1px solid var(--line);background:var(--surface);
+color:var(--ink);border-radius:var(--r-sm);cursor:pointer;transition:border-color .15s var(--eo),background .15s var(--eo),transform .1s var(--eo)}
+button:active{transform:scale(.97)}
+button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+@media(hover:hover) and (pointer:fine){
+button:hover:not(.on):not(.chip.on),select:hover{border-color:var(--ink-3)}}
+
+#density{display:inline-flex;border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden}
+#density button{border:0;border-radius:0;padding:5px 9px;background:var(--surface);color:var(--ink-2)}
+#density button+button{border-left:1px solid var(--line)}
+#density button.on{background:var(--accent);color:#fff}
+body.list #density{display:none}
+
+.chip{display:inline-flex;gap:5px;align-items:center;font-size:11px;padding:3px 8px;border:1px solid var(--line);
+border-radius:var(--r-sm);background:var(--surface);color:var(--ink-2)}
+.chip .n{font-variant-numeric:tabular-nums;opacity:.65}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.chip.warn.on{background:var(--warn);border-color:var(--warn);color:#fff}
+@media(hover:hover) and (pointer:fine){.chip:hover:not(.on){border-color:var(--ink-3);color:var(--ink)}}
+
+main{display:flex;gap:16px;align-items:flex-start;padding:14px 16px 40px}
+#facets{width:230px;flex:0 0 230px;position:sticky;top:96px;max-height:calc(100vh - 112px);overflow-y:auto}
 #facetbox>summary{display:none}
-aside section{margin-bottom:16px}
+aside section{margin-bottom:18px}
 aside h2{font:600 11px/1 inherit;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-3);margin:0 0 6px}
-.facet{display:block;width:100%;text-align:left;border:0;background:none;padding:2px 5px;border-radius:var(--r-sm);color:var(--ink);font-size:12px;cursor:pointer}
+.frow{display:flex;align-items:center;gap:1px}
+.caret{flex:none;width:18px;height:24px;padding:0;border:0;background:none;color:var(--ink-3);cursor:pointer;
+transition:transform .15s var(--eo)}
+.caret.open{transform:rotate(90deg)}
+@media(hover:hover) and (pointer:fine){.caret:hover{color:var(--ink)}}
+.facet{display:block;flex:1;width:100%;min-width:0;text-align:left;border:0;background:none;padding:3px 6px;
+border-radius:var(--r-sm);color:var(--ink);font-size:12px;cursor:pointer}
 .facet:hover{background:var(--sunk)}
-.facet.on{background:var(--accent);color:var(--bg)}
+.facet.on{background:var(--accent);color:#fff}
 .facet .n{float:right;color:var(--ink-3);font-variant-numeric:tabular-nums}
-.facet.on .n{color:var(--bg)}
-.facet.lvl1{padding-left:15px;font-size:12px}
-.facet.lvl2{padding-left:27px;font-size:12px}
-.facet.lvl3{padding-left:39px;font-size:11px}
-.facet.lvl4{padding-left:51px;font-size:11px}
-.hint{color:var(--ink-3);font-size:11px;font-style:italic;padding:4px}
-.crumb{font-size:12px;color:var(--ink-2);display:flex;flex-wrap:wrap;gap:3px;align-items:baseline}
-.crumb .sep{color:var(--ink-3)}
+.facet.on .n{color:#fff}
+.facet.lvl1{padding-left:16px}
+.facet.lvl2{padding-left:28px}
+.facet.lvl3{padding-left:40px}
+.facet.lvl4{padding-left:52px}
+.more{border:0;background:none;color:var(--accent);font-size:11px;padding:4px 6px;cursor:pointer}
+.more:hover{text-decoration:underline}
+
+#content{flex:1;min-width:0}
+.fbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 12px}
+.fchip{display:inline-flex;gap:4px;align-items:center;font-size:11px;padding:3px 4px 3px 8px;
+border:1px solid var(--accent);border-radius:var(--r-sm);background:var(--surface);color:var(--accent)}
+.fchip .x{border:0;background:none;color:inherit;font-size:12px;line-height:1;padding:1px 4px;cursor:pointer}
+.fchip .x:hover{text-decoration:underline}
+.clearall{border:0;background:none;color:var(--ink-3);font-size:11px;padding:3px 6px;cursor:pointer;text-decoration:underline}
+.clearall:hover{color:var(--ink)}
+
 .pending{color:var(--ink-3);font-style:italic}
-.local{font-size:11px;color:var(--ink-3);word-break:break-word}
+.local{font-size:11px;color:var(--ink-3);word-break:break-all}
 td .pending{font-size:11px}
-#out{flex:1;min-width:0}
-#detail{display:none;width:320px;flex:0 0 320px;position:sticky;top:56px;max-height:calc(100vh - 72px);overflow-y:auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px}
-#detail.on{display:block}
-#detail .dhd{display:flex;gap:8px;align-items:flex-start;justify-content:space-between;margin:0 0 8px}
-#detail .dnm{font:600 15px/1.3 inherit;text-transform:none;letter-spacing:0;color:var(--ink);margin:0}
-#detail h2{margin:12px 0 6px}
-#detail .ver{border-top:1px solid var(--line);padding:6px 0}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}
-.card{width:100%;text-align:left;font:inherit;color:var(--ink);cursor:pointer;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:8px;display:flex;flex-direction:column;gap:4px;overflow:hidden}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px}
+.grid.d-s{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+.grid.d-l{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+.card{width:100%;text-align:left;font:inherit;color:var(--ink);cursor:pointer;border:1px solid var(--line);
+border-radius:var(--r);background:var(--surface);padding:8px;display:flex;flex-direction:column;gap:5px;overflow:hidden;
+transition:transform .16s var(--eo),box-shadow .16s var(--eo),border-color .16s var(--eo)}
+@media(hover:hover) and (pointer:fine){
+.card:hover{transform:translateY(-2px);border-color:var(--ink-3);box-shadow:var(--shadow)}}
+.card:active{transform:scale(.98)}
 .card.pick{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
-.card .th{aspect-ratio:16/10;background:var(--sunk);border:1px solid var(--line);border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;color:var(--ink-3);font-size:11px;overflow:hidden}
+.card .th{position:relative;aspect-ratio:16/10;background:var(--sunk);border:1px solid var(--line);
+border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;color:var(--ink-3);overflow:hidden}
 .card .th img{width:100%;height:100%;object-fit:cover}
 .card .th .ph{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);padding:0 6px;text-align:center}
-.card .nm{font-weight:600;font-size:13px;line-height:1.3;word-break:break-word;text-wrap:balance;display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.card .mt{color:var(--ink-2);font-size:12px;word-break:break-word;font-variant-numeric:tabular-nums}
+.card .vcount{position:absolute;right:4px;bottom:4px;font-size:10px;padding:1px 5px;border-radius:var(--r-sm);
+background:rgba(24,24,27,.72);color:#fff;font-variant-numeric:tabular-nums}
+.card .nm{font-weight:600;font-size:13px;line-height:1.3;word-break:break-word;text-wrap:balance;display:-webkit-box;
+-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card .mt{display:flex;justify-content:space-between;gap:8px;color:var(--ink-2);font-size:12px;font-variant-numeric:tabular-nums}
+.card .au{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card .sz{flex:none;color:var(--ink-3)}
+
 .tags{display:flex;flex-wrap:wrap;gap:3px}
 .tag{font-size:11px;padding:0 5px;border:1px solid var(--line);border-radius:var(--r-sm);color:var(--ink-3)}
 .badge{font-size:11px;padding:0 5px;border-radius:var(--r-sm);background:var(--sunk);color:var(--ink-3);align-self:flex-start}
 .badge.warn{color:var(--warn)}
 .row{display:flex;gap:5px;flex-wrap:wrap;margin-top:auto;padding-top:4px}
-.row button,.row a{font-size:11px;padding:2px 7px;border:1px solid var(--line);border-radius:var(--r-sm);color:var(--ink);text-decoration:none;background:var(--bg);cursor:pointer}
+.row button,.row a{font-size:11px;padding:2px 7px;border:1px solid var(--line);border-radius:var(--r-sm);color:var(--ink);
+text-decoration:none;background:var(--bg);cursor:pointer}
+
+.empty{padding:90px 20px;text-align:center;color:var(--ink-3)}
+.empty .eh{font-size:15px;font-weight:600;color:var(--ink-2);animation:fade-in .2s var(--eo)}
+.empty .es{margin:6px 0 14px;animation:fade-in .2s var(--eo)}
+@keyframes fade-in{from{opacity:0}}
+
+#detail{display:none;width:340px;flex:0 0 340px;position:sticky;top:96px;max-height:calc(100vh - 112px);overflow-y:auto;
+background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px}
+#detail:focus{outline:none}
+#detail.on{display:block;animation:panel-in .22s var(--eo)}
+@keyframes panel-in{from{opacity:0;transform:translateX(10px)}}
+#detail .dhd{display:flex;gap:8px;align-items:flex-start;justify-content:space-between;margin:0 0 8px}
+#detail .dnm{font:600 15px/1.3 inherit;color:var(--ink);margin:0;word-break:break-word}
+#detail .pnav{display:flex;gap:3px;flex:none}
+#detail .pbtn{padding:2px 8px;font-size:13px;line-height:1.2}
+#detail .dth{margin:2px 0 10px;border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden;aspect-ratio:16/10;background:var(--sunk)}
+#detail .dth img{width:100%;height:100%;object-fit:cover;display:block}
+#detail h2{margin:12px 0 6px;font-size:12px}
+#detail .ver{border-top:1px solid var(--line);padding:6px 0}
+.crumb{font-size:12px;color:var(--ink-2);display:flex;flex-wrap:wrap;gap:3px;align-items:baseline}
+.crumb .sep{color:var(--ink-3)}
+
 table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
 td,th{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left;font-size:12px;vertical-align:top}
-th{color:var(--ink-3);font-weight:600;white-space:nowrap}
+th{color:var(--ink-3);font-weight:600;white-space:nowrap;background:var(--surface)}
 th.sortable{cursor:pointer;color:var(--ink-2)}
+th.sortable:hover{color:var(--ink)}
 #out tbody tr{cursor:pointer}
+#out tbody tr:hover{background:var(--sunk)}
 #out tbody tr.cur{box-shadow:inset 2px 0 0 var(--ink-3)}
 #out tbody tr.pick{background:var(--sunk);box-shadow:inset 2px 0 0 var(--accent)}
 .wrap{overflow-x:auto}
 .sentinel{height:1px}
-@media(max-width:1100px){#detail.on{position:fixed;top:56px;right:0;bottom:0;width:340px;flex:none;max-height:none;z-index:6;border-radius:0;border-width:0 0 0 1px}}
+
+@media(max-width:1100px){#detail.on{position:fixed;top:0;right:0;bottom:0;width:360px;flex:none;max-height:none;
+z-index:6;border-radius:0;border-width:0;box-shadow:var(--shadow)}}
 @media(max-width:760px){main{flex-direction:column}
 #facets{width:100%;flex:1;position:static;max-height:none}
 #facetbox>summary{display:list-item;cursor:pointer;font:600 11px/1 inherit;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-3);padding:4px 0}
 #detail.on{width:100%;left:0}}
+
+@media(prefers-reduced-motion:reduce){
+#detail.on{animation:none}
+.card,.caret,button,#q{transition:none}
+.card:hover,.card:active,button:active{transform:none}
+.empty .eh,.empty .es{animation:none}}
 </style>
 </head>
 <body>
 <header>
   <h1>Unity Asset Index</h1>
-  <input id="q" type="search" placeholder="Search name, author, tag, path…" autocomplete="off">
-  <button id="view">List view</button>
-  <select id="sort"><option value="name">Name</option><option value="size">Size</option><option value="rating">Rating</option><option value="date">Date</option></select>
+  <input id="q" type="search" placeholder="Search name, author, tag, path" autocomplete="off" spellcheck="false">
   <span class="count" id="count" aria-live="polite"></span>
   <span class="stamp" id="generated"></span>
+  <div class="controls">
+    <button id="view">List view</button>
+    <span id="density" role="group" aria-label="Card size">
+      <button type="button" data-d="s" title="Small cards">S</button><button type="button" data-d="m" title="Medium cards">M</button><button type="button" data-d="l" title="Large cards">L</button>
+    </span>
+    <select id="sort" aria-label="Sort"><option value="name">Name</option><option value="size">Size</option><option value="rating">Rating</option><option value="date">Date</option></select>
+    <span class="sep"></span>
+    <span id="flagchips" role="group" aria-label="Filter by flag"></span>
+  </div>
 </header>
 <main>
   <aside id="facets"><details id="facetbox" open><summary>Filters</summary>
     <div id="facetlist"></div></details></aside>
-  <div id="out"></div>
+  <div id="content">
+    <div id="filterbar"></div>
+    <div id="out"></div>
+  </div>
   <aside id="detail" tabindex="-1" aria-label="Asset detail"></aside>
 </main>
+
 <script type="application/json" id="data">__DATA__</script>
 <script>
 (function(){
 "use strict";
 var DATA = JSON.parse(document.getElementById("data").textContent);
-var assets = DATA.assets, grid = true, sortBy = "name";
-var selected = null;
+var assets = DATA.assets, grid = true, sortBy = "name", density = "m";
+var selected = null, origin = null, pendingKey = null;
 // Chunked append, not virtualization: at 835 items the ceiling is ~5,000 nodes,
 // and scroll math plus height estimation would buy nothing for that.
 var CHUNK = 100, view = [], cursor = 0, obs = null, gen = 0;
-var query = "", rowIdx = -1, qt, origin = null;
-// Only these columns map to a real sort key. The rest stay unbound and, per the
-// CSS above, stop claiming to be clickable.
+var query = "", rowIdx = -1, qt;
 var SORTABLE = {"Name (store)":"name", "Size":"size"};
 var sel = {category:new Set(), tag:new Set(), author:new Set(), flag:new Set()};
+// Collapsed-by-default category branches and per-family facet expansion. Session
+// scoped on purpose: a stale expanded tree is noise after the library moves.
+var openCats = new Set(), showAll = {tag:false, author:false};
+// View preferences survive reloads. localStorage can throw on file:// in some
+// configurations, so every touch is guarded and the default is always usable.
+var prefs = {
+  get:function(k,d){try{var v=localStorage.getItem("uai:"+k);return v==null?d:v;}catch(e){return d;}},
+  set:function(k,v){try{localStorage.setItem("uai:"+k,v);}catch(e){}}};
+grid = prefs.get("view","grid")!=="list";
+sortBy = prefs.get("sort","name");
+if(["name","size","rating","date"].indexOf(sortBy)<0)sortBy="name";
+density = prefs.get("density","m");
+if(["s","m","l"].indexOf(density)<0)density="m";
 
 function el(t, cls, txt){var n=document.createElement(t); if(cls)n.className=cls;
   if(txt!==undefined&&txt!==null)n.textContent=String(txt); return n;}
@@ -848,8 +954,7 @@ function matches(a, q, except){
   if(except!=="flag"&&sel.flag.size){var f=flagsOf(a);
     for(var g of sel.flag){if(f.indexOf(g)<0)return false;}}
   if(!q)return true;
-  return q.split(/\\s+/).every(function(w){return hay(a).indexOf(w)>=0;});
-}
+  return q.split(/\s+/).every(function(w){return hay(a).indexOf(w)>=0;});}
 
 // Every path prefix gets its own count, so a 3-level tree reports totals at each depth.
 // Standard faceted refinement: when counting family F, apply every filter EXCEPT F's
@@ -858,14 +963,14 @@ function facetPool(family){
   return assets.filter(function(a){return matches(a,query,family);});}
 
 function categoryTree(){
-  var counts={}, depth={};
+  var counts={};
   facetPool("category").forEach(function(a){
     var L=levels(a);
-    if(!L.length){counts["(none)"]=(counts["(none)"]||0)+1; depth["(none)"]=0; return;}
+    if(!L.length){counts["(none)"]=(counts["(none)"]||0)+1; return;}
     for(var i=0;i<L.length;i++){
       var p=L.slice(0,i+1).join("/");
-      counts[p]=(counts[p]||0)+1; depth[p]=i;}});
-  return {counts:counts, depth:depth};}
+      counts[p]=(counts[p]||0)+1;}});
+  return counts;}
 
 // Zero arity on purpose. Two tests slice the template on this declaration's exact
 // text, so adding a parameter makes the split raise IndexError and the older test
@@ -883,7 +988,69 @@ function facetCounts(){
       .forEach(function(f){c.flag[f]=(c.flag[f]||0)+1;});});
   return c;}
 
-function renderFacets(){
+// Header chips are the flags facet: same Set, same counts, one fewer sidebar section.
+var CHIPDEFS = [["broken",1],["suspicious",1],["duplicate",0],["variant",0],
+                ["pending-enrichment",0],["non-store",0]];
+function renderChips(counts){
+  var host=document.getElementById("flagchips");
+  host.textContent="";
+  CHIPDEFS.forEach(function(def){
+    var f=def[0], n=counts.flag[f]||0;
+    if(!n&&!sel.flag.has(f))return;
+    var b=el("button","chip"+(def[1]?" warn":"")+(sel.flag.has(f)?" on":""));
+    b.setAttribute("type","button");
+    b.setAttribute("aria-pressed",sel.flag.has(f)?"true":"false");
+    b.setAttribute("title","Filter: "+f);
+    b.appendChild(el("span",null,f));
+    b.appendChild(el("span","n",n));
+    b.addEventListener("click",function(){
+      sel.flag.has(f)?sel.flag.delete(f):sel.flag.add(f); render();});
+    host.appendChild(b);});}
+
+function anySel(){return sel.category.size||sel.tag.size||sel.author.size||sel.flag.size;}
+
+// Active filters rendered at the content site, not only in the rail: the state that
+// shapes the grid should be visible next to the grid, and removable in one click.
+function renderFilterBar(){
+  var host=document.getElementById("filterbar");
+  host.textContent="";
+  if(!anySel())return;
+  var bar=el("div","fbar");
+  [["category",sel.category],["tag",sel.tag],["author",sel.author],["flag",sel.flag]]
+  .forEach(function(fm){
+    fm[1].forEach(function(v){
+      var label=fm[0]==="category"?(v==="(none)"?"uncategorized":v.split("/").pop()):v;
+      var c=el("span","fchip");
+      c.appendChild(el("span",null,label));
+      c.setAttribute("title",fm[0]+": "+v);
+      var x=el("button","x","×");
+      x.setAttribute("type","button");
+      x.setAttribute("aria-label","Remove filter "+label);
+      x.addEventListener("click",function(){fm[1].delete(v); render();});
+      c.appendChild(x);
+      bar.appendChild(c);});});
+  var cl=el("button","clearall","Clear all");
+  cl.setAttribute("type","button");
+  cl.addEventListener("click",clearAll);
+  bar.appendChild(cl);
+  host.appendChild(bar);}
+
+function clearAll(){
+  sel.category.clear(); sel.tag.clear(); sel.author.clear(); sel.flag.clear();
+  var box=document.getElementById("q");
+  box.value="";
+  openCats.clear();
+  render();
+  box.focus();}
+
+// Branches expand when opened by hand or when they contain a selection, so a deep
+// pick is always visible without walking the whole tree.
+function selectedInSub(p){
+  var any=false;
+  sel.category.forEach(function(s){if(s===p||s.indexOf(p+"/")===0)any=true;});
+  return any;}
+
+function renderFacets(tree, counts){
   var host=document.getElementById("facetlist");
   // The active facet button is about to be destroyed and rebuilt. Remember it by
   // label so focus can land on its replacement instead of falling to <body>.
@@ -892,40 +1059,66 @@ function renderFacets(){
     mark=live.getAttribute("title")||live.firstChild.textContent;
   host.textContent="";
 
-  // Category: hierarchical, indented by depth, sorted as a path tree.
-  var tree=categoryTree();
-  var paths=Object.keys(tree.counts).sort();
-  if(paths.length){
-    var sec=el("section"); sec.appendChild(el("h2",null,"Category"));
-    paths.forEach(function(p){
-      var d=tree.depth[p];
-      var label=p==="(none)"?"(uncategorized)":p.split("/").pop();
-      var b=el("button","facet lvl"+d+(sel.category.has(p)?" on":""));
-      b.appendChild(el("span",null,label));
-      b.appendChild(el("span","n",tree.counts[p]));
+  var sec=el("section"); sec.appendChild(el("h2",null,"Category"));
+  var kids={};
+  Object.keys(tree).sort().forEach(function(p){
+    if(p==="(none)")return;
+    var parent=p.split("/").slice(0,-1).join("/");
+    (kids[parent]=kids[parent]||[]).push(p);});
+  var branch=function(parent,depth){
+    (kids[parent]||[]).forEach(function(p){
+      var hasKids=!!kids[p];
+      var isOpen=openCats.has(p)||selectedInSub(p);
+      var row=el("div","frow");
+      if(hasKids){
+        var caret=el("button","caret"+(isOpen?" open":""));
+        caret.setAttribute("type","button");
+        caret.setAttribute("aria-expanded",isOpen?"true":"false");
+        caret.setAttribute("aria-label",(isOpen?"Collapse ":"Expand ")+p);
+        caret.textContent="›";
+        caret.addEventListener("click",function(){
+          openCats.has(p)?openCats.delete(p):openCats.add(p); render();});
+        row.appendChild(caret);}
+      var b=el("button","facet lvl"+depth+(sel.category.has(p)?" on":""));
+      b.appendChild(el("span",null,p.split("/").pop()));
+      b.appendChild(el("span","n",tree[p]));
       b.setAttribute("title",p);
       b.addEventListener("click",function(){
         sel.category.has(p)?sel.category.delete(p):sel.category.add(p); render();});
-      sec.appendChild(b);});
-    if(paths.every(function(p){return tree.depth[p]===0||p==="(none)";}))
-      sec.appendChild(el("div","hint",
-        "Sub-categories appear once store enrichment runs."));
-    host.appendChild(sec);}
+      row.appendChild(b);
+      sec.appendChild(row);
+      if(isOpen)branch(p,depth+1);});};
+  branch("",0);
+  if(tree["(none)"]){
+    var row=el("div","frow");
+    var nb=el("button","facet lvl0"+(sel.category.has("(none)")?" on":""));
+    nb.appendChild(el("span",null,"(uncategorized)"));
+    nb.appendChild(el("span","n",tree["(none)"]));
+    nb.addEventListener("click",function(){
+      sel.category.has("(none)")?sel.category.delete("(none)"):sel.category.add("(none)"); render();});
+    row.appendChild(nb);
+    sec.appendChild(row);}
+  host.appendChild(sec);
 
-  var counts=facetCounts();
-  [["Tags","tag"],["Author","author"],["Flags","flag"]].forEach(function(pair){
-    var keys=Object.keys(counts[pair[1]]);
+  [["Tags","tag"],["Author","author"]].forEach(function(pair){
+    var f=pair[1], keys=Object.keys(counts[f]);
     if(!keys.length)return;
-    keys.sort(function(x,y){return counts[pair[1]][y]-counts[pair[1]][x]||x.localeCompare(y);});
-    var sec=el("section"); sec.appendChild(el("h2",null,pair[0]));
-    keys.slice(0,pair[1]==="author"?25:40).forEach(function(k){
-      var b=el("button","facet"+(sel[pair[1]].has(k)?" on":""));
+    keys.sort(function(x,y){return counts[f][y]-counts[f][x]||x.localeCompare(y);});
+    var limit=showAll[f]?keys.length:15;
+    var s2=el("section"); s2.appendChild(el("h2",null,pair[0]));
+    keys.slice(0,limit).forEach(function(k){
+      var b=el("button","facet"+(sel[f].has(k)?" on":""));
       b.appendChild(el("span",null,k));
-      b.appendChild(el("span","n",counts[pair[1]][k]));
+      b.appendChild(el("span","n",counts[f][k]));
       b.addEventListener("click",function(){
-        sel[pair[1]].has(k)?sel[pair[1]].delete(k):sel[pair[1]].add(k); render();});
-      sec.appendChild(b);});
-    host.appendChild(sec);});
+        sel[f].has(k)?sel[f].delete(k):sel[f].add(k); render();});
+      s2.appendChild(b);});
+    if(keys.length>15){
+      var m=el("button","more",showAll[f]?"Show less":"Show all ("+keys.length+")");
+      m.setAttribute("type","button");
+      m.addEventListener("click",function(){showAll[f]=!showAll[f]; render();});
+      s2.appendChild(m);}
+    host.appendChild(s2);});
 
   if(mark){
     var all=host.querySelectorAll(".facet");
@@ -958,10 +1151,13 @@ function card(a){
       th.textContent=""; th.appendChild(thumbFallback(a));});
     th.appendChild(im);}
   else th.appendChild(thumbFallback(a));
+  if(a.versions.length>1)th.appendChild(el("span","vcount",a.versions.length+" versions"));
   c.appendChild(th);
   c.appendChild(el("div","nm",a.name));
-  c.appendChild(el("div","mt",a.author||"author pending"));
-  c.appendChild(el("div","mt",bytes(totalSize(a))));
+  var mt=el("div","mt");
+  mt.appendChild(el("span","au",a.author||"author pending"));
+  mt.appendChild(el("span","sz",bytes(totalSize(a))));
+  c.appendChild(mt);
   c.addEventListener("click",function(){select(a.asset_key,c);});
   return c;}
 
@@ -989,6 +1185,7 @@ function closePanel(){
   if(prev)prev.className="card";
   selected=null; detail(null);
   paintRows(false);
+  syncHash();
   // The close button was just destroyed, so focus would otherwise land on <body> and
   // a keyboard user would restart from the top of the document.
   var back=origin; origin=null;
@@ -1009,9 +1206,19 @@ function openDetail(a, node){
   origin=node||null;
   detail(a||null);
   paintRows(false);
+  syncHash();
   // #out sits before #detail in DOM order, so without this the panel is ~835 tab
   // stops away from the card that opened it.
   if(a){var h=document.getElementById("detail"); h.focus();}}
+
+// Step through the current filter result without closing the panel: the common
+// "triage every duplicate" loop becomes two clicks instead of open-close-open.
+function stepSelection(dir){
+  if(!selected)return;
+  for(var i=0;i<view.length;i++){
+    if(view[i].asset_key===selected){
+      openDetail(view[(i+dir+view.length)%view.length], null);
+      return;}}}
 
 // Row state is painted from (selected, rowIdx), never mutated in place, so the two
 // cannot drift apart the way a directly-assigned class did.
@@ -1029,6 +1236,22 @@ function moveRow(step){
   rowIdx=Math.max(0,Math.min(view.length-1,rowIdx+step));
   paintRows(true);}
 
+// Arrow-key walking for the grid. Column count comes from the first rendered row's
+// geometry, so it tracks the responsive auto-fill layout with no math of its own.
+// Focus jumps are keyboard-initiated: no animation, instant scroll.
+function gridNav(dx,dy){
+  var cards=document.querySelectorAll("#out .card");
+  if(!cards.length)return;
+  var idx=-1,i;
+  for(i=0;i<cards.length;i++){if(cards[i]===document.activeElement){idx=i;break;}}
+  if(idx<0){cards[0].focus(); return;}
+  var cols=1, top=cards[0].offsetTop;
+  for(i=1;i<cards.length;i++){if(cards[i].offsetTop===top)cols++; else break;}
+  var n=idx+dx+dy*cols;
+  if(n<0||n>=cards.length)return;
+  cards[n].focus();
+  cards[n].scrollIntoView({block:"nearest"});}
+
 function detail(a){
   var host=document.getElementById("detail");
   host.textContent="";
@@ -1038,10 +1261,30 @@ function detail(a){
 
   var hd=el("div","dhd");
   hd.appendChild(el("h2","dnm",a.name));
+  var nav=el("div","pnav");
+  var pb=el("button","pbtn","‹");
+  pb.setAttribute("type","button");
+  pb.setAttribute("title","Previous asset in results");
+  pb.setAttribute("aria-label","Previous asset in results");
+  pb.addEventListener("click",function(){stepSelection(-1);});
+  var nb=el("button","pbtn","›");
+  nb.setAttribute("type","button");
+  nb.setAttribute("title","Next asset in results");
+  nb.setAttribute("aria-label","Next asset in results");
+  nb.addEventListener("click",function(){stepSelection(1);});
   var x=el("button",null,"close");
   x.addEventListener("click",closePanel);
-  hd.appendChild(x);
+  nav.appendChild(pb); nav.appendChild(nb); nav.appendChild(x);
+  hd.appendChild(nav);
   host.appendChild(hd);
+
+  if(a.thumbnail&&a.thumbnail.remote){
+    var im=document.createElement("img");
+    im.setAttribute("src",a.thumbnail.remote); im.setAttribute("alt","");
+    im.setAttribute("loading","lazy"); im.setAttribute("decoding","async");
+    im.setAttribute("width","1950"); im.setAttribute("height","1300");
+    im.addEventListener("error",function(){im.parentNode&&im.parentNode.removeChild(im);});
+    var dth=el("div","dth"); dth.appendChild(im); host.appendChild(dth);}
 
   if(a.local_name&&a.local_name!==a.name)
     host.appendChild(el("div","local","on disk: "+a.local_name));
@@ -1086,7 +1329,7 @@ function detail(a){
   var cp=el("button",null,"copy path");
   cp.addEventListener("click",function(){
     navigator.clipboard&&navigator.clipboard.writeText(v.file);
-    cp.textContent="copied"; setTimeout(function(){cp.textContent="copy path";},900);});
+    cp.textContent="copied"; setTimeout(function(){cp.textContent="copy path";},1200);});
   row.appendChild(cp);
   // The store slot is always present so the field is visibly accounted for whether or
   // not enrichment has resolved it yet.
@@ -1097,16 +1340,19 @@ function detail(a){
     var cs=el("button",null,"copy store URL");
     cs.addEventListener("click",function(){
       navigator.clipboard&&navigator.clipboard.writeText(a.store);
-      cs.textContent="copied"; setTimeout(function(){cs.textContent="copy store URL";},900);});
+      cs.textContent="copied"; setTimeout(function(){cs.textContent="copy store URL";},1200);});
     row.appendChild(cs);
   } else {
     row.appendChild(el("span","pending",a.non_store?"not an Asset Store package"
                                                   :"store link pending"));
   }
+  if(a.resolution&&a.resolution.id_verified)
+    host.appendChild(el("div","local","store id verified"));
   host.appendChild(row);}
 
 function setSort(key){
   sortBy=key;
+  prefs.set("sort",key);
   document.getElementById("sort").value=key;
   render();}
 
@@ -1150,6 +1396,67 @@ function appendChunk(g){
   for(var i=cursor;i<end;i++)g.appendChild(card(view[i]));
   cursor=end;}
 
+function emptyState(){
+  var d=el("div","empty");
+  d.appendChild(el("div","eh","Nothing matches"));
+  d.appendChild(el("div","es","Try a different search, or remove some filters."));
+  var b=el("button",null,"Clear all filters");
+  b.setAttribute("type","button");
+  b.addEventListener("click",clearAll);
+  d.appendChild(b);
+  return d;}
+
+// The URL carries the whole view state, so a filtered result set or a single asset
+// can be pasted into a note or a review thread and reopened exactly.
+function syncHash(){
+  var p=[], q=document.getElementById("q").value.trim();
+  if(q)p.push("q="+encodeURIComponent(q));
+  if(sortBy!=="name")p.push("s="+sortBy);
+  if(!grid)p.push("v=list");
+  if(density!=="m")p.push("d="+density);
+  [["category","c"],["tag","t"],["author","a"],["flag","f"]].forEach(function(fm){
+    var vals=[];
+    sel[fm[0]].forEach(function(v){vals.push(v);});
+    if(vals.length)p.push(fm[1]+"="+encodeURIComponent(vals.join(";")));});
+  if(selected)p.push("k="+encodeURIComponent(selected));
+  var h=p.length?"#"+p.join("&"):"";
+  if(h===location.hash)return;
+  try{history.replaceState(null,"",h||location.pathname+location.search);}
+  catch(e){}}
+
+function applyHash(){
+  var h=location.hash.replace(/^#/,"");
+  if(h){
+    h.split("&").forEach(function(kv){
+      var i=kv.indexOf("="); if(i<0)return;
+      var k=kv.slice(0,i), v;
+      try{v=decodeURIComponent(kv.slice(i+1));}catch(e){v=kv.slice(i+1);}
+      if(k==="q")document.getElementById("q").value=v;
+      else if(k==="s"&&["name","size","rating","date"].indexOf(v)>=0)sortBy=v;
+      else if(k==="v"&&v==="list")grid=false;
+      else if(k==="d"&&["s","m","l"].indexOf(v)>=0)density=v;
+      else if(k==="k")pendingKey=v;
+      else if("ctaf".indexOf(k)>=0&&v){
+        var fam={c:"category",t:"tag",a:"author",f:"flag"}[k];
+        v.split(";").forEach(function(x){if(x)sel[fam].add(x);});}});}
+  document.getElementById("sort").value=sortBy;
+  document.getElementById("view").textContent=grid?"List view":"Grid view";
+  document.body.classList.toggle("list",!grid);
+  syncDensityButtons();}
+
+function syncDensityButtons(){
+  var host=document.getElementById("density");
+  var bs=host.querySelectorAll("button");
+  for(var i=0;i<bs.length;i++){
+    var on=bs[i].getAttribute("data-d")===density;
+    bs[i].className=on?"on":"";
+    bs[i].setAttribute("aria-pressed",on?"true":"false");}}
+
+function setDensity(d){
+  if(density===d)return;
+  density=d; prefs.set("density",d);
+  syncDensityButtons(); render();}
+
 function render(){
   query=document.getElementById("q").value.trim().toLowerCase();
   var list=assets.filter(function(a){return matches(a,query);});
@@ -1179,23 +1486,31 @@ function render(){
   var mine=++gen;
   if(obs){obs.disconnect(); obs=null;}
   view=list; cursor=0; rowIdx=-1;
+  document.body.classList.toggle("list",!grid);
 
   // The header always reports the full filtered total, independent of how many chunks
-  // have actually rendered, so chunking never reads as missing results.
-  var files=list.reduce(function(s,a){return s+a.versions.length;},0);
-  document.getElementById("count").textContent=
-    list.length+" / "+assets.length+" assets · "+files+" files";
-  // Counted once per render, from the filtered list, before the first chunk lands.
-  renderFacets();
+  // have actually rendered, so chunking never reads as missing results. The byte
+  // total turns the grid into a disk-budget view at a glance.
+  var files=0, total=0;
+  list.forEach(function(a){files+=a.versions.length; total+=totalSize(a);});
+  var parts=[list.length+" / "+assets.length+" assets", files+" files"];
+  if(total)parts.push(bytes(total));
+  document.getElementById("count").textContent=parts.join(" · ");
+
+  var tree=categoryTree(), counts=facetCounts();
+  renderFacets(tree, counts);
+  renderChips(counts);
+  renderFilterBar();
 
   var out=document.getElementById("out"); out.textContent="";
-  if(!grid){out.appendChild(table(list)); paintRows(false); return;}
-  var g=el("div","grid"); out.appendChild(g);
+  if(!list.length){out.appendChild(emptyState()); syncHash(); return;}
+  if(!grid){out.appendChild(table(list)); paintRows(false); syncHash(); return;}
+  var g=el("div","grid d-"+density); out.appendChild(g);
   appendChunk(g);
-  if(cursor>=view.length)return;
+  if(cursor>=view.length){syncHash(); return;}
   if(!window.IntersectionObserver){
     while(cursor<view.length)appendChunk(g);
-    return;}
+    syncHash(); return;}
   var sen=el("div","sentinel"); out.appendChild(sen);
   obs=new IntersectionObserver(function(entries){
     // disconnect() unregisters targets but does NOT drop entries already queued, so a
@@ -1207,20 +1522,21 @@ function render(){
     appendChunk(g);
     if(cursor>=view.length){obs.disconnect(); obs=null; out.removeChild(sen);}},
     {rootMargin:"400px"});
-  obs.observe(sen);}
+  obs.observe(sen);
+  syncHash();}
 
 // Manual-only triggering means a stale index is indistinguishable from a fresh one
 // unless we say so. This stamp is the whole mitigation for that trigger choice.
 (function(){
-  var el=document.getElementById("generated");
-  if(!el||!DATA.generated){return;}
+  var stamp=document.getElementById("generated");
+  if(!stamp||!DATA.generated){return;}
   var t=Date.parse(DATA.generated);
-  if(isNaN(t)){el.textContent="indexed "+DATA.generated; return;}
+  if(isNaN(t)){stamp.textContent="indexed "+DATA.generated; return;}
   var days=Math.floor((Date.now()-t)/86400000);
   var age=days<1?"today":days===1?"1 day ago":days+" days ago";
-  el.textContent="indexed "+age;
-  el.setAttribute("title",DATA.generated);
-  if(days>=7){el.className="stamp stale";}
+  stamp.textContent="indexed "+age;
+  stamp.setAttribute("title",DATA.generated);
+  if(days>=7){stamp.className="stamp stale";}
 })();
 
 document.addEventListener("keydown",function(e){
@@ -1233,10 +1549,17 @@ document.addEventListener("keydown",function(e){
     // Clear a live search first: it is the wider undo of the two.
     if(box.value){clearTimeout(qt); box.value=""; render(); return;}
     closePanel(); return;}
-  // Grid view gets / and Esc only. Two-dimensional arrow navigation needs live
-  // column-count math against a responsive auto-fill grid, and Tab already reaches
-  // one stop per card.
-  if(grid||typing)return;
+  // [ and ] walk the panel through the current result set, matching its prev/next.
+  if((e.key==="["||e.key==="]")&&!typing&&selected){
+    e.preventDefault(); stepSelection(e.key==="["?-1:1); return;}
+  if(grid){
+    if(typing)return;
+    if(e.key==="ArrowRight"){e.preventDefault(); gridNav(1,0); return;}
+    if(e.key==="ArrowLeft"){e.preventDefault(); gridNav(-1,0); return;}
+    if(e.key==="ArrowDown"){e.preventDefault(); gridNav(0,1); return;}
+    if(e.key==="ArrowUp"){e.preventDefault(); gridNav(0,-1); return;}
+    return;}
+  if(typing)return;
   if(e.key==="ArrowDown"){e.preventDefault(); moveRow(rowIdx<0?0:1); return;}
   if(e.key==="ArrowUp"){e.preventDefault(); moveRow(-1); return;}
   if(e.key==="Enter"&&rowIdx>=0){
@@ -1252,12 +1575,22 @@ if(narrow){
   if(narrow.addEventListener)narrow.addEventListener("change",syncRail);
   else if(narrow.addListener)narrow.addListener(syncRail);}
 
+// Boot: hash first (it is the explicit request), stored prefs already applied above.
+applyHash();
+if(pendingKey){
+  var ka=byKey(pendingKey);
+  if(ka){selected=ka.asset_key; detail(ka);}
+  pendingKey=null;}
 document.getElementById("q").addEventListener("input",function(){
   clearTimeout(qt); qt=setTimeout(render,120);});
-document.getElementById("sort").addEventListener("change",function(e){sortBy=e.target.value;render();});
+document.getElementById("sort").addEventListener("change",function(e){sortBy=e.target.value;prefs.set("sort",sortBy);render();});
 document.getElementById("view").addEventListener("click",function(e){
-  grid=!grid; e.target.textContent=grid?"List view":"Grid view"; render();});
+  grid=!grid; e.target.textContent=grid?"List view":"Grid view"; prefs.set("view",grid?"grid":"list"); render();});
 render();
+var dbs=document.querySelectorAll("#density button");
+for(var di=0;di<dbs.length;di++){
+  (function(b){b.addEventListener("click",function(){setDensity(b.getAttribute("data-d"));});})(dbs[di]);}
+window.addEventListener("hashchange",function(){applyHash(); render();});
 })();
 </script>
 </body>

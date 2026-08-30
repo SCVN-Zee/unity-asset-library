@@ -13,8 +13,9 @@ resolved absolute path, never by name.
 
 The vault root comes from ../config.json ("vault_root"); --root overrides it for
 one run and --state relocates the state directory (tests pass both to sandbox).
-State lives in this repo's state/, never inside the vault; index.html and
-assets.csv are emitted into the vault root so the gallery travels with the vault.
+State lives in this repo's state/, never inside the vault. index.html and
+assets.csv go to the configured output dir — config.json "output_dir",
+resolved relative to this repo — falling back to the vault root.
 
 Usage:
     python3 index_assets.py scan          # write state/assets.json
@@ -1561,7 +1562,8 @@ def main(argv=None):
                 data = json.load(fh)
         data = annotate_pending(
             data, os.path.join(index_dir, "pending-enrichment.json"))
-        out_dir = os.path.abspath(cfg.get("output_dir") or root)
+        out_dir = cfg.get("output_dir")  # relative paths resolve against the repo
+        out_dir = os.path.abspath(os.path.join(repo_dir(), out_dir)) if out_dir else root
         emit_html(data, os.path.join(out_dir, "index.html"))
         rows = emit_csv(data, os.path.join(out_dir, "assets.csv"))
         emit_review_queue(data, os.path.join(index_dir, "review-queue.md"))

@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 .DS_Store
+# Generated gallery output — regenerate with: python3 bin/index_assets.py emit
+index.html
+assets.csv

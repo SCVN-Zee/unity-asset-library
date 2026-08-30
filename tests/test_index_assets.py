@@ -1428,5 +1428,32 @@ class TestThumbnailLocalRemoved(unittest.TestCase):
         self.assertIn("assetstorev1-prd-cdn.unity3d.com", html)
 
 
+class TestOutputDirRouting(unittest.TestCase):
+    """config "output_dir" relocates the emitted gallery. Relative values resolve
+    against the repo, so the committed config stays machine-portable."""
+
+    def test_output_dir_resolves_relative_to_repo(self):
+        root = tempfile.mkdtemp()
+        state = os.path.join(root, "state")
+        os.makedirs(state)
+        vault = os.path.join(root, "vault")
+        os.makedirs(os.path.join(vault, "Tools"))
+        with open(os.path.join(vault, "Tools", "Thing v1.0.unitypackage"), "wb") as fh:
+            fh.write(b"\0" * 500)
+        ia.main(["scan", "--root", vault, "--state", state])
+
+        fake_repo = tempfile.mkdtemp()
+        with mock.patch.object(ia, "load_config",
+                               return_value={"vault_root": vault,
+                                             "output_dir": "gallery"}), \
+             mock.patch.object(ia, "repo_dir", return_value=fake_repo):
+            ia.main(["emit", "--state", state])
+
+        self.assertTrue(os.path.exists(os.path.join(fake_repo, "gallery", "index.html")))
+        self.assertTrue(os.path.exists(os.path.join(fake_repo, "gallery", "assets.csv")))
+        self.assertFalse(os.path.exists(os.path.join(vault, "index.html")),
+                         "gallery must be relocated, not duplicated into the vault")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

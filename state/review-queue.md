@@ -1,6 +1,6 @@
 # Review Queue
 
-Generated 2026-08-30T07:53:33Z
+Generated 2026-09-01T19:20:52Z
 
 ## Duplicates
 
@@ -36,22 +36,12 @@ Generated 2026-08-30T07:53:33Z
     - `3D/Animations/Creepy Animatronic Anims (v1.0).unitypackage`
     - `3D/Animations/RamsterZ/Creepy Animatronic Anims v1.0.unitypackage`
 
-## Size collisions that are NOT duplicates
-
-- 5,948,381,557 B x2 — `same-size-different-version`
-    - `2D/AllSky - 220 Sky Skybox Set v5.2.0.unitypackage`
-    - `VFX/AllSky - 220 Sky Skybox Set v5.1.0.unitypackage`
-- 4,096 B x2 — `size-coincidence`
-    - `Particle Dynamic Magic 2 v2.5.3 Unity.unitypackage`
-    - `Tools/Prefab Brush - Easy Object Placement Tool Level Designer v1.3.3 (22 Jan 2025).unitypackage`
-
 ## Integrity
 
 Thresholds are byte literals: `broken < 10,000 B`, `suspicious < 100,000 B`. Stated in bytes on purpose — the decimal/binary reading of "100 KB" already produced two wrong counts here.
 
-### broken (3)
+### broken (2)
 - 4,096 B — `Particle Dynamic Magic 2 v2.5.3 Unity.unitypackage`
-- 4,096 B — `Tools/Prefab Brush - Easy Object Placement Tool Level Designer v1.3.3 (22 Jan 2025).unitypackage`
 - 4,555 B — `Tools/FMOD_InstrumentalEventPlayback.unitypackage`
 
 ### suspicious (4)
@@ -150,9 +140,9 @@ These filenames carry no version; the parent folder is the only record.
 
 ## Store resolution
 
-- id-verified: **720** / 829 store-eligible
+- id-verified: **720** / 834 store-eligible
 - attempted but unresolved: **109**
-- not yet searched: **0** (no lookup performed — a later run will attempt these; do NOT hand-write overrides for them)
+- not yet searched: **5** (no lookup performed — a later run will attempt these; do NOT hand-write overrides for them)
 
 ### Needs a manual override (109)
 

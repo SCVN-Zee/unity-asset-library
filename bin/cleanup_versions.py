@@ -1,0 +1,322 @@
+#!/usr/bin/env python3
+"""Report or remove superseded Unity Asset Store archive versions.
+
+Dry-run is the default. Cleanup uses the existing offline scanner and parser, so
+archive contents are never opened and OneDrive placeholders are not hydrated.
+"""
+
+import argparse
+import fcntl
+import hashlib
+import os
+import stat
+import sys
+import tempfile
+from collections import defaultdict
+from contextlib import contextmanager
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import index_assets as ia  # noqa: E402
+
+
+class SafetyError(RuntimeError):
+    """Raised when the vault or a planned candidate changed unexpectedly."""
+
+
+def _parsed_records(scanned):
+    records = []
+    for item in scanned:
+        parsed = ia.parse(item["rel_path"])
+        parsed.update(item)
+        records.append(parsed)
+    return records
+
+
+def _rank(record):
+    return (ia.version_key(record["version"], record["prerelease"]), record["release_date"] or "")
+
+
+def plan_cleanup(scanned):
+    """Return a deterministic, fail-closed cleanup plan from current scan rows."""
+    families = defaultdict(list)
+    for record in _parsed_records(scanned):
+        families[ia.asset_key(record)].append(record)
+
+    result = {"families": [], "removals": []}
+    for key in sorted(families):
+        members = sorted(families[key], key=lambda r: r["rel_path"])
+        family = {"asset_key": key, "members": members, "survivor": None,
+                  "removals": [], "reason": None}
+        if len(members) < 2:
+            family["reason"] = "single-archive"
+        elif any(not member["version"] for member in members):
+            family["reason"] = "unparseable-version"
+        else:
+            maximum = max(_rank(member) for member in members)
+            winners = [member for member in members if _rank(member) == maximum]
+            family["survivor"] = winners[0] if len(winners) == 1 else None
+            if len(winners) > 1:
+                family["reason"] = "maximum-tie"
+            else:
+                family["reason"] = "superseded"
+                family["removals"] = [member for member in members if member is not winners[0]]
+                result["removals"].extend(family["removals"])
+        result["families"].append(family)
+
+    result["removals"].sort(key=lambda r: r["rel_path"])
+    result["candidate_bytes"] = sum(r["size"] for r in result["removals"])
+    result["candidate_files"] = len(result["removals"])
+    result["candidate_families"] = sum(bool(f["removals"]) for f in result["families"])
+    return result
+
+
+def _display_version(record):
+    return record["version"] or "?"
+
+
+def render_plan(plan, apply=False):
+    lines = ["cleanup: apply" if apply else "cleanup: dry-run"]
+    for family in plan["families"]:
+        if family["removals"]:
+            survivor = family["survivor"]
+            lines.append(f"family {family['asset_key']} ({family['reason']})")
+            lines.append(f"  keep {_display_version(survivor)} {survivor['release_date'] or '-'} {survivor['rel_path']}")
+            for candidate in family["removals"]:
+                lines.append(f"  remove {_display_version(candidate)} {candidate['release_date'] or '-'} {candidate['size']} {candidate['rel_path']}")
+        elif len(family["members"]) > 1:
+            lines.append(f"protected {family['asset_key']} ({family['reason']})")
+            for member in family["members"]:
+                lines.append(f"  keep {_display_version(member)} {member['release_date'] or '-'} {member['rel_path']}")
+    lines.append(f"summary: {plan['candidate_files']} files, {plan['candidate_families']} families, {plan['candidate_bytes']} bytes")
+    return "\n".join(lines)
+
+
+def _manifest(scanned):
+    return tuple(sorted((row["rel_path"], row["size"]) for row in scanned))
+
+
+def _root_identity(root):
+    try:
+        st = os.lstat(root)
+    except OSError as exc:
+        raise SafetyError(f"vault root unavailable: {root}") from exc
+    if not stat.S_ISDIR(st.st_mode) or stat.S_ISLNK(st.st_mode):
+        raise SafetyError(f"vault root is not a real directory: {root}")
+    return st.st_dev, st.st_ino
+
+
+def _candidate_path(root, rel_path):
+    parts = rel_path.replace("\\", "/").split("/")
+    if os.path.isabs(rel_path) or rel_path in ("", ".") or ".." in parts:
+        raise SafetyError(f"unsafe candidate path: {rel_path!r}")
+    root = os.path.realpath(os.path.abspath(root))
+    path = os.path.abspath(os.path.join(root, rel_path))
+    try:
+        if os.path.commonpath((root, path)) != root or os.path.commonpath((root, os.path.realpath(path))) != root:
+            raise SafetyError(f"candidate escapes vault: {rel_path}")
+    except ValueError as exc:
+        raise SafetyError(f"candidate escapes vault: {rel_path}") from exc
+    if not path.lower().endswith(ia.ARCHIVE_EXTS):
+        raise SafetyError(f"unsupported candidate suffix: {rel_path}")
+    return path
+
+
+def validate_candidate(root, rel_path, expected):
+    """Validate one relative archive and return its current lstat identity."""
+    path = _candidate_path(root, rel_path)
+    try:
+        st = os.lstat(path)
+    except OSError as exc:
+        raise SafetyError(f"candidate unavailable: {rel_path}") from exc
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+        raise SafetyError(f"candidate is not a regular file: {rel_path}")
+    current = (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+    if expected and current != expected:
+        raise SafetyError(f"candidate changed: {rel_path}")
+    return current
+
+
+def capture_snapshot(root, scanned):
+    """Capture root, manifest, and original archive identities before planning."""
+    snapshot = {"root": _root_identity(root), "manifest": _manifest(scanned), "identities": {}}
+    for row in scanned:
+        snapshot["identities"][row["rel_path"]] = validate_candidate(root, row["rel_path"], {})
+    return snapshot
+
+
+def preflight(root, scanned, snapshot):
+    """Require unchanged root/manifest and validate every original archive identity."""
+    if _root_identity(root) != snapshot["root"]:
+        raise SafetyError("vault root changed before cleanup")
+    if _manifest(ia.scan(root, strict=True)) != snapshot["manifest"]:
+        raise SafetyError("vault archive manifest changed before cleanup")
+    for row in scanned:
+        validate_candidate(root, row["rel_path"], snapshot["identities"][row["rel_path"]])
+
+
+def _update_args(state, root, root_override):
+    argv = ["update"]
+    if root_override:
+        argv.extend(("--root", root))
+    if state:
+        argv.extend(("--state", state))
+    return argv
+
+
+@contextmanager
+def _cleanup_lock(root):
+    """Serialize cooperating cleanup processes without creating a vault file."""
+    name = hashlib.sha256(f"{_root_identity(root)}".encode()).hexdigest()[:20]
+    path = os.path.join(tempfile.gettempdir(), f"unity-asset-cleanup-{name}.lock")
+    with open(path, "a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _rollback_staged(root, staged):
+    errors = []
+    for rel_path, staged_path in reversed(staged):
+        if not os.path.lexists(staged_path):
+            continue
+        source = _candidate_path(root, rel_path)
+        if os.path.lexists(source):
+            errors.append(f"cannot restore {rel_path}: destination exists")
+            continue
+        try:
+            os.makedirs(os.path.dirname(source), exist_ok=True)
+            os.replace(staged_path, source)
+        except OSError as exc:
+            errors.append(f"cannot restore {rel_path}: {exc}")
+    return errors
+
+
+def _reconcile(root, state, root_override, expected_root):
+    if _root_identity(root) != expected_root:
+        raise SafetyError("vault root changed during reconciliation")
+    return ia.main(_update_args(state, root, root_override))
+
+
+def _remove_empty_tree(path):
+    for directory, subdirectories, files in os.walk(path, topdown=False):
+        if files:
+            raise OSError("staging tree contains unexpected files")
+        for subdirectory in subdirectories:
+            os.rmdir(os.path.join(directory, subdirectory))
+    os.rmdir(path)
+
+
+def apply_cleanup(root, state, scanned, plan, root_override=False, snapshot=None):
+    snapshot = snapshot or capture_snapshot(root, scanned)
+    candidate_paths = {row["rel_path"] for row in plan["removals"]}
+    with _cleanup_lock(root):
+        print(render_plan(plan, apply=True))
+        preflight(root, scanned, snapshot)
+        quarantine = os.path.join(root, "_Quarantine")
+        if os.path.lexists(quarantine):
+            st = os.lstat(quarantine)
+            if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+                raise SafetyError("cleanup quarantine is not a real directory")
+        else:
+            os.makedirs(quarantine)
+        stage_root = tempfile.mkdtemp(prefix=".cleanup-", dir=quarantine)
+        staged = []
+        moved = False
+        removed = 0
+        destructive_started = False
+        failure = None
+        update_result = 0
+        try:
+            for candidate in plan["removals"]:
+                rel_path = candidate["rel_path"]
+                validate_candidate(root, rel_path, snapshot["identities"][rel_path])
+                staged_path = os.path.join(stage_root, rel_path)
+                os.makedirs(os.path.dirname(staged_path), exist_ok=True)
+                # Register before rename: a committed rename may still raise.
+                staged.append((rel_path, staged_path))
+                moved = True
+                os.replace(_candidate_path(root, rel_path), staged_path)
+                validate_candidate(stage_root, rel_path, snapshot["identities"][rel_path])
+
+            expected_manifest = tuple(sorted(
+                (row["rel_path"], row["size"])
+                for row in scanned if row["rel_path"] not in candidate_paths))
+            if _manifest(ia.scan(root, strict=True)) != expected_manifest:
+                raise SafetyError("vault manifest changed while staging cleanup")
+            for rel_path, staged_path in staged:
+                validate_candidate(stage_root, rel_path, snapshot["identities"][rel_path])
+            for row in scanned:
+                if row["rel_path"] not in candidate_paths:
+                    validate_candidate(root, row["rel_path"], snapshot["identities"][row["rel_path"]])
+
+            try:
+                for rel_path, staged_path in staged:
+                    # Set before unlink: a committed unlink may still raise.
+                    destructive_started = True
+                    os.unlink(staged_path)
+                    removed += 1
+                    print(f"removed: {rel_path}")
+            except BaseException as exc:
+                failure = exc
+        except BaseException as exc:
+            failure = exc
+        finally:
+            rollback_errors = []
+            if failure is not None and moved:
+                rollback_errors = _rollback_staged(root, staged)
+                if rollback_errors:
+                    failure = SafetyError(f"{failure}; rollback failed: {'; '.join(rollback_errors)}")
+                else:
+                    moved = False
+            if failure is not None and (destructive_started or rollback_errors):
+                try:
+                    update_result = _reconcile(root, state, root_override, snapshot["root"])
+                except BaseException as update_exc:
+                    failure = SafetyError(f"{failure}; reconciliation failed: {update_exc}")
+            elif failure is None:
+                try:
+                    if _root_identity(root) != snapshot["root"]:
+                        raise SafetyError("vault root changed after cleanup")
+                    update_result = ia.main(_update_args(state, root, root_override))
+                except BaseException as update_exc:
+                    failure = SafetyError(f"index update failed: {update_exc}")
+            if failure is None:
+                try:
+                    _remove_empty_tree(stage_root)
+                except OSError as exc:
+                    failure = SafetyError(f"cleanup staging residue: {exc}")
+        if failure is not None:
+            if isinstance(failure, SafetyError):
+                raise failure
+            raise SafetyError(f"cleanup failed: {failure}") from failure
+        return update_result
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", help="vault root override")
+    parser.add_argument("--state", help="state directory override")
+    parser.add_argument("--apply", action="store_true", help="remove candidates and run index update")
+    args = parser.parse_args(argv)
+
+    cfg = {} if args.root else ia.load_config()
+    root = os.path.abspath(args.root or cfg["vault_root"])
+    state = os.path.abspath(args.state) if args.state else ia.state_dir()
+    try:
+        _root_identity(root)
+        scanned = ia.scan(root, strict=True)
+        if not args.apply:
+            print(render_plan(plan_cleanup(scanned)))
+            return 0
+        snapshot = capture_snapshot(root, scanned)
+        plan = plan_cleanup(scanned)
+        return apply_cleanup(root, state, scanned, plan, bool(args.root), snapshot)
+    except (KeyError, OSError, SafetyError) as exc:
+        print(f"cleanup aborted: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

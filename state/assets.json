@@ -1,5 +1,5 @@
 {
- "asset_count": 839,
+ "asset_count": 844,
  "assets": [
   {
    "asset_key": "100-stylized-historical-textures-medieval-egyptian-roman-more",
@@ -676,19 +676,6 @@
      "release_date": "2024-12-03",
      "size_bytes": 15589232,
      "version": "1.7.7"
-    },
-    {
-     "duplicate": null,
-     "editor_version": null,
-     "file": "2D/2D Pixel Unit Maker - SPUM v1.6.5.unitypackage",
-     "folder_hint": null,
-     "integrity": null,
-     "latest": false,
-     "pipeline": null,
-     "prerelease": false,
-     "release_date": null,
-     "size_bytes": 1696618,
-     "version": "1.6.5"
     }
    ]
   },
@@ -1403,15 +1390,15 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "Tools/A Pathfinding Project Pro v5.2.5 (21 Nov 2024).unitypackage",
+     "file": "Tools/A Pathfinding Project Pro v5.4.6.unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
      "pipeline": null,
      "prerelease": false,
-     "release_date": "2024-11-21",
-     "size_bytes": 69688156,
-     "version": "5.2.5"
+     "release_date": null,
+     "size_bytes": 72344364,
+     "version": "5.4.6"
     }
    ]
   },
@@ -2556,11 +2543,7 @@
    "upstream_version": "5.2.0",
    "versions": [
     {
-     "duplicate": {
-      "group_size": 5948381557,
-      "reason": "same-size-different-version",
-      "verdict": "review"
-     },
+     "duplicate": null,
      "editor_version": null,
      "file": "2D/AllSky - 220 Sky Skybox Set v5.2.0.unitypackage",
      "folder_hint": null,
@@ -2571,23 +2554,6 @@
      "release_date": null,
      "size_bytes": 5948381557,
      "version": "5.2.0"
-    },
-    {
-     "duplicate": {
-      "group_size": 5948381557,
-      "reason": "same-size-different-version",
-      "verdict": "review"
-     },
-     "editor_version": null,
-     "file": "VFX/AllSky - 220 Sky Skybox Set v5.1.0.unitypackage",
-     "folder_hint": null,
-     "integrity": null,
-     "latest": false,
-     "pipeline": null,
-     "prerelease": false,
-     "release_date": null,
-     "size_bytes": 5948381557,
-     "version": "5.1.0"
     }
    ]
   },
@@ -3995,15 +3961,59 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "Tools/Bakery - GPU Lightmapper vv1.96.unitypackage",
+     "file": "Tools/Bakery - GPU Lightmapper v1.98 (24 Dec 2025).unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
      "pipeline": null,
      "prerelease": false,
-     "release_date": null,
-     "size_bytes": 499741745,
-     "version": "1.96"
+     "release_date": "2025-12-24",
+     "size_bytes": 509028137,
+     "version": "1.98"
+    }
+   ]
+  },
+  {
+   "asset_key": "bakery-real-time-preview",
+   "author": null,
+   "category": {
+    "levels": [
+     "Tools"
+    ],
+    "path": "Tools",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Bakery Real-Time Preview",
+   "name": "Bakery Real-Time Preview",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "editor-tool",
+    "lighting"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/Bakery Real-Time Preview v1.198 (24 Dec 2025).unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": "2025-12-24",
+     "size_bytes": 1517076,
+     "version": "1.198"
     }
    ]
   },
@@ -6744,19 +6754,6 @@
      "release_date": "2025-06-19",
      "size_bytes": 110255183,
      "version": "1.0"
-    },
-    {
-     "duplicate": null,
-     "editor_version": null,
-     "file": "VFX/Particles/Combat Magic Spells - Volume II v1.0.unitypackage",
-     "folder_hint": null,
-     "integrity": null,
-     "latest": false,
-     "pipeline": null,
-     "prerelease": false,
-     "release_date": null,
-     "size_bytes": 108324312,
-     "version": "1.0"
     }
    ]
   },
@@ -7095,19 +7092,6 @@
      "release_date": "2025-03-31",
      "size_bytes": 382228694,
      "version": "3.6.2"
-    },
-    {
-     "duplicate": null,
-     "editor_version": null,
-     "file": "COZY Stylized Weather 3 v3.6.0 (21 Jan 2025).unitypackage",
-     "folder_hint": null,
-     "integrity": null,
-     "latest": false,
-     "pipeline": null,
-     "prerelease": false,
-     "release_date": "2025-01-21",
-     "size_bytes": 381777296,
-     "version": "3.6.0"
     }
    ]
   },
@@ -8659,19 +8643,6 @@
      "release_date": null,
      "size_bytes": 7800456,
      "version": "2.18.5"
-    },
-    {
-     "duplicate": null,
-     "editor_version": null,
-     "file": "Tools/DunGen v2.16.0.unitypackage",
-     "folder_hint": null,
-     "integrity": null,
-     "latest": false,
-     "pipeline": null,
-     "prerelease": false,
-     "release_date": null,
-     "size_bytes": 6422205,
-     "version": "2.16.0"
     }
    ]
   },
@@ -8972,19 +8943,6 @@
      "release_date": "2025-11-18",
      "size_bytes": 5484915,
      "version": "6.18.7"
-    },
-    {
-     "duplicate": null,
-     "editor_version": null,
-     "file": "Tools/Easy Collider Editor v6.18.4 (27 Jun 2025).unitypackage",
-     "folder_hint": null,
-     "integrity": null,
-     "latest": false,
-     "pipeline": null,
-     "prerelease": false,
-     "release_date": "2025-06-27",
-     "size_bytes": 5440211,
-     "version": "6.18.4"
     }
    ]
   },
@@ -10889,15 +10847,15 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "Tools/Final IK v2.4.unitypackage",
+     "file": "Tools/Final IK v2.5 (11 Apr 2026).unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
      "pipeline": null,
      "prerelease": false,
-     "release_date": null,
-     "size_bytes": 49990798,
-     "version": "2.4"
+     "release_date": "2026-04-11",
+     "size_bytes": 50176819,
+     "version": "2.5"
     }
    ]
   },
@@ -11191,15 +11149,15 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "Tools/FlowCanvas v3.3.3 (05 May 2025).unitypackage",
+     "file": "Tools/FlowCanvas v3.4.2.unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
      "pipeline": null,
      "prerelease": false,
-     "release_date": "2025-05-05",
-     "size_bytes": 1149408,
-     "version": "3.3.3"
+     "release_date": null,
+     "size_bytes": 1152952,
+     "version": "3.4.2"
     }
    ]
   },
@@ -14596,7 +14554,7 @@
    },
    "discriminators": [],
    "flags": [],
-   "local_name": "Horse Animset Pro (Riding System)",
+   "local_name": "Horse Animset Pro Riding System",
    "name": "Horse Animset Pro (Riding System)",
    "non_store": false,
    "price": "74.99",
@@ -14631,32 +14589,6 @@
      "release_date": "2025-01-23",
      "size_bytes": 313175481,
      "version": "4.4.8b"
-    },
-    {
-     "duplicate": null,
-     "editor_version": null,
-     "file": "3D/Animations/Horse Animset Pro (Riding System) v4.4.7 (20 Nov 2024).unitypackage",
-     "folder_hint": null,
-     "integrity": null,
-     "latest": false,
-     "pipeline": null,
-     "prerelease": false,
-     "release_date": "2024-11-20",
-     "size_bytes": 300963174,
-     "version": "4.4.7"
-    },
-    {
-     "duplicate": null,
-     "editor_version": null,
-     "file": "3D/Animations/Horse Animset Pro (Riding System) v4.5.0-pre (30 Jul 2025).unitypackage",
-     "folder_hint": null,
-     "integrity": null,
-     "latest": false,
-     "pipeline": null,
-     "prerelease": true,
-     "release_date": "2025-07-30",
-     "size_bytes": 340628586,
-     "version": "4.5.0-pre"
     }
    ]
   },
@@ -14943,19 +14875,6 @@
      "release_date": null,
      "size_bytes": 1825668,
      "version": "1.5.8"
-    },
-    {
-     "duplicate": null,
-     "editor_version": null,
-     "file": "Tools/Initargs v1.5.2.unitypackage",
-     "folder_hint": null,
-     "integrity": null,
-     "latest": false,
-     "pipeline": null,
-     "prerelease": false,
-     "release_date": null,
-     "size_bytes": 1680506,
-     "version": "1.5.2"
     }
    ]
   },
@@ -18584,32 +18503,6 @@
      "release_date": "2025-11-09",
      "size_bytes": 3974905,
      "version": "3.2.1"
-    },
-    {
-     "duplicate": null,
-     "editor_version": null,
-     "file": "3D/Animations/Kinemation/Magic Animation Blend v2.2.2 (22 May 2025).unitypackage",
-     "folder_hint": null,
-     "integrity": null,
-     "latest": false,
-     "pipeline": null,
-     "prerelease": false,
-     "release_date": "2025-05-22",
-     "size_bytes": 3963104,
-     "version": "2.2.2"
-    },
-    {
-     "duplicate": null,
-     "editor_version": null,
-     "file": "3D/Animations/Magic Animation Blend v2.1.0.unitypackage",
-     "folder_hint": null,
-     "integrity": null,
-     "latest": false,
-     "pipeline": null,
-     "prerelease": false,
-     "release_date": null,
-     "size_bytes": 8322609,
-     "version": "2.1.0"
     }
    ]
   },
@@ -21815,7 +21708,8 @@
    "store_id": "270046",
    "tag_source": "keyword",
    "tags": [
-    "animation"
+    "animation",
+    "editor-tool"
    ],
    "thumbnail": {
     "remote": "https://assetstorev1-prd-cdn.unity3d.com/key-image/218a4570-a355-430f-9286-47eaa5bdba68.jpg"
@@ -21834,19 +21728,6 @@
      "release_date": "2025-11-15",
      "size_bytes": 1074862,
      "version": "3.2.0"
-    },
-    {
-     "duplicate": null,
-     "editor_version": null,
-     "file": "3D/Animations/Kinemation/Motion Warping Climb Interact v3.1.0.unitypackage",
-     "folder_hint": null,
-     "integrity": null,
-     "latest": false,
-     "pipeline": null,
-     "prerelease": false,
-     "release_date": null,
-     "size_bytes": 1074691,
-     "version": "3.1.0"
     }
    ]
   },
@@ -22233,19 +22114,6 @@
      "release_date": "2025-11-16",
      "size_bytes": 9018053,
      "version": "2.0"
-    },
-    {
-     "duplicate": null,
-     "editor_version": null,
-     "file": "Tools/Non-Convex Mesh Collider Automatic Generator v2.0.unitypackage",
-     "folder_hint": null,
-     "integrity": null,
-     "latest": false,
-     "pipeline": null,
-     "prerelease": false,
-     "release_date": null,
-     "size_bytes": 9446590,
-     "version": "2.0"
     }
    ]
   },
@@ -22296,6 +22164,49 @@
      "release_date": null,
      "size_bytes": 4253606,
      "version": "1.08"
+    }
+   ]
+  },
+  {
+   "asset_key": "obfuscator-pro-plug-and-play-code-protection-2026",
+   "author": null,
+   "category": {
+    "levels": [
+     "Tools"
+    ],
+    "path": "Tools",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Obfuscator Pro Plug and Play Code Protection 2026",
+   "name": "Obfuscator Pro Plug and Play Code Protection 2026",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "editor-tool"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/Obfuscator Pro Plug and Play Code Protection 2026 v2026.2.2.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 1251954,
+     "version": "2026.2.2"
     }
    ]
   },
@@ -22389,15 +22300,15 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "Tools/Odin Inspector and Serializer v4.0.2.0.unitypackage",
+     "file": "Tools/Odin Inspector and Serializer v4.0.2.4.unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
      "pipeline": null,
      "prerelease": false,
      "release_date": null,
-     "size_bytes": 6271088,
-     "version": "4.0.2.0"
+     "size_bytes": 6289621,
+     "version": "4.0.2.4"
     }
    ]
   },
@@ -23040,11 +22951,7 @@
    "thumbnail": null,
    "versions": [
     {
-     "duplicate": {
-      "group_size": 4096,
-      "reason": "size-coincidence",
-      "verdict": "distinct"
-     },
+     "duplicate": null,
      "editor_version": null,
      "file": "Particle Dynamic Magic 2 v2.5.3 Unity.unitypackage",
      "folder_hint": null,
@@ -27597,23 +27504,6 @@
      "release_date": null,
      "size_bytes": 3073802,
      "version": "1.5.7"
-    },
-    {
-     "duplicate": {
-      "group_size": 4096,
-      "reason": "size-coincidence",
-      "verdict": "distinct"
-     },
-     "editor_version": null,
-     "file": "Tools/Prefab Brush - Easy Object Placement Tool Level Designer v1.3.3 (22 Jan 2025).unitypackage",
-     "folder_hint": null,
-     "integrity": "broken",
-     "latest": false,
-     "pipeline": null,
-     "prerelease": false,
-     "release_date": "2025-01-22",
-     "size_bytes": 4096,
-     "version": "1.3.3"
     }
    ]
   },
@@ -27714,19 +27604,6 @@
      "release_date": null,
      "size_bytes": 3607970,
      "version": "4.12.2"
-    },
-    {
-     "duplicate": null,
-     "editor_version": null,
-     "file": "Tools/Prefab World Builder v4.9 (20 Oct 2025).unitypackage",
-     "folder_hint": null,
-     "integrity": null,
-     "latest": false,
-     "pipeline": null,
-     "prerelease": false,
-     "release_date": "2025-10-20",
-     "size_bytes": 3297498,
-     "version": "4.9"
     }
    ]
   },
@@ -28598,19 +28475,6 @@
      "release_date": null,
      "size_bytes": 325500,
      "version": "1.7.4"
-    },
-    {
-     "duplicate": null,
-     "editor_version": null,
-     "file": "Tools/RapidIcon In-Editor Icon Generator v1.7.2.unitypackage",
-     "folder_hint": null,
-     "integrity": null,
-     "latest": false,
-     "pipeline": null,
-     "prerelease": false,
-     "release_date": null,
-     "size_bytes": 286447,
-     "version": "1.7.2"
     }
    ]
   },
@@ -29007,6 +28871,49 @@
      "release_date": "2025-06-30",
      "size_bytes": 33503654,
      "version": "1.0.4"
+    }
+   ]
+  },
+  {
+   "asset_key": "retarget-pro-v5",
+   "author": null,
+   "category": {
+    "levels": [
+     "Tools"
+    ],
+    "path": "Tools",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Retarget Pro V5",
+   "name": "Retarget Pro V5",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "editor-tool"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/Retarget Pro V5 v5.2.1.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 11059843,
+     "version": "5.2.1"
     }
    ]
   },
@@ -30336,19 +30243,6 @@
      "release_date": "2025-02-07",
      "size_bytes": 85650184,
      "version": "5.2.4"
-    },
-    {
-     "duplicate": null,
-     "editor_version": null,
-     "file": "VFX/Particles/RPG VFX Bundle v5.1.0 (11 Sep 2024).unitypackage",
-     "folder_hint": null,
-     "integrity": null,
-     "latest": false,
-     "pipeline": null,
-     "prerelease": false,
-     "release_date": "2024-09-11",
-     "size_bytes": 95985033,
-     "version": "5.1.0"
     }
    ]
   },
@@ -31377,19 +31271,6 @@
      "release_date": "2025-07-05",
      "size_bytes": 227558,
      "version": "2025.3"
-    },
-    {
-     "duplicate": null,
-     "editor_version": null,
-     "file": "VFX/Shaders/Shader Graph Baker v2025.1 (25 May 2025).unitypackage",
-     "folder_hint": null,
-     "integrity": null,
-     "latest": false,
-     "pipeline": null,
-     "prerelease": false,
-     "release_date": "2025-05-25",
-     "size_bytes": 227297,
-     "version": "2025.1"
     }
    ]
   },
@@ -32515,6 +32396,50 @@
      "release_date": "2025-07-30",
      "size_bytes": 799730,
      "version": "3.5.3"
+    }
+   ]
+  },
+  {
+   "asset_key": "sounds-good-easy-optimized-audio-manager",
+   "author": null,
+   "category": {
+    "levels": [
+     "Tools"
+    ],
+    "path": "Tools",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Sounds Good - Easy Optimized Audio Manager",
+   "name": "Sounds Good - Easy Optimized Audio Manager",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "editor-tool",
+    "sfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/Sounds Good - Easy Optimized Audio Manager v2.2.0.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 321327037,
+     "version": "2.2.0"
     }
    ]
   },
@@ -39511,19 +39436,6 @@
      "release_date": null,
      "size_bytes": 23184298,
      "version": "1.29p04"
-    },
-    {
-     "duplicate": null,
-     "editor_version": null,
-     "file": "3D/Animations/UMotion Pro - Animation Editor v1.29p02.unitypackage",
-     "folder_hint": null,
-     "integrity": null,
-     "latest": false,
-     "pipeline": null,
-     "prerelease": false,
-     "release_date": null,
-     "size_bytes": 23131371,
-     "version": "1.29p02"
     }
    ]
   },
@@ -39857,19 +39769,6 @@
      "release_date": null,
      "size_bytes": 9497910,
      "version": "3.2.11"
-    },
-    {
-     "duplicate": null,
-     "editor_version": null,
-     "file": "Tools/uNode 3 Pro v3.2.0 (30 Jul 2025).unitypackage",
-     "folder_hint": null,
-     "integrity": null,
-     "latest": false,
-     "pipeline": null,
-     "prerelease": false,
-     "release_date": "2025-07-30",
-     "size_bytes": 9656325,
-     "version": "3.2.0"
     }
    ]
   },
@@ -40121,6 +40020,50 @@
      "release_date": null,
      "size_bytes": 45243035,
      "version": "1.0"
+    }
+   ]
+  },
+  {
+   "asset_key": "very-animation",
+   "author": null,
+   "category": {
+    "levels": [
+     "Tools"
+    ],
+    "path": "Tools",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Very Animation",
+   "name": "Very Animation",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "animation",
+    "editor-tool"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/Very Animation v1.4.1.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 10340672,
+     "version": "1.4.1"
     }
    ]
   },
@@ -40462,15 +40405,15 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "Tools/Kubacho Lab/vInspector 2 v2.0.18 (05 Mar 2026).unitypackage",
+     "file": "Tools/vInspector 2 v2.0.19.unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
      "pipeline": null,
      "prerelease": false,
-     "release_date": "2026-03-05",
-     "size_bytes": 143358,
-     "version": "2.0.18"
+     "release_date": null,
+     "size_bytes": 143465,
+     "version": "2.0.19"
     }
    ]
   },
@@ -41809,17 +41752,6 @@
   {
    "identity_evidence": "size+name, unhashed",
    "members": [
-    "2D/AllSky - 220 Sky Skybox Set v5.2.0.unitypackage",
-    "VFX/AllSky - 220 Sky Skybox Set v5.1.0.unitypackage"
-   ],
-   "reason": "same-size-different-version",
-   "redundant_bytes": 0,
-   "size": 5948381557,
-   "verdict": "review"
-  },
-  {
-   "identity_evidence": "size+name, unhashed",
-   "members": [
     "3D/66 Creatures Super Mega (Pack) v1.0 (10 Nov 2024).unitypackage",
     "3D/66 Creatures Super Mega Pack.unitypackage"
    ],
@@ -41915,17 +41847,6 @@
    "redundant_bytes": 11243331,
    "size": 11243331,
    "verdict": "duplicate"
-  },
-  {
-   "identity_evidence": "size+name, unhashed",
-   "members": [
-    "Particle Dynamic Magic 2 v2.5.3 Unity.unitypackage",
-    "Tools/Prefab Brush - Easy Object Placement Tool Level Designer v1.3.3 (22 Jan 2025).unitypackage"
-   ],
-   "reason": "size-coincidence",
-   "redundant_bytes": 0,
-   "size": 4096,
-   "verdict": "distinct"
   }
  ],
  "enrichment": {
@@ -41968,8 +41889,8 @@
     "stylized-solarpunk-city/urp"
    ]
   },
-  "store_eligible": 829
+  "store_eligible": 834
  },
- "file_count": 869,
- "generated": "2026-08-30T07:53:33Z"
+ "file_count": 854,
+ "generated": "2026-09-01T19:20:52Z"
 }

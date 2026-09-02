@@ -1,11 +1,41 @@
 {
- "generated": "2026-08-30T07:53:34Z",
+ "generated": "2026-09-01T19:20:52Z",
  "pending": [
+  {
+   "asset_key": "bakery-real-time-preview",
+   "first_seen": "2026-09-01",
+   "previously_unresolved": false,
+   "title": "Bakery Real-Time Preview"
+  },
+  {
+   "asset_key": "obfuscator-pro-plug-and-play-code-protection-2026",
+   "first_seen": "2026-09-01",
+   "previously_unresolved": false,
+   "title": "Obfuscator Pro Plug and Play Code Protection 2026"
+  },
+  {
+   "asset_key": "retarget-pro-v5",
+   "first_seen": "2026-09-01",
+   "previously_unresolved": false,
+   "title": "Retarget Pro V5"
+  },
+  {
+   "asset_key": "sounds-good-easy-optimized-audio-manager",
+   "first_seen": "2026-09-01",
+   "previously_unresolved": false,
+   "title": "Sounds Good - Easy Optimized Audio Manager"
+  },
   {
    "asset_key": "umodeler",
    "first_seen": "2026-08-30",
    "previously_unresolved": false,
    "title": "UModeler"
+  },
+  {
+   "asset_key": "very-animation",
+   "first_seen": "2026-09-01",
+   "previously_unresolved": false,
+   "title": "Very Animation"
   }
  ]
 }

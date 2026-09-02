@@ -115,7 +115,7 @@ TAG_KEYWORDS = {
 # scan — os.walk + os.stat only. Never opens a file.
 # ---------------------------------------------------------------------------
 
-def scan(root):
+def scan(root, strict=False):
     """Return one record per archive. Reads metadata only; never opens a file."""
     root = os.path.abspath(root)
     excluded = set()
@@ -125,7 +125,7 @@ def scan(root):
             excluded.add(os.path.realpath(candidate))
 
     records = []
-    for dirpath, dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(root, onerror=(lambda exc: (_ for _ in ()).throw(exc)) if strict else None):
         # Prune by resolved path, not by name. On a case-insensitive volume a
         # name-based skip of "tools" would also drop "Tools" and its 191 archives.
         dirnames[:] = [

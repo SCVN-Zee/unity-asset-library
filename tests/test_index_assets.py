@@ -24,9 +24,9 @@ import index_assets as ia  # noqa: E402
 with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        "config.json"), encoding="utf-8") as _fh:
     REAL_ROOT = json.load(_fh)["vault_root"]
-# Recalibrated 2026-08-30 from the live library during the repo split (was 861 on
-# 2026-07-30; 8 downloads arrived since). Bump after every intentional download.
-EXPECTED_FILE_COUNT = 869
+# Recalibrated 2026-09-02 after superseded-version cleanup (26 archives removed).
+# Bump after every intentional download or cleanup.
+EXPECTED_FILE_COUNT = 854
 
 
 def P(name, parent=""):
@@ -79,7 +79,7 @@ class TestScannerNeverOpens(unittest.TestCase):
 
 class TestRealTree(unittest.TestCase):
     @unittest.skipUnless(os.path.isdir(os.path.join(REAL_ROOT, "3D")), "real library absent")
-    def test_scan_of_real_root_finds_861(self):
+    def test_scan_of_real_root_finds_854(self):
         self.assertEqual(len(ia.scan(REAL_ROOT)), EXPECTED_FILE_COUNT)
 
     @unittest.skipUnless(os.path.isdir(os.path.join(REAL_ROOT, "Tools")), "real library absent")

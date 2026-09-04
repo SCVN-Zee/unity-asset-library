@@ -6,6 +6,84 @@ mtime change means nothing here and is ignored entirely.
 
 A file still uploading can briefly report a different size and appear as `resized`.
 
+## 2026-09-04 13:46 — +62 −8 ~0
+
+**NEW ASSETS (43)** — need enrichment: `resolve_store.py export-titles --pending`
+- `2D/90 Animated emojis 2D Bubbles 1.13.unitypackage` → `90-animated-emojis-2d-bubbles`
+- `3D/Coral_Forest_-_Seaweed_Valley_v1.1.unitypackage` → `coral-forest-seaweed-valley`
+- `3D/Modular Cyber Racing Cars - Low Poly 3D Models.unitypackage` → `modular-cyber-racing-cars-low-poly-3d-models`
+- `3D/Synty/POLYGON Meadow Forest - Nature Biomes - Low Poly 3D Art by Synty v1.9.1.unitypackage` → `polygon-meadow-forest-nature-biomes-low-poly-3d-art-by-synty` _(previously unresolved)_
+- `3D/Ultimate Jurassic Pack Dinosaurs v2022.unitypackage` → `ultimate-jurassic-pack-dinosaurs-v2022`
+- `Audio/The Complete UI Sound Effects Library.unitypackage` → `the-complete-ui-sound-effects-library`
+- `Tools/Animation Composer System - ACS v1.3.8.unitypackage` → `animation-composer-system-acs`
+- `Tools/Animation Composer System - ACS.unitypackage` → `animation-composer-system-acs`
+- `Tools/Better Animation Events v2.0.1.unitypackage` → `better-animation-events`
+- `Tools/Binding System 2 v2.4.1 (20 Jul 2025).unitypackage` → `binding-system-2`
+- `Tools/Flexalon Pro 3D UI Layouts.unitypackage` → `flexalon-pro-3d-ui-layouts`
+- `Tools/Fluid Frenzy v1.4.7 (14 May 2026).unitypackage` → `fluid-frenzy`
+- `Tools/Highlight Plus 2 - All in One Outline Selection Effects v30.0.1.unitypackage` → `highlight-plus-2-all-in-one-outline-selection-effects`
+- `Tools/Maintainer 2.unitypackage` → `maintainer-2`
+- `Tools/Raycast Pro v1.1.5B.unitypackage` → `raycast-pro`
+- `Tools/RealBlend - Mesh Painting Creation.unitypackage` → `realblend-mesh-painting-creation`
+- `Tools/ReplaceWithPrefabs.zip` → `replacewithprefabs`
+- `Tools/Rope Swinging System.unitypackage` → `rope-swinging-system`
+- `Tools/Terrain To Mesh v2024.1.unitypackage` → `terrain-to-mesh`
+- `Tools/UModeler X Plus (version X Plus 1.0.29 - Hub 1.1.4).unitypackage` → `umodeler-x-plus-version-x-plus-1-0-29-hub-1-1-4`
+- `Tools/UnityHFSM-v2.3.0.zip` → `unityhfsm-v2-3-0`
+- `VFX/Flat Kit Toon Shading and Water Unity2022[4.7.6].unitypackage` → `flat-kit-toon-shading-and-water-unity2022-4-7-6`
+- `VFX/Particles/Cartoon FX 2 Remaster [R 1.2.4].unitypackage` → `cartoon-fx-2-remaster-r-1-2-4`
+- `VFX/Particles/Cartoon FX 3 Remaster [R 1.1.4].unitypackage` → `cartoon-fx-3-remaster-r-1-1-4`
+- `VFX/Particles/Cartoon FX 4 Remaster [R 1.1.4].unitypackage` → `cartoon-fx-4-remaster-r-1-1-4`
+- `VFX/Particles/Cartoon FX Remaster [R 1.2.4].unitypackage` → `cartoon-fx-remaster-r-1-2-4`
+- `VFX/Particles/Environment Weather Nature VFX pack v1.1.3 (26 Sep 2025).unitypackage` → `environment-weather-nature-vfx-pack`
+- `VFX/Particles/Epic Toon FX v1.82 (23 Jul 2024).unitypackage` → `epic-toon-fx`
+- `VFX/Particles/URP Claw Slashes FX v1.0.unitypackage` → `urp-claw-slashes-fx`
+- `VFX/Particles/Water splashes sprite effects v1.0.unitypackage` → `water-splashes-sprite-effects`
+- `VFX/Shaders/Advanced Dissolve 2025.4.unitypackage` → `advanced-dissolve`
+- `VFX/Shaders/Advanced Vertical FogHeight Fog Shader for Mobile Desktop and VR 1.2.unitypackage` → `advanced-vertical-fogheight-fog-shader-for-mobile-desktop-and-vr`
+- `VFX/Shaders/All In 1 Shader Nodes v1.12.unitypackage` → `all-in-1-shader-nodes`
+- `VFX/Shaders/Better Lit Shader 2021 1.1.33.unitypackage` → `better-lit-shader-2021`
+- `VFX/Shaders/FogVolume.unitypackage` → `fogvolume`
+- `VFX/Shaders/Interactive_Dissolve_Effects_2.0.unitypackage` → `interactive-dissolve-effects-2-0`
+- `VFX/Shaders/MK Toon - Stylized Shader.unitypackage` → `mk-toon-stylized-shader`
+- `VFX/Shaders/Mat_Overlay.unitypackage` → `mat-overlay`
+- `VFX/Shaders/Stylized Grass Shader 1.4.6.unitypackage` → `stylized-grass-shader`
+- `VFX/Shaders/Super Realistic Diamond Shaders v1.3.unitypackage` → `super-realistic-diamond-shaders`
+- `VFX/Shaders/URP - Ghost Shaders v2026.0.1.unitypackage` → `urp-ghost-shaders`
+- `VFX/Shaders/URP - Glass Shaders v2022.3.unitypackage` → `urp-glass-shaders`
+- `VFX/Shaders/Wireframe Shader Effect v1.6.unitypackage` → `wireframe-shader-effect`
+
+**NEW VERSION of a known asset (19)** — resolution reused, no search needed
+- `3D/Animations/Animation Designer.unitypackage` → `animation-designer`
+- `3D/FANTASTIC - Dungeon Pack v1.3.0 (12 Dec 2025).unitypackage` (v1.3.0) → `fantastic-dungeon-pack`
+- `Tools/ALINE v1.7.9 (19 Feb 2026).unitypackage` (v1.7.9) → `aline`
+- `Tools/All In 1 Springs Toolkit v1.7 (28 Jan 2026).unitypackage` (v1.7) → `all-in-1-springs-toolkit`
+- `Tools/Easy Save - The Complete Save Game Data Serializer System v3.5.27.unitypackage` (v3.5.27) → `easy-save-the-complete-save-game-data-serializer-system`
+- `Tools/Find Reference 2 v2.6.10.unitypackage` (v2.6.10) → `find-reference-2`
+- `Tools/Kubacho Lab/vInspector 2 v2.0.19.unitypackage` (v2.0.19) → `vinspector-2`
+- `Tools/Lattice Modifier for Unity v1.4.0.unitypackage` (v1.4.0) → `lattice-modifier-for-unity`
+- `Tools/Magica Cloth 2 v2.18.3.unitypackage` (v2.18.3) → `magica-cloth-2`
+- `Tools/Retarget Pro v4.1.0 (21 Jun 2025).unitypackage` (v4.1.0) → `retarget-pro`
+- `Tools/Scriptable Sheets v1.9.1.unitypackage` (v1.9.1) → `scriptable-sheets`
+- `VFX/Particles/Epic Toon VFX 2 v2.0 (18 Feb 2026).unitypackage` (v2.0) → `epic-toon-vfx-2`
+- `VFX/Shaders/All In 1 3D-Shader v2.01 (23 Aug 2025).unitypackage` (v2.01) → `all-in-1-3d-shader`
+- `VFX/Shaders/All In 1 3D-Shader v2.74 (07 Apr 2026).unitypackage` (v2.74) → `all-in-1-3d-shader`
+- `VFX/Shaders/All In 1 Sprite Shader v4.68 (20 May 2026).unitypackage` (v4.68) → `all-in-1-sprite-shader`
+- `VFX/Shaders/All In 1 Vfx Toolkit v2.3 (07 Feb 2026).unitypackage` (v2.3) → `all-in-1-vfx-toolkit`
+- `VFX/Shaders/Amplify Shader Pack v2.3.10.unitypackage` (v2.3.10) → `amplify-shader-pack`
+- `VFX/Shaders/Shiny SSR 2 - Screen Space Reflections v24.0 (16 Sep 2025).unitypackage` (v24.0) → `shiny-ssr-2-screen-space-reflections`
+- `VFX/Shaders/Stylized Water 2 v1.7.0 (16 Oct 2025).unitypackage` (v1.7.0) → `stylized-water-2`
+
+**REMOVED (8)**
+- `Tools/ALINE v1.7.8 (06 May 2025).unitypackage`
+- `Tools/All In 1 Springs Toolkit v1.45.unitypackage`
+- `Tools/Find Reference 2 v2.5.1.unitypackage`
+- `Tools/vInspector 2 v2.0.19.unitypackage`
+- `VFX/Particles/Epic Toon VFX 2 v1.3 (23 Dec 2024).unitypackage`
+- `VFX/Shaders/All In 1 3D-Shader v1.61.unitypackage`
+- `VFX/Shaders/All In 1 Sprite Shader v4.25.unitypackage`
+- `VFX/Shaders/Amplify Shader Pack v2.3.9-r2 (27 Jan 2026).unitypackage`
+
 ## 2026-09-02 02:20 — +11 −26 ~0
 
 **NEW ASSETS (5)** — need enrichment: `resolve_store.py export-titles --pending`

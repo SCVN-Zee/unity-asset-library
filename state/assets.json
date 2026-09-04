@@ -1,5 +1,5 @@
 {
- "asset_count": 844,
+ "asset_count": 885,
  "assets": [
   {
    "asset_key": "100-stylized-historical-textures-medieval-egyptian-roman-more",
@@ -1352,6 +1352,47 @@
    ]
   },
   {
+   "asset_key": "90-animated-emojis-2d-bubbles",
+   "author": null,
+   "category": {
+    "levels": [
+     "2D"
+    ],
+    "path": "2D",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "90 Animated emojis 2D Bubbles",
+   "name": "90 Animated emojis 2D Bubbles",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "2D/90 Animated emojis 2D Bubbles 1.13.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 97037077,
+     "version": "1.13"
+    }
+   ]
+  },
+  {
    "asset_key": "a-pathfinding-project-pro",
    "author": "Aron Granberg",
    "category": {
@@ -1951,6 +1992,49 @@
    ]
   },
   {
+   "asset_key": "advanced-dissolve",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Advanced Dissolve",
+   "name": "Advanced Dissolve",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": "2025.4",
+     "file": "VFX/Shaders/Advanced Dissolve 2025.4.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 142925457,
+     "version": null
+    }
+   ]
+  },
+  {
    "asset_key": "advanced-fps-counter",
    "author": "Code Stage",
    "category": {
@@ -2101,6 +2185,50 @@
    ]
   },
   {
+   "asset_key": "advanced-vertical-fogheight-fog-shader-for-mobile-desktop-and-vr",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Advanced Vertical FogHeight Fog Shader for Mobile Desktop and VR",
+   "name": "Advanced Vertical FogHeight Fog Shader for Mobile Desktop and VR",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "shader",
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Shaders/Advanced Vertical FogHeight Fog Shader for Mobile Desktop and VR 1.2.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 1178474,
+     "version": "1.2"
+    }
+   ]
+  },
+  {
    "asset_key": "adventure-creator",
    "author": "ICEBOX Studios",
    "category": {
@@ -2240,15 +2368,15 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "Tools/ALINE v1.7.8 (06 May 2025).unitypackage",
+     "file": "Tools/ALINE v1.7.9 (19 Feb 2026).unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
      "pipeline": null,
      "prerelease": false,
-     "release_date": "2025-05-06",
-     "size_bytes": 315561,
-     "version": "1.7.8"
+     "release_date": "2026-02-19",
+     "size_bytes": 852132,
+     "version": "1.7.9"
     }
    ]
   },
@@ -2291,15 +2419,72 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "VFX/Shaders/All In 1 3D-Shader v1.61.unitypackage",
+     "file": "VFX/Shaders/All In 1 3D-Shader v2.74 (07 Apr 2026).unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": "2026-04-07",
+     "size_bytes": 55895969,
+     "version": "2.74"
+    },
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Shaders/All In 1 3D-Shader v2.01 (23 Aug 2025).unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": "2025-08-23",
+     "size_bytes": 52662335,
+     "version": "2.01"
+    }
+   ]
+  },
+  {
+   "asset_key": "all-in-1-shader-nodes",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "All In 1 Shader Nodes",
+   "name": "All In 1 Shader Nodes",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "shader",
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Shaders/All In 1 Shader Nodes v1.12.unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
      "pipeline": null,
      "prerelease": false,
      "release_date": null,
-     "size_bytes": 48112585,
-     "version": "1.61"
+     "size_bytes": 16178802,
+     "version": "1.12"
     }
    ]
   },
@@ -2342,15 +2527,15 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "Tools/All In 1 Springs Toolkit v1.45.unitypackage",
+     "file": "Tools/All In 1 Springs Toolkit v1.7 (28 Jan 2026).unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
      "pipeline": null,
      "prerelease": false,
-     "release_date": null,
-     "size_bytes": 4759885,
-     "version": "1.45"
+     "release_date": "2026-01-28",
+     "size_bytes": 4720623,
+     "version": "1.7"
     }
    ]
   },
@@ -2443,15 +2628,15 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "VFX/Shaders/All In 1 Sprite Shader v4.25.unitypackage",
+     "file": "VFX/Shaders/All In 1 Sprite Shader v4.68 (20 May 2026).unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
      "pipeline": null,
      "prerelease": false,
-     "release_date": null,
-     "size_bytes": 23976727,
-     "version": "4.25"
+     "release_date": "2026-05-20",
+     "size_bytes": 17120921,
+     "version": "4.68"
     }
    ]
   },
@@ -2494,10 +2679,23 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "VFX/All In 1 Vfx Toolkit v2.1.unitypackage",
+     "file": "VFX/Shaders/All In 1 Vfx Toolkit v2.3 (07 Feb 2026).unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": "2026-02-07",
+     "size_bytes": 249170029,
+     "version": "2.3"
+    },
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/All In 1 Vfx Toolkit v2.1.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
      "pipeline": null,
      "prerelease": false,
      "release_date": null,
@@ -2847,15 +3045,15 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "VFX/Shaders/Amplify Shader Pack v2.3.9-r2 (27 Jan 2026).unitypackage",
+     "file": "VFX/Shaders/Amplify Shader Pack v2.3.10.unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
      "pipeline": null,
      "prerelease": false,
-     "release_date": "2026-01-27",
-     "size_bytes": 453419558,
-     "version": "2.3.9-r2"
+     "release_date": null,
+     "size_bytes": 396626398,
+     "version": "2.3.10"
     }
    ]
   },
@@ -3101,6 +3299,64 @@
    ]
   },
   {
+   "asset_key": "animation-composer-system-acs",
+   "author": null,
+   "category": {
+    "levels": [
+     "Tools"
+    ],
+    "path": "Tools",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Animation Composer System - ACS",
+   "name": "Animation Composer System - ACS",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "animation",
+    "editor-tool",
+    "template"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/Animation Composer System - ACS v1.3.8.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 20025797,
+     "version": "1.3.8"
+    },
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/Animation Composer System - ACS.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 19736702,
+     "version": null
+    }
+   ]
+  },
+  {
    "asset_key": "animation-designer",
    "author": "FImpossible Creations",
    "category": {
@@ -3147,6 +3403,19 @@
      "release_date": "2025-07-03",
      "size_bytes": 6709621,
      "version": "1.2.5.3"
+    },
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "3D/Animations/Animation Designer.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 6614199,
+     "version": null
     }
    ]
   },
@@ -4644,6 +4913,50 @@
    ]
   },
   {
+   "asset_key": "better-animation-events",
+   "author": null,
+   "category": {
+    "levels": [
+     "Tools"
+    ],
+    "path": "Tools",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Better Animation Events",
+   "name": "Better Animation Events",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "animation",
+    "editor-tool"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/Better Animation Events v2.0.1.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 915786,
+     "version": "2.0.1"
+    }
+   ]
+  },
+  {
    "asset_key": "better-fog-height-fog-light-scattering-more",
    "author": "INab Studio",
    "category": {
@@ -4691,6 +5004,50 @@
      "release_date": null,
      "size_bytes": 41428292,
      "version": null
+    }
+   ]
+  },
+  {
+   "asset_key": "better-lit-shader-2021",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Better Lit Shader 2021",
+   "name": "Better Lit Shader 2021",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "shader",
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Shaders/Better Lit Shader 2021 1.1.33.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 171590559,
+     "version": "1.1.33"
     }
    ]
   },
@@ -4785,6 +5142,50 @@
      "release_date": "2025-06-21",
      "size_bytes": 118817,
      "version": "2.11.0a"
+    }
+   ]
+  },
+  {
+   "asset_key": "binding-system-2",
+   "author": null,
+   "category": {
+    "levels": [
+     "Tools"
+    ],
+    "path": "Tools",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Binding System 2",
+   "name": "Binding System 2",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "editor-tool",
+    "template"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/Binding System 2 v2.4.1 (20 Jul 2025).unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": "2025-07-20",
+     "size_bytes": 15651606,
+     "version": "2.4.1"
     }
    ]
   },
@@ -5574,6 +5975,186 @@
      "release_date": "2024-11-08",
      "size_bytes": 67119956,
      "version": "1.21"
+    }
+   ]
+  },
+  {
+   "asset_key": "cartoon-fx-2-remaster-r-1-2-4",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Cartoon FX 2 Remaster [R 1.2.4]",
+   "name": "Cartoon FX 2 Remaster [R 1.2.4]",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "stylized",
+    "vehicle",
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Particles/Cartoon FX 2 Remaster [R 1.2.4].unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 12868789,
+     "version": null
+    }
+   ]
+  },
+  {
+   "asset_key": "cartoon-fx-3-remaster-r-1-1-4",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Cartoon FX 3 Remaster [R 1.1.4]",
+   "name": "Cartoon FX 3 Remaster [R 1.1.4]",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "stylized",
+    "vehicle",
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Particles/Cartoon FX 3 Remaster [R 1.1.4].unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 11331332,
+     "version": null
+    }
+   ]
+  },
+  {
+   "asset_key": "cartoon-fx-4-remaster-r-1-1-4",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Cartoon FX 4 Remaster [R 1.1.4]",
+   "name": "Cartoon FX 4 Remaster [R 1.1.4]",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "stylized",
+    "vehicle",
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Particles/Cartoon FX 4 Remaster [R 1.1.4].unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 13764670,
+     "version": null
+    }
+   ]
+  },
+  {
+   "asset_key": "cartoon-fx-remaster-r-1-2-4",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Cartoon FX Remaster [R 1.2.4]",
+   "name": "Cartoon FX Remaster [R 1.2.4]",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "stylized",
+    "vehicle",
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Particles/Cartoon FX Remaster [R 1.2.4].unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 10973432,
+     "version": null
     }
    ]
   },
@@ -6845,6 +7426,49 @@
      "release_date": null,
      "size_bytes": 16505986,
      "version": "1.0"
+    }
+   ]
+  },
+  {
+   "asset_key": "coral-forest-seaweed-valley",
+   "author": null,
+   "category": {
+    "levels": [
+     "3D"
+    ],
+    "path": "3D",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Coral Forest - Seaweed Valley",
+   "name": "Coral Forest - Seaweed Valley",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "environment"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "3D/Coral_Forest_-_Seaweed_Valley_v1.1.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 57709407,
+     "version": "1.1"
     }
    ]
   },
@@ -9036,10 +9660,23 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "Tools/Easy Save - The Complete Save Game Data Serializer System v3.5.22 (17 Mar 2025).unitypackage",
+     "file": "Tools/Easy Save - The Complete Save Game Data Serializer System v3.5.27.unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 256989,
+     "version": "3.5.27"
+    },
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/Easy Save - The Complete Save Game Data Serializer System v3.5.22 (17 Mar 2025).unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
      "pipeline": null,
      "prerelease": false,
      "release_date": "2025-03-17",
@@ -9382,6 +10019,94 @@
    ]
   },
   {
+   "asset_key": "environment-weather-nature-vfx-pack",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Environment Weather Nature VFX pack",
+   "name": "Environment Weather Nature VFX pack",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "environment",
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Particles/Environment Weather Nature VFX pack v1.1.3 (26 Sep 2025).unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": "2025-09-26",
+     "size_bytes": 4497098,
+     "version": "1.1.3"
+    }
+   ]
+  },
+  {
+   "asset_key": "epic-toon-fx",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Epic Toon FX",
+   "name": "Epic Toon FX",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "stylized",
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Particles/Epic Toon FX v1.82 (23 Jul 2024).unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": "2024-07-23",
+     "size_bytes": 80492085,
+     "version": "1.82"
+    }
+   ]
+  },
+  {
    "asset_key": "epic-toon-vfx-2",
    "author": "Hovl Studio",
    "category": {
@@ -9421,15 +10146,15 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "VFX/Particles/Epic Toon VFX 2 v1.3 (23 Dec 2024).unitypackage",
+     "file": "VFX/Particles/Epic Toon VFX 2 v2.0 (18 Feb 2026).unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
      "pipeline": null,
      "prerelease": false,
-     "release_date": "2024-12-23",
-     "size_bytes": 30475532,
-     "version": "1.3"
+     "release_date": "2026-02-18",
+     "size_bytes": 32124984,
+     "version": "2.0"
     }
    ]
   },
@@ -10073,10 +10798,23 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "3D/FANTASTIC - Dungeon Pack v1.2.unitypackage",
+     "file": "3D/FANTASTIC - Dungeon Pack v1.3.0 (12 Dec 2025).unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": "2025-12-12",
+     "size_bytes": 776867049,
+     "version": "1.3.0"
+    },
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "3D/FANTASTIC - Dungeon Pack v1.2.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
      "pipeline": null,
      "prerelease": false,
      "release_date": null,
@@ -10947,15 +11685,15 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "Tools/Find Reference 2 v2.5.1.unitypackage",
+     "file": "Tools/Find Reference 2 v2.6.10.unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
      "pipeline": null,
      "prerelease": false,
      "release_date": null,
-     "size_bytes": 1133337,
-     "version": "2.5.1"
+     "size_bytes": 204971,
+     "version": "2.6.10"
     }
    ]
   },
@@ -11062,6 +11800,96 @@
    ]
   },
   {
+   "asset_key": "flat-kit-toon-shading-and-water-unity2022-4-7-6",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Flat Kit Toon Shading and Water Unity2022[4.7.6]",
+   "name": "Flat Kit Toon Shading and Water Unity2022[4.7.6]",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "shader",
+    "stylized",
+    "template",
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Flat Kit Toon Shading and Water Unity2022[4.7.6].unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 158009528,
+     "version": null
+    }
+   ]
+  },
+  {
+   "asset_key": "flexalon-pro-3d-ui-layouts",
+   "author": null,
+   "category": {
+    "levels": [
+     "Tools"
+    ],
+    "path": "Tools",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Flexalon Pro 3D UI Layouts",
+   "name": "Flexalon Pro 3D UI Layouts",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "editor-tool",
+    "ui"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/Flexalon Pro 3D UI Layouts.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 14145172,
+     "version": null
+    }
+   ]
+  },
+  {
    "asset_key": "flipbook-vfx-urp",
    "author": "Vefects",
    "category": {
@@ -11162,6 +11990,49 @@
    ]
   },
   {
+   "asset_key": "fluid-frenzy",
+   "author": null,
+   "category": {
+    "levels": [
+     "Tools"
+    ],
+    "path": "Tools",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Fluid Frenzy",
+   "name": "Fluid Frenzy",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "editor-tool"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/Fluid Frenzy v1.4.7 (14 May 2026).unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": "2026-05-14",
+     "size_bytes": 310144811,
+     "version": "1.4.7"
+    }
+   ]
+  },
+  {
    "asset_key": "flying-mage-animset",
    "author": "wemakethegame",
    "category": {
@@ -11250,6 +12121,49 @@
      "prerelease": false,
      "release_date": null,
      "size_bytes": 4555,
+     "version": null
+    }
+   ]
+  },
+  {
+   "asset_key": "fogvolume",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "FogVolume",
+   "name": "FogVolume",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Shaders/FogVolume.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 257294567,
      "version": null
     }
    ]
@@ -14245,6 +15159,51 @@
    ]
   },
   {
+   "asset_key": "highlight-plus-2-all-in-one-outline-selection-effects",
+   "author": null,
+   "category": {
+    "levels": [
+     "Tools"
+    ],
+    "path": "Tools",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Highlight Plus 2 - All in One Outline Selection Effects",
+   "name": "Highlight Plus 2 - All in One Outline Selection Effects",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "editor-tool",
+    "lighting",
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/Highlight Plus 2 - All in One Outline Selection Effects v30.0.1.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 19482716,
+     "version": "30.0.1"
+    }
+   ]
+  },
+  {
    "asset_key": "highlight-plus-all-in-one-outline-selection-effects",
    "author": "Kronnect",
    "category": {
@@ -15031,6 +15990,49 @@
      "release_date": null,
      "size_bytes": 170804233,
      "version": "1.0"
+    }
+   ]
+  },
+  {
+   "asset_key": "interactive-dissolve-effects-2-0",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Interactive Dissolve Effects 2.0",
+   "name": "Interactive Dissolve Effects 2.0",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Shaders/Interactive_Dissolve_Effects_2.0.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 329948222,
+     "version": null
     }
    ]
   },
@@ -15941,10 +16943,23 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "Tools/Lattice Modifier for Unity v1.3.1 (29 Oct 2025).unitypackage",
+     "file": "Tools/Lattice Modifier for Unity v1.4.0.unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 130395060,
+     "version": "1.4.0"
+    },
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/Lattice Modifier for Unity v1.3.1 (29 Oct 2025).unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
      "pipeline": null,
      "prerelease": false,
      "release_date": "2025-10-29",
@@ -18695,10 +19710,23 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "Tools/Magica Cloth 2 v2.13.2 (17 Jan 2025).unitypackage",
+     "file": "Tools/Magica Cloth 2 v2.18.3.unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 87613609,
+     "version": "2.18.3"
+    },
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/Magica Cloth 2 v2.13.2 (17 Jan 2025).unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
      "pipeline": null,
      "prerelease": false,
      "release_date": "2025-01-17",
@@ -18745,6 +19773,49 @@
      "release_date": null,
      "size_bytes": 431721484,
      "version": "1.1"
+    }
+   ]
+  },
+  {
+   "asset_key": "maintainer-2",
+   "author": null,
+   "category": {
+    "levels": [
+     "Tools"
+    ],
+    "path": "Tools",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Maintainer 2",
+   "name": "Maintainer 2",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "editor-tool"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/Maintainer 2.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 1703162,
+     "version": null
     }
    ]
   },
@@ -19114,6 +20185,49 @@
      "release_date": null,
      "size_bytes": 432828345,
      "version": "1.0"
+    }
+   ]
+  },
+  {
+   "asset_key": "mat-overlay",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Mat Overlay",
+   "name": "Mat Overlay",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Shaders/Mat_Overlay.unitypackage",
+     "folder_hint": null,
+     "integrity": "broken",
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 4608,
+     "version": null
     }
    ]
   },
@@ -20416,6 +21530,51 @@
    ]
   },
   {
+   "asset_key": "mk-toon-stylized-shader",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "MK Toon - Stylized Shader",
+   "name": "MK Toon - Stylized Shader",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "shader",
+    "stylized",
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Shaders/MK Toon - Stylized Shader.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 130911962,
+     "version": null
+    }
+   ]
+  },
+  {
    "asset_key": "mmorpg-kit-2d-3d-survival",
    "author": "SURIYUN",
    "category": {
@@ -20871,6 +22030,50 @@
      "release_date": "2023-10-06",
      "size_bytes": 1289457011,
      "version": "2.0.0"
+    }
+   ]
+  },
+  {
+   "asset_key": "modular-cyber-racing-cars-low-poly-3d-models",
+   "author": null,
+   "category": {
+    "levels": [
+     "3D"
+    ],
+    "path": "3D",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Modular Cyber Racing Cars - Low Poly 3D Models",
+   "name": "Modular Cyber Racing Cars - Low Poly 3D Models",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "low-poly",
+    "vehicle"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "3D/Modular Cyber Racing Cars - Low Poly 3D Models.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 31195669,
+     "version": null
     }
    ]
   },
@@ -25470,10 +26673,23 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "3D/Synty/POLYGON Meadow Forest - Nature Biomes - Low Poly 3D Art by Synty v1.02.unitypackage",
+     "file": "3D/Synty/POLYGON Meadow Forest - Nature Biomes - Low Poly 3D Art by Synty v1.9.1.unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 309889422,
+     "version": "1.9.1"
+    },
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "3D/Synty/POLYGON Meadow Forest - Nature Biomes - Low Poly 3D Art by Synty v1.02.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
      "pipeline": null,
      "prerelease": false,
      "release_date": null,
@@ -28527,6 +29743,49 @@
    ]
   },
   {
+   "asset_key": "raycast-pro",
+   "author": null,
+   "category": {
+    "levels": [
+     "Tools"
+    ],
+    "path": "Tools",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Raycast Pro",
+   "name": "Raycast Pro",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "editor-tool"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/Raycast Pro v1.1.5B.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 16792580,
+     "version": "1.1.5B"
+    }
+   ]
+  },
+  {
    "asset_key": "raycastpro",
    "author": "Philosophers",
    "category": {
@@ -28671,6 +29930,49 @@
    ]
   },
   {
+   "asset_key": "realblend-mesh-painting-creation",
+   "author": null,
+   "category": {
+    "levels": [
+     "Tools"
+    ],
+    "path": "Tools",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "RealBlend - Mesh Painting Creation",
+   "name": "RealBlend - Mesh Painting Creation",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "editor-tool"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/RealBlend - Mesh Painting Creation.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 172978283,
+     "version": null
+    }
+   ]
+  },
+  {
    "asset_key": "realistic-car-controller-pro",
    "author": "BoneCracker Games",
    "category": {
@@ -28774,6 +30076,49 @@
    ]
   },
   {
+   "asset_key": "replacewithprefabs",
+   "author": null,
+   "category": {
+    "levels": [
+     "Tools"
+    ],
+    "path": "Tools",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "ReplaceWithPrefabs",
+   "name": "ReplaceWithPrefabs",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "editor-tool"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/ReplaceWithPrefabs.zip",
+     "folder_hint": null,
+     "integrity": "broken",
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 2570,
+     "version": null
+    }
+   ]
+  },
+  {
    "asset_key": "retarget-pro",
    "author": "KINEMATION",
    "category": {
@@ -28820,6 +30165,19 @@
      "release_date": "2025-11-09",
      "size_bytes": 4429328,
      "version": "4.2.0"
+    },
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/Retarget Pro v4.1.0 (21 Jun 2025).unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": "2025-06-21",
+     "size_bytes": 4418133,
+     "version": "4.1.0"
     }
    ]
   },
@@ -29480,6 +30838,50 @@
      "release_date": null,
      "size_bytes": 3253549,
      "version": "2.6.6"
+    }
+   ]
+  },
+  {
+   "asset_key": "rope-swinging-system",
+   "author": null,
+   "category": {
+    "levels": [
+     "Tools"
+    ],
+    "path": "Tools",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Rope Swinging System",
+   "name": "Rope Swinging System",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "editor-tool",
+    "template"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/Rope Swinging System.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 51675739,
+     "version": null
     }
    ]
   },
@@ -30977,10 +32379,23 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "Tools/Scriptable Sheets v1.8.0 (23 Nov 2025).unitypackage",
+     "file": "Tools/Scriptable Sheets v1.9.1.unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 389468,
+     "version": "1.9.1"
+    },
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/Scriptable Sheets v1.8.0 (23 Nov 2025).unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
      "pipeline": null,
      "prerelease": false,
      "release_date": "2025-11-23",
@@ -31464,10 +32879,23 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "Shiny SSR 2 - Screen Space Reflections v23.1.unitypackage",
+     "file": "VFX/Shaders/Shiny SSR 2 - Screen Space Reflections v24.0 (16 Sep 2025).unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": "2025-09-16",
+     "size_bytes": 15901399,
+     "version": "24.0"
+    },
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Shiny SSR 2 - Screen Space Reflections v23.1.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
      "pipeline": null,
      "prerelease": false,
      "release_date": null,
@@ -34416,6 +35844,51 @@
    ]
   },
   {
+   "asset_key": "stylized-grass-shader",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Stylized Grass Shader",
+   "name": "Stylized Grass Shader",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "shader",
+    "stylized",
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Shaders/Stylized Grass Shader 1.4.6.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 19418350,
+     "version": "1.4.6"
+    }
+   ]
+  },
+  {
    "asset_key": "stylized-house-interior",
    "author": "StylArts",
    "category": {
@@ -35524,10 +36997,23 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "VFX/Shaders/Stylized Water 2 v1.6.1.unitypackage",
+     "file": "VFX/Shaders/Stylized Water 2 v1.7.0 (16 Oct 2025).unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": "2025-10-16",
+     "size_bytes": 40793883,
+     "version": "1.7.0"
+    },
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Shaders/Stylized Water 2 v1.6.1.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
      "pipeline": null,
      "prerelease": false,
      "release_date": null,
@@ -35738,6 +37224,50 @@
      "release_date": null,
      "size_bytes": 342744407,
      "version": null
+    }
+   ]
+  },
+  {
+   "asset_key": "super-realistic-diamond-shaders",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Super Realistic Diamond Shaders",
+   "name": "Super Realistic Diamond Shaders",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "shader",
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Shaders/Super Realistic Diamond Shaders v1.3.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 135829712,
+     "version": "1.3"
     }
    ]
   },
@@ -36749,6 +38279,50 @@
    ]
   },
   {
+   "asset_key": "terrain-to-mesh",
+   "author": null,
+   "category": {
+    "levels": [
+     "Tools"
+    ],
+    "path": "Tools",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Terrain To Mesh",
+   "name": "Terrain To Mesh",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "editor-tool",
+    "terrain"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/Terrain To Mesh v2024.1.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 20917636,
+     "version": "2024.1"
+    }
+   ]
+  },
+  {
    "asset_key": "text-animator-for-unity",
    "author": null,
    "category": {
@@ -36882,6 +38456,51 @@
      "release_date": null,
      "size_bytes": 43985100,
      "version": "1.0"
+    }
+   ]
+  },
+  {
+   "asset_key": "the-complete-ui-sound-effects-library",
+   "author": null,
+   "category": {
+    "levels": [
+     "Audio"
+    ],
+    "path": "Audio",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "The Complete UI Sound Effects Library",
+   "name": "The Complete UI Sound Effects Library",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "sfx",
+    "ui",
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Audio/The Complete UI Sound Effects Library.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 84751337,
+     "version": null
     }
    ]
   },
@@ -38994,6 +40613,47 @@
    ]
   },
   {
+   "asset_key": "ultimate-jurassic-pack-dinosaurs-v2022",
+   "author": null,
+   "category": {
+    "levels": [
+     "3D"
+    ],
+    "path": "3D",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Ultimate Jurassic Pack Dinosaurs v2022",
+   "name": "Ultimate Jurassic Pack Dinosaurs v2022",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "3D/Ultimate Jurassic Pack Dinosaurs v2022.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 318143756,
+     "version": null
+    }
+   ]
+  },
+  {
    "asset_key": "ultimate-low-poly-mining-cave-blacksmith-pack-ores-gems-props-tools",
    "author": "Pure Poly",
    "category": {
@@ -39389,6 +41049,49 @@
    ]
   },
   {
+   "asset_key": "umodeler-x-plus-version-x-plus-1-0-29-hub-1-1-4",
+   "author": null,
+   "category": {
+    "levels": [
+     "Tools"
+    ],
+    "path": "Tools",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "UModeler X Plus (version X Plus 1.0.29 - Hub 1.1.4)",
+   "name": "UModeler X Plus (version X Plus 1.0.29 - Hub 1.1.4)",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "editor-tool"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/UModeler X Plus (version X Plus 1.0.29 - Hub 1.1.4).unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 3100065,
+     "version": null
+    }
+   ]
+  },
+  {
    "asset_key": "umotion-pro-animation-editor",
    "author": "Soxware Interactive",
    "category": {
@@ -39627,6 +41330,49 @@
    ]
   },
   {
+   "asset_key": "unityhfsm-v2-3-0",
+   "author": null,
+   "category": {
+    "levels": [
+     "Tools"
+    ],
+    "path": "Tools",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "UnityHFSM-v2.3.0",
+   "name": "UnityHFSM-v2.3.0",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "editor-tool"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "Tools/UnityHFSM-v2.3.0.zip",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": false,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 124825,
+     "version": null
+    }
+   ]
+  },
+  {
    "asset_key": "universal-fighting-engine-2/source",
    "author": null,
    "category": {
@@ -39819,6 +41565,140 @@
      "release_date": null,
      "size_bytes": 43067943,
      "version": "1.0"
+    }
+   ]
+  },
+  {
+   "asset_key": "urp-claw-slashes-fx",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "URP Claw Slashes FX",
+   "name": "URP Claw Slashes FX",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "urp",
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Particles/URP Claw Slashes FX v1.0.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 18316331,
+     "version": "1.0"
+    }
+   ]
+  },
+  {
+   "asset_key": "urp-ghost-shaders",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "URP - Ghost Shaders",
+   "name": "URP - Ghost Shaders",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "shader",
+    "urp",
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Shaders/URP - Ghost Shaders v2026.0.1.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 29526844,
+     "version": "2026.0.1"
+    }
+   ]
+  },
+  {
+   "asset_key": "urp-glass-shaders",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "URP - Glass Shaders",
+   "name": "URP - Glass Shaders",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "shader",
+    "urp",
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Shaders/URP - Glass Shaders v2022.3.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 120635258,
+     "version": "2022.3"
     }
    ]
   },
@@ -40405,7 +42285,7 @@
     {
      "duplicate": null,
      "editor_version": null,
-     "file": "Tools/vInspector 2 v2.0.19.unitypackage",
+     "file": "Tools/Kubacho Lab/vInspector 2 v2.0.19.unitypackage",
      "folder_hint": null,
      "integrity": null,
      "latest": true,
@@ -40910,6 +42790,49 @@
    ]
   },
   {
+   "asset_key": "water-splashes-sprite-effects",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Water splashes sprite effects",
+   "name": "Water splashes sprite effects",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Particles/Water splashes sprite effects v1.0.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 17371223,
+     "version": "1.0"
+    }
+   ]
+  },
+  {
    "asset_key": "web-builder-pro",
    "author": "Simon Nordon",
    "category": {
@@ -41156,6 +43079,50 @@
      "release_date": null,
      "size_bytes": 566801,
      "version": "1.2.3"
+    }
+   ]
+  },
+  {
+   "asset_key": "wireframe-shader-effect",
+   "author": null,
+   "category": {
+    "levels": [
+     "VFX"
+    ],
+    "path": "VFX",
+    "source": "folder"
+   },
+   "discriminators": [],
+   "flags": [],
+   "local_name": "Wireframe Shader Effect",
+   "name": "Wireframe Shader Effect",
+   "non_store": false,
+   "resolution": {
+    "id_verified": false,
+    "method": null,
+    "reason": "not-attempted"
+   },
+   "store": null,
+   "store_id": null,
+   "tag_source": "keyword",
+   "tags": [
+    "shader",
+    "vfx"
+   ],
+   "thumbnail": null,
+   "versions": [
+    {
+     "duplicate": null,
+     "editor_version": null,
+     "file": "VFX/Shaders/Wireframe Shader Effect v1.6.unitypackage",
+     "folder_hint": null,
+     "integrity": null,
+     "latest": true,
+     "pipeline": null,
+     "prerelease": false,
+     "release_date": null,
+     "size_bytes": 9093109,
+     "version": "1.6"
     }
    ]
   },
@@ -41889,8 +43856,8 @@
     "stylized-solarpunk-city/urp"
    ]
   },
-  "store_eligible": 834
+  "store_eligible": 875
  },
- "file_count": 854,
- "generated": "2026-09-01T19:20:52Z"
+ "file_count": 908,
+ "generated": "2026-09-04T06:46:35Z"
 }

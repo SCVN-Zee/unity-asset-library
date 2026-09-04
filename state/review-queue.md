@@ -1,6 +1,6 @@
 # Review Queue
 
-Generated 2026-09-01T19:20:52Z
+Generated 2026-09-04T06:46:35Z
 
 ## Duplicates
 
@@ -40,9 +40,11 @@ Generated 2026-09-01T19:20:52Z
 
 Thresholds are byte literals: `broken < 10,000 B`, `suspicious < 100,000 B`. Stated in bytes on purpose — the decimal/binary reading of "100 KB" already produced two wrong counts here.
 
-### broken (2)
+### broken (4)
+- 2,570 B — `Tools/ReplaceWithPrefabs.zip`
 - 4,096 B — `Particle Dynamic Magic 2 v2.5.3 Unity.unitypackage`
 - 4,555 B — `Tools/FMOD_InstrumentalEventPlayback.unitypackage`
+- 4,608 B — `VFX/Shaders/Mat_Overlay.unitypackage`
 
 ### suspicious (4)
 - 48,733 B — `Tools/Dissonance For FMOD Playback.unitypackage`
@@ -50,34 +52,49 @@ Thresholds are byte literals: `broken < 10,000 B`, `suspicious < 100,000 B`. Sta
 - 62,680 B — `2D/2D ULTIMATE BUNDLE v1.0.unitypackage`
 - 77,642 B — `Tools/Toolkit for Discord Social (Preview) v0.2.0.unitypackage`
 
-## Unparseable version (65)
+## Unparseable version (87)
 
 - `3D/27 NPC Characters Medieval Pack.unitypackage`
 - `3D/66 Creatures Super Mega Pack.unitypackage`
 - `3D/Abandoned Industrial Factory Environment.unitypackage`
 - `3D/Abandoned Psychiatric Hospital.unitypackage`
+- `VFX/Shaders/Advanced Dissolve 2025.4.unitypackage`
+- `Tools/Animation Composer System - ACS.unitypackage`
+- `3D/Animations/Animation Designer.unitypackage`
 - `Tools/Ash Vehicle AI.unitypackage`
 - `3D/Battle Royale Hero PBR.unitypackage`
 - `BattleSimulator.zip`
 - `Tools/Better Fog Height Fog Light Scattering More.unitypackage`
 - `Breeze - Advanced Character Behaviour.unitypackage`
+- `VFX/Particles/Cartoon FX 2 Remaster [R 1.2.4].unitypackage`
+- `VFX/Particles/Cartoon FX 3 Remaster [R 1.1.4].unitypackage`
+- `VFX/Particles/Cartoon FX 4 Remaster [R 1.1.4].unitypackage`
+- `VFX/Particles/Cartoon FX Remaster [R 1.2.4].unitypackage`
 - `Tools/Dissonance For FMOD Playback.unitypackage`
 - `VFX/Particles/Elemental Spells Full Pack VFX.unitypackage`
 - `VFX/Particles/EpicToonFX.unitypackage`
 - `Tools/FMOD_InstrumentalEventPlayback.unitypackage`
 - `Tools/Favorites Tabs.unitypackage`
+- `VFX/Flat Kit Toon Shading and Water Unity2022[4.7.6].unitypackage`
+- `Tools/Flexalon Pro 3D UI Layouts.unitypackage`
+- `VFX/Shaders/FogVolume.unitypackage`
 - `VFX/Particles/Glowing orbs pack.unitypackage`
 - `HORROR SYSTEM.unitypackage`
+- `VFX/Shaders/Interactive_Dissolve_Effects_2.0.unitypackage`
 - `Interface and Collectible Sounds - Lite Edition 2 v2.unitypackage`
 - `Kenney Game Assets All-in-1.zip`
 - `LayerLab.unitypackage`
 - `Templates/MFPS Mobile.unitypackage`
+- `VFX/Shaders/MK Toon - Stylized Shader.unitypackage`
+- `Tools/Maintainer 2.unitypackage`
+- `VFX/Shaders/Mat_Overlay.unitypackage`
 - `HDRPBuilt-inURP Medieval Fantasy Ruins - Dark Forest Environment.unitypackage`
 - `3D/Animations/Kevin Iglesias/Mega Animations Pack.unitypackage`
 - `MicroSplat.unitypackage`
 - `Audio/Mobile Games Audio Bundle.unitypackage`
 - `3D/ModernCity_HDRP_2021.3.6f1.unitypackage`
 - `3D/ModernCity_URP_2021.3.6f1.unitypackage`
+- `3D/Modular Cyber Racing Cars - Low Poly 3D Models.unitypackage`
 - `3D/Modular Stylized Character 1.unitypackage`
 - `3D/Modular Stylized Medieval Town (Unity 2021.3.6f1).unitypackage`
 - `3D/Synty/POLYGON - Pirates Pack.unitypackage`
@@ -90,7 +107,10 @@ Thresholds are byte literals: `broken < 10,000 B`, `suspicious < 100,000 B`. Sta
 - `Tools/Pixelate - Pixel art converter.unitypackage`
 - `Tools/RPG Farming Kit.unitypackage`
 - `Tools/RaycastPro.unitypackage`
+- `Tools/RealBlend - Mesh Painting Creation.unitypackage`
+- `Tools/ReplaceWithPrefabs.zip`
 - `Templates/Retro Horror Template.unitypackage`
+- `Tools/Rope Swinging System.unitypackage`
 - `3D/SIMPLE_Farm_Source_Files.zip`
 - `VFX/Particles/SUPER Magic FX - 929 VFX.unitypackage`
 - `3D/Sci-Fi Scenes Pack.unitypackage`
@@ -107,12 +127,16 @@ Thresholds are byte literals: `broken < 10,000 B`, `suspicious < 100,000 B`. Sta
 - `VFX/Particles/Stylized Toon Projectiles Hits Volume 3.unitypackage`
 - `3D/Stylized Viking Hut (Unity 2021.3.6f1).unitypackage`
 - `3D/Tank Assets.zip`
+- `Audio/The Complete UI Sound Effects Library.unitypackage`
 - `3D/Toon RTS Pack.unitypackage`
 - `3D/Toon RTS Units - Elves.unitypackage`
 - `Transitions Plus.unitypackage`
 - `3D/Animations/WM_Animset/TwinDaggers_Animset v2.unitypackage`
 - `3D/Animations/ULTIMATE ANIMATION COLLECTION.unitypackage`
+- `Tools/UModeler X Plus (version X Plus 1.0.29 - Hub 1.1.4).unitypackage`
+- `3D/Ultimate Jurassic Pack Dinosaurs v2022.unitypackage`
 - `3D/Ultimate Low Poly Mining Cave Blacksmith Pack - Ores Gems Props Tools.unitypackage`
+- `Tools/UnityHFSM-v2.3.0.zip`
 - `Tools/VoiceGPT.unitypackage`
 - `Tools/Voxel Destruction Pro.unitypackage`
 - `Tools/Voxelica - Voxel Engine.unitypackage`
@@ -140,9 +164,9 @@ These filenames carry no version; the parent folder is the only record.
 
 ## Store resolution
 
-- id-verified: **720** / 834 store-eligible
+- id-verified: **720** / 875 store-eligible
 - attempted but unresolved: **109**
-- not yet searched: **5** (no lookup performed — a later run will attempt these; do NOT hand-write overrides for them)
+- not yet searched: **46** (no lookup performed — a later run will attempt these; do NOT hand-write overrides for them)
 
 ### Needs a manual override (109)
 

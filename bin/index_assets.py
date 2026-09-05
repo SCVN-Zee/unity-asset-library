@@ -13,16 +13,17 @@ resolved absolute path, never by name.
 
 The vault root comes from ../config.json ("vault_root"); --root overrides it for
 one run and --state relocates the state directory (tests pass both to sandbox).
-State lives in this repo's state/, never inside the vault. index.html and
-assets.csv go to the configured output dir — config.json "output_dir",
-resolved relative to this repo — falling back to the vault root.
+State lives in this repo's state/, never inside the vault. assets.csv and
+review-queue.md are generated outputs; React/Electron is the supported viewer.
 
 Usage:
     python3 index_assets.py scan          # write state/assets.json
-    python3 index_assets.py emit          # write index.html + assets.csv + review-queue.md
+    python3 index_assets.py emit          # write assets.csv + review-queue.md
     python3 index_assets.py scan emit
 """
 
+import contextlib
+import fcntl
 import argparse
 import csv
 import json
@@ -523,6 +524,41 @@ def build(scanned):
 # emit
 # ---------------------------------------------------------------------------
 
+class StateWriteBusy(RuntimeError):
+    """A non-blocking state lock could not be acquired."""
+
+
+@contextlib.contextmanager
+def state_write_lock(index_dir, command="cli", blocking=True, already_held=False):
+    """Serialize every state snapshot writer across CLI and server processes.
+
+    CLI callers block so update/enrich/emit cannot race a server job. Server
+    callers use blocking=False for a fast HTTP 409, while subprocesses spawned
+    under the server's held lock pass already_held=True to avoid self-deadlock.
+    """
+    if already_held:
+        yield
+        return
+    os.makedirs(index_dir, exist_ok=True)
+    fh = open(os.path.join(index_dir, "state-write.lock"), "a")
+    acquired = False
+    try:
+        flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
+        try:
+            fcntl.flock(fh.fileno(), flags)
+            acquired = True
+        except BlockingIOError as exc:
+            raise StateWriteBusy(f"{command}: another state writer is active") from exc
+        yield
+    finally:
+        if acquired:
+            try:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+        fh.close()
+
+
 def write_atomic(path, text):
     """tmp -> fsync -> os.replace, so a crash can never truncate the file."""
     directory = os.path.dirname(os.path.abspath(path)) or "."
@@ -540,17 +576,21 @@ def write_atomic(path, text):
         raise
 
 
-def safe_json(obj):
-    """JSON that cannot break out of a <script> block in any tokenizer form.
 
-    Escaping the literal '</script>' is insufficient: the HTML5 script-data end-tag
-    match is case-insensitive and also terminates on '</script' followed by
-    whitespace or '/'. Escaping '<' itself closes all of those forms at once.
-    """
-    s = json.dumps(obj, ensure_ascii=False, sort_keys=True)
-    return (s.replace("<", "\\u003c").replace(">", "\\u003e")
-             .replace("&", "\\u0026")
-             .replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"))
+
+def annotate_pending(data, queue_path):
+    """Mark assets still waiting in the pending enrichment queue."""
+    keys = set()
+    if os.path.exists(queue_path):
+        try:
+            with open(queue_path, encoding="utf-8") as fh:
+                keys = {entry["asset_key"] for entry in json.load(fh).get("pending", [])}
+        except (ValueError, KeyError, TypeError):
+            print(f"emit: {os.path.basename(queue_path)} unreadable — pending flags skipped")
+    for asset in data.get("assets", []):
+        if asset["asset_key"] in keys:
+            asset["pending_enrichment"] = True
+    return data
 
 
 def emit_csv(data, path):
@@ -683,940 +723,6 @@ def emit_review_queue(data, path):
     return len(dups)
 
 
-HTML_TEMPLATE = r"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https://assetstorev1-prd-cdn.unity3d.com data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
-<title>Unity Asset Index</title>
-<style>
-:root{
---bg:#fafafa;--surface:#ffffff;--sunk:#f4f4f5;
---ink:#18181b;--ink-2:#52525b;--ink-3:#71717a;
---line:#e4e4e7;--accent:#2563eb;--warn:#b45309;
---head:rgba(250,250,250,.82);--shadow:0 10px 30px rgba(24,24,27,.10);
---r:8px;--r-sm:5px;--eo:cubic-bezier(.23,1,.32,1)}
-@media(prefers-color-scheme:dark){:root{
---bg:#0c0c0e;--surface:#161619;--sunk:#09090b;
---ink:#fafafa;--ink-2:#a1a1bb;--ink-3:#8b8b98;
---line:#27272a;--accent:#3b82f6;--warn:#d97706;
---head:rgba(12,12,14,.80);--shadow:0 10px 30px rgba(0,0,0,.50)}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.5 ui-sans-serif,-apple-system,"SF Pro Text",system-ui,sans-serif}
-::focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-
-header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);
-padding:10px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-@supports((backdrop-filter:blur(4px)) or (-webkit-backdrop-filter:blur(4px))){
-header{background:var(--head);backdrop-filter:blur(10px) saturate(1.4);-webkit-backdrop-filter:blur(10px) saturate(1.4)}}
-h1{font:600 15px/1 inherit;margin:0;letter-spacing:.01em;white-space:nowrap}
-#q{flex:1;min-width:200px;height:30px;padding:0 10px;border:1px solid var(--line);border-radius:var(--r-sm);
-background:var(--surface);color:var(--ink);font:inherit;transition:border-color .15s var(--eo),box-shadow .15s var(--eo)}
-#q:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.15)}
-.count{color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap}
-.stamp{color:var(--ink-3);font-size:11px;white-space:nowrap;font-variant-numeric:tabular-nums}
-.stamp.stale{color:var(--warn);font-weight:600}
-.controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%}
-.controls .sep{flex:1}
-button,select{font:inherit;font-size:12px;padding:5px 10px;border:1px solid var(--line);background:var(--surface);
-color:var(--ink);border-radius:var(--r-sm);cursor:pointer;transition:border-color .15s var(--eo),background .15s var(--eo),transform .1s var(--eo)}
-button:active{transform:scale(.97)}
-button.on{background:var(--accent);border-color:var(--accent);color:#fff}
-@media(hover:hover) and (pointer:fine){
-button:hover:not(.on):not(.chip.on),select:hover{border-color:var(--ink-3)}}
-
-#density{display:inline-flex;border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden}
-#density button{border:0;border-radius:0;padding:5px 9px;background:var(--surface);color:var(--ink-2)}
-#density button+button{border-left:1px solid var(--line)}
-#density button.on{background:var(--accent);color:#fff}
-body.list #density{display:none}
-
-.chip{display:inline-flex;gap:5px;align-items:center;font-size:11px;padding:3px 8px;border:1px solid var(--line);
-border-radius:var(--r-sm);background:var(--surface);color:var(--ink-2)}
-.chip .n{font-variant-numeric:tabular-nums;opacity:.65}
-.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
-.chip.warn.on{background:var(--warn);border-color:var(--warn);color:#fff}
-@media(hover:hover) and (pointer:fine){.chip:hover:not(.on){border-color:var(--ink-3);color:var(--ink)}}
-
-main{display:flex;gap:16px;align-items:flex-start;padding:14px 16px 40px}
-#facets{width:230px;flex:0 0 230px;position:sticky;top:96px;max-height:calc(100vh - 112px);overflow-y:auto}
-#facetbox>summary{display:none}
-aside section{margin-bottom:18px}
-aside h2{font:600 11px/1 inherit;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-3);margin:0 0 6px}
-.frow{display:flex;align-items:center;gap:1px}
-.caret{flex:none;width:18px;height:24px;padding:0;border:0;background:none;color:var(--ink-3);cursor:pointer;
-transition:transform .15s var(--eo)}
-.caret.open{transform:rotate(90deg)}
-@media(hover:hover) and (pointer:fine){.caret:hover{color:var(--ink)}}
-.facet{display:block;flex:1;width:100%;min-width:0;text-align:left;border:0;background:none;padding:3px 6px;
-border-radius:var(--r-sm);color:var(--ink);font-size:12px;cursor:pointer}
-.facet:hover{background:var(--sunk)}
-.facet.on{background:var(--accent);color:#fff}
-.facet .n{float:right;color:var(--ink-3);font-variant-numeric:tabular-nums}
-.facet.on .n{color:#fff}
-.facet.lvl1{padding-left:16px}
-.facet.lvl2{padding-left:28px}
-.facet.lvl3{padding-left:40px}
-.facet.lvl4{padding-left:52px}
-.more{border:0;background:none;color:var(--accent);font-size:11px;padding:4px 6px;cursor:pointer}
-.more:hover{text-decoration:underline}
-
-#content{flex:1;min-width:0}
-.fbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 12px}
-.fchip{display:inline-flex;gap:4px;align-items:center;font-size:11px;padding:3px 4px 3px 8px;
-border:1px solid var(--accent);border-radius:var(--r-sm);background:var(--surface);color:var(--accent)}
-.fchip .x{border:0;background:none;color:inherit;font-size:12px;line-height:1;padding:1px 4px;cursor:pointer}
-.fchip .x:hover{text-decoration:underline}
-.clearall{border:0;background:none;color:var(--ink-3);font-size:11px;padding:3px 6px;cursor:pointer;text-decoration:underline}
-.clearall:hover{color:var(--ink)}
-
-.pending{color:var(--ink-3);font-style:italic}
-.local{font-size:11px;color:var(--ink-3);word-break:break-all}
-td .pending{font-size:11px}
-
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px}
-.grid.d-s{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
-.grid.d-l{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
-.card{width:100%;text-align:left;font:inherit;color:var(--ink);cursor:pointer;border:1px solid var(--line);
-border-radius:var(--r);background:var(--surface);padding:8px;display:flex;flex-direction:column;gap:5px;overflow:hidden;
-transition:transform .16s var(--eo),box-shadow .16s var(--eo),border-color .16s var(--eo)}
-@media(hover:hover) and (pointer:fine){
-.card:hover{transform:translateY(-2px);border-color:var(--ink-3);box-shadow:var(--shadow)}}
-.card:active{transform:scale(.98)}
-.card.pick{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
-.card .th{position:relative;aspect-ratio:16/10;background:var(--sunk);border:1px solid var(--line);
-border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;color:var(--ink-3);overflow:hidden}
-.card .th img{width:100%;height:100%;object-fit:cover}
-.card .th .ph{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);padding:0 6px;text-align:center}
-.card .vcount{position:absolute;right:4px;bottom:4px;font-size:10px;padding:1px 5px;border-radius:var(--r-sm);
-background:rgba(24,24,27,.72);color:#fff;font-variant-numeric:tabular-nums}
-.card .nm{font-weight:600;font-size:13px;line-height:1.3;word-break:break-word;text-wrap:balance;display:-webkit-box;
--webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.card .mt{display:flex;justify-content:space-between;gap:8px;color:var(--ink-2);font-size:12px;font-variant-numeric:tabular-nums}
-.card .au{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.card .sz{flex:none;color:var(--ink-3)}
-
-.tags{display:flex;flex-wrap:wrap;gap:3px}
-.tag{font-size:11px;padding:0 5px;border:1px solid var(--line);border-radius:var(--r-sm);color:var(--ink-3)}
-.badge{font-size:11px;padding:0 5px;border-radius:var(--r-sm);background:var(--sunk);color:var(--ink-3);align-self:flex-start}
-.badge.warn{color:var(--warn)}
-.row{display:flex;gap:5px;flex-wrap:wrap;margin-top:auto;padding-top:4px}
-.row button,.row a{font-size:11px;padding:2px 7px;border:1px solid var(--line);border-radius:var(--r-sm);color:var(--ink);
-text-decoration:none;background:var(--bg);cursor:pointer}
-
-.empty{padding:90px 20px;text-align:center;color:var(--ink-3)}
-.empty .eh{font-size:15px;font-weight:600;color:var(--ink-2);animation:fade-in .2s var(--eo)}
-.empty .es{margin:6px 0 14px;animation:fade-in .2s var(--eo)}
-@keyframes fade-in{from{opacity:0}}
-
-#detail{display:none;width:340px;flex:0 0 340px;position:sticky;top:96px;max-height:calc(100vh - 112px);overflow-y:auto;
-background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px}
-#detail:focus{outline:none}
-#detail.on{display:block;animation:panel-in .22s var(--eo)}
-@keyframes panel-in{from{opacity:0;transform:translateX(10px)}}
-#detail .dhd{display:flex;gap:8px;align-items:flex-start;justify-content:space-between;margin:0 0 8px}
-#detail .dnm{font:600 15px/1.3 inherit;color:var(--ink);margin:0;word-break:break-word}
-#detail .pnav{display:flex;gap:3px;flex:none}
-#detail .pbtn{padding:2px 8px;font-size:13px;line-height:1.2}
-#detail .dth{margin:2px 0 10px;border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden;aspect-ratio:16/10;background:var(--sunk)}
-#detail .dth img{width:100%;height:100%;object-fit:cover;display:block}
-#detail h2{margin:12px 0 6px;font-size:12px}
-#detail .ver{border-top:1px solid var(--line);padding:6px 0}
-.crumb{font-size:12px;color:var(--ink-2);display:flex;flex-wrap:wrap;gap:3px;align-items:baseline}
-.crumb .sep{color:var(--ink-3)}
-
-table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
-td,th{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left;font-size:12px;vertical-align:top}
-th{color:var(--ink-3);font-weight:600;white-space:nowrap;background:var(--surface)}
-th.sortable{cursor:pointer;color:var(--ink-2)}
-th.sortable:hover{color:var(--ink)}
-#out tbody tr{cursor:pointer}
-#out tbody tr:hover{background:var(--sunk)}
-#out tbody tr.cur{box-shadow:inset 2px 0 0 var(--ink-3)}
-#out tbody tr.pick{background:var(--sunk);box-shadow:inset 2px 0 0 var(--accent)}
-.wrap{overflow-x:auto}
-.sentinel{height:1px}
-
-@media(max-width:1100px){#detail.on{position:fixed;top:0;right:0;bottom:0;width:360px;flex:none;max-height:none;
-z-index:6;border-radius:0;border-width:0;box-shadow:var(--shadow)}}
-@media(max-width:760px){main{flex-direction:column}
-#facets{width:100%;flex:1;position:static;max-height:none}
-#facetbox>summary{display:list-item;cursor:pointer;font:600 11px/1 inherit;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-3);padding:4px 0}
-#detail.on{width:100%;left:0}}
-
-@media(prefers-reduced-motion:reduce){
-#detail.on{animation:none}
-.card,.caret,button,#q{transition:none}
-.card:hover,.card:active,button:active{transform:none}
-.empty .eh,.empty .es{animation:none}}
-</style>
-</head>
-<body>
-<header>
-  <h1>Unity Asset Index</h1>
-  <input id="q" type="search" placeholder="Search name, author, tag, path" autocomplete="off" spellcheck="false">
-  <span class="count" id="count" aria-live="polite"></span>
-  <span class="stamp" id="generated"></span>
-  <div class="controls">
-    <button id="view">List view</button>
-    <span id="density" role="group" aria-label="Card size">
-      <button type="button" data-d="s" title="Small cards">S</button><button type="button" data-d="m" title="Medium cards">M</button><button type="button" data-d="l" title="Large cards">L</button>
-    </span>
-    <select id="sort" aria-label="Sort"><option value="name">Name</option><option value="size">Size</option><option value="rating">Rating</option><option value="date">Date</option></select>
-    <span class="sep"></span>
-    <span id="flagchips" role="group" aria-label="Filter by flag"></span>
-  </div>
-</header>
-<main>
-  <aside id="facets"><details id="facetbox" open><summary>Filters</summary>
-    <div id="facetlist"></div></details></aside>
-  <div id="content">
-    <div id="filterbar"></div>
-    <div id="out"></div>
-  </div>
-  <aside id="detail" tabindex="-1" aria-label="Asset detail"></aside>
-</main>
-
-<script type="application/json" id="data">__DATA__</script>
-<script>
-(function(){
-"use strict";
-var DATA = JSON.parse(document.getElementById("data").textContent);
-var assets = DATA.assets, grid = true, sortBy = "name", density = "m";
-var selected = null, origin = null, pendingKey = null;
-// Chunked append, not virtualization: at 835 items the ceiling is ~5,000 nodes,
-// and scroll math plus height estimation would buy nothing for that.
-var CHUNK = 100, view = [], cursor = 0, obs = null, gen = 0;
-var query = "", rowIdx = -1, qt;
-var SORTABLE = {"Name (store)":"name", "Size":"size"};
-var sel = {category:new Set(), tag:new Set(), author:new Set(), flag:new Set()};
-// Collapsed-by-default category branches and per-family facet expansion. Session
-// scoped on purpose: a stale expanded tree is noise after the library moves.
-var openCats = new Set(), showAll = {tag:false, author:false};
-// View preferences survive reloads. localStorage can throw on file:// in some
-// configurations, so every touch is guarded and the default is always usable.
-var prefs = {
-  get:function(k,d){try{var v=localStorage.getItem("uai:"+k);return v==null?d:v;}catch(e){return d;}},
-  set:function(k,v){try{localStorage.setItem("uai:"+k,v);}catch(e){}}};
-grid = prefs.get("view","grid")!=="list";
-sortBy = prefs.get("sort","name");
-if(["name","size","rating","date"].indexOf(sortBy)<0)sortBy="name";
-density = prefs.get("density","m");
-if(["s","m","l"].indexOf(density)<0)density="m";
-
-function el(t, cls, txt){var n=document.createElement(t); if(cls)n.className=cls;
-  if(txt!==undefined&&txt!==null)n.textContent=String(txt); return n;}
-function bytes(b){if(!b)return "";var u=["B","KB","MB","GB"],i=0,v=b;
-  while(v>=1024&&i<u.length-1){v/=1024;i++;}return v.toFixed(i?1:0)+" "+u[i];}
-function latest(a){for(var i=0;i<a.versions.length;i++){if(a.versions[i].latest)return a.versions[i];}
-  return a.versions[0];}
-function totalSize(a){return a.versions.reduce(function(s,v){return s+(v.size_bytes||0);},0);}
-function flagsOf(a){var f=[];
-  if(a.non_store)f.push("non-store");
-  if(a.pending_enrichment)f.push("pending-enrichment");
-  a.versions.forEach(function(v){
-    if(v.integrity)f.push(v.integrity);
-    if(v.duplicate&&v.duplicate.verdict==="duplicate")f.push("duplicate");
-    if(v.duplicate&&v.duplicate.verdict==="variant")f.push("variant");});
-  return f;}
-
-function levels(a){
-  var L=(a.category&&a.category.levels)||[];
-  return L.length?L:(a.category&&a.category.path?a.category.path.split("/"):[]);}
-function catPath(a){var L=levels(a); return L.length?L.join("/"):"";}
-
-// Built once per asset, not once per matches() call: facetPool adds four extra passes
-// over all 835 assets per render, and rebuilding this string five times was the cost.
-function hay(a){
-  if(a._hay===undefined)a._hay=(a.name+" "+(a.local_name||"")+" "+(a.author||"")+" "+
-    a.tags.join(" ")+" "+catPath(a)+" "+(a.store||"")+" "+
-    a.versions.map(function(v){return v.file;}).join(" ")).toLowerCase();
-  return a._hay;}
-
-// A selected facet is a path PREFIX, so picking "3D" also matches
-// "3D/Environments/Fantasy". Store enrichment supplies levels 2 and 3; before it runs
-// only level 1 exists, and the tree simply has no children to expand.
-function inCategory(a, prefix){
-  if(prefix==="(none)")return levels(a).length===0;
-  var p=catPath(a);
-  return p===prefix||p.indexOf(prefix+"/")===0;}
-
-// `except` names one facet family to ignore. Only facetPool passes it: the result
-// grid always applies every filter.
-function matches(a, q, except){
-  if(except!=="category"&&sel.category.size){
-    var any=false;
-    sel.category.forEach(function(p){if(inCategory(a,p))any=true;});
-    if(!any)return false;}
-  if(except!=="author"&&sel.author.size&&!sel.author.has(a.author||"(unknown)"))return false;
-  if(except!=="tag"&&sel.tag.size){for(var t of sel.tag){if(a.tags.indexOf(t)<0)return false;}}
-  if(except!=="flag"&&sel.flag.size){var f=flagsOf(a);
-    for(var g of sel.flag){if(f.indexOf(g)<0)return false;}}
-  if(!q)return true;
-  return q.split(/\s+/).every(function(w){return hay(a).indexOf(w)>=0;});}
-
-// Every path prefix gets its own count, so a 3-level tree reports totals at each depth.
-// Standard faceted refinement: when counting family F, apply every filter EXCEPT F's
-// own selections. Counting a family under its own picks drops every sibling to zero.
-function facetPool(family){
-  return assets.filter(function(a){return matches(a,query,family);});}
-
-function categoryTree(){
-  var counts={};
-  facetPool("category").forEach(function(a){
-    var L=levels(a);
-    if(!L.length){counts["(none)"]=(counts["(none)"]||0)+1; return;}
-    for(var i=0;i<L.length;i++){
-      var p=L.slice(0,i+1).join("/");
-      counts[p]=(counts[p]||0)+1;}});
-  return counts;}
-
-// Zero arity on purpose. Two tests slice the template on this declaration's exact
-// text, so adding a parameter makes the split raise IndexError and the older test
-// errors instead of failing. Filtered inputs come from module scope via facetPool.
-function facetCounts(){
-  var c={tag:{},author:{},flag:{}};
-  facetPool("author").forEach(function(a){
-    var au=a.author||"(unknown)"; c.author[au]=(c.author[au]||0)+1;});
-  facetPool("tag").forEach(function(a){
-    a.tags.forEach(function(t){c.tag[t]=(c.tag[t]||0)+1;});});
-  // A duplicate group is one asset with two flagged versions, so undeduped counting
-  // reported 20 duplicates where there were 10.
-  facetPool("flag").forEach(function(a){
-    flagsOf(a).filter(function(x,i,s){return s.indexOf(x)===i;})
-      .forEach(function(f){c.flag[f]=(c.flag[f]||0)+1;});});
-  return c;}
-
-// Header chips are the flags facet: same Set, same counts, one fewer sidebar section.
-var CHIPDEFS = [["broken",1],["suspicious",1],["duplicate",0],["variant",0],
-                ["pending-enrichment",0],["non-store",0]];
-function renderChips(counts){
-  var host=document.getElementById("flagchips");
-  host.textContent="";
-  CHIPDEFS.forEach(function(def){
-    var f=def[0], n=counts.flag[f]||0;
-    if(!n&&!sel.flag.has(f))return;
-    var b=el("button","chip"+(def[1]?" warn":"")+(sel.flag.has(f)?" on":""));
-    b.setAttribute("type","button");
-    b.setAttribute("aria-pressed",sel.flag.has(f)?"true":"false");
-    b.setAttribute("title","Filter: "+f);
-    b.appendChild(el("span",null,f));
-    b.appendChild(el("span","n",n));
-    b.addEventListener("click",function(){
-      sel.flag.has(f)?sel.flag.delete(f):sel.flag.add(f); render();});
-    host.appendChild(b);});}
-
-function anySel(){return sel.category.size||sel.tag.size||sel.author.size||sel.flag.size;}
-
-// Active filters rendered at the content site, not only in the rail: the state that
-// shapes the grid should be visible next to the grid, and removable in one click.
-function renderFilterBar(){
-  var host=document.getElementById("filterbar");
-  host.textContent="";
-  if(!anySel())return;
-  var bar=el("div","fbar");
-  [["category",sel.category],["tag",sel.tag],["author",sel.author],["flag",sel.flag]]
-  .forEach(function(fm){
-    fm[1].forEach(function(v){
-      var label=fm[0]==="category"?(v==="(none)"?"uncategorized":v.split("/").pop()):v;
-      var c=el("span","fchip");
-      c.appendChild(el("span",null,label));
-      c.setAttribute("title",fm[0]+": "+v);
-      var x=el("button","x","×");
-      x.setAttribute("type","button");
-      x.setAttribute("aria-label","Remove filter "+label);
-      x.addEventListener("click",function(){fm[1].delete(v); render();});
-      c.appendChild(x);
-      bar.appendChild(c);});});
-  var cl=el("button","clearall","Clear all");
-  cl.setAttribute("type","button");
-  cl.addEventListener("click",clearAll);
-  bar.appendChild(cl);
-  host.appendChild(bar);}
-
-function clearAll(){
-  sel.category.clear(); sel.tag.clear(); sel.author.clear(); sel.flag.clear();
-  var box=document.getElementById("q");
-  box.value="";
-  openCats.clear();
-  render();
-  box.focus();}
-
-// Branches expand when opened by hand or when they contain a selection, so a deep
-// pick is always visible without walking the whole tree.
-function selectedInSub(p){
-  var any=false;
-  sel.category.forEach(function(s){if(s===p||s.indexOf(p+"/")===0)any=true;});
-  return any;}
-
-function renderFacets(tree, counts){
-  var host=document.getElementById("facetlist");
-  // The active facet button is about to be destroyed and rebuilt. Remember it by
-  // label so focus can land on its replacement instead of falling to <body>.
-  var live=document.activeElement, mark=null;
-  if(live&&live.className&&live.className.indexOf("facet")===0)
-    mark=live.getAttribute("title")||live.firstChild.textContent;
-  host.textContent="";
-
-  var sec=el("section"); sec.appendChild(el("h2",null,"Category"));
-  var kids={};
-  Object.keys(tree).sort().forEach(function(p){
-    if(p==="(none)")return;
-    var parent=p.split("/").slice(0,-1).join("/");
-    (kids[parent]=kids[parent]||[]).push(p);});
-  var branch=function(parent,depth){
-    (kids[parent]||[]).forEach(function(p){
-      var hasKids=!!kids[p];
-      var isOpen=openCats.has(p)||selectedInSub(p);
-      var row=el("div","frow");
-      if(hasKids){
-        var caret=el("button","caret"+(isOpen?" open":""));
-        caret.setAttribute("type","button");
-        caret.setAttribute("aria-expanded",isOpen?"true":"false");
-        caret.setAttribute("aria-label",(isOpen?"Collapse ":"Expand ")+p);
-        caret.textContent="›";
-        caret.addEventListener("click",function(){
-          openCats.has(p)?openCats.delete(p):openCats.add(p); render();});
-        row.appendChild(caret);}
-      var b=el("button","facet lvl"+depth+(sel.category.has(p)?" on":""));
-      b.appendChild(el("span",null,p.split("/").pop()));
-      b.appendChild(el("span","n",tree[p]));
-      b.setAttribute("title",p);
-      b.addEventListener("click",function(){
-        sel.category.has(p)?sel.category.delete(p):sel.category.add(p); render();});
-      row.appendChild(b);
-      sec.appendChild(row);
-      if(isOpen)branch(p,depth+1);});};
-  branch("",0);
-  if(tree["(none)"]){
-    var row=el("div","frow");
-    var nb=el("button","facet lvl0"+(sel.category.has("(none)")?" on":""));
-    nb.appendChild(el("span",null,"(uncategorized)"));
-    nb.appendChild(el("span","n",tree["(none)"]));
-    nb.addEventListener("click",function(){
-      sel.category.has("(none)")?sel.category.delete("(none)"):sel.category.add("(none)"); render();});
-    row.appendChild(nb);
-    sec.appendChild(row);}
-  host.appendChild(sec);
-
-  [["Tags","tag"],["Author","author"]].forEach(function(pair){
-    var f=pair[1], keys=Object.keys(counts[f]);
-    if(!keys.length)return;
-    keys.sort(function(x,y){return counts[f][y]-counts[f][x]||x.localeCompare(y);});
-    var limit=showAll[f]?keys.length:15;
-    var s2=el("section"); s2.appendChild(el("h2",null,pair[0]));
-    keys.slice(0,limit).forEach(function(k){
-      var b=el("button","facet"+(sel[f].has(k)?" on":""));
-      b.appendChild(el("span",null,k));
-      b.appendChild(el("span","n",counts[f][k]));
-      b.addEventListener("click",function(){
-        sel[f].has(k)?sel[f].delete(k):sel[f].add(k); render();});
-      s2.appendChild(b);});
-    if(keys.length>15){
-      var m=el("button","more",showAll[f]?"Show less":"Show all ("+keys.length+")");
-      m.setAttribute("type","button");
-      m.addEventListener("click",function(){showAll[f]=!showAll[f]; render();});
-      s2.appendChild(m);}
-    host.appendChild(s2);});
-
-  if(mark){
-    var all=host.querySelectorAll(".facet");
-    for(var i=0;i<all.length;i++){
-      if((all[i].getAttribute("title")||all[i].firstChild.textContent)===mark){
-        all[i].focus(); break;}}}
-}
-
-// Remote or placeholder, nothing between. There is no local mirror left to fall
-// back to, so a missing thumbnail and a failed CDN fetch reach this same node.
-function thumbFallback(a){
-  var L=levels(a);
-  return el("span","ph",L.length?L[0]:"uncategorized");}
-
-function card(a){
-  // Four elements, one focusable. Everything else the card used to carry lives in
-  // detail(); a filtered grid of 835 was ~3,104 tab stops before that split.
-  var c=el("button","card"+(selected===a.asset_key?" pick":""));
-  c.setAttribute("type","button");
-  c.setAttribute("title",a.name);
-  c.setAttribute("aria-label",a.name);
-  var th=el("div","th");
-  if(a.thumbnail&&a.thumbnail.remote){var im=document.createElement("img");
-    im.setAttribute("src",a.thumbnail.remote); im.setAttribute("alt","");
-    im.setAttribute("loading","lazy"); im.setAttribute("decoding","async");
-    // Intrinsic CDN size. The container's aspect-ratio governs layout; these only let
-    // the browser reserve the box before any bytes arrive, so nothing shifts.
-    im.setAttribute("width","1950"); im.setAttribute("height","1300");
-    im.addEventListener("error",function(){
-      th.textContent=""; th.appendChild(thumbFallback(a));});
-    th.appendChild(im);}
-  else th.appendChild(thumbFallback(a));
-  if(a.versions.length>1)th.appendChild(el("span","vcount",a.versions.length+" versions"));
-  c.appendChild(th);
-  c.appendChild(el("div","nm",a.name));
-  var mt=el("div","mt");
-  mt.appendChild(el("span","au",a.author||"author pending"));
-  mt.appendChild(el("span","sz",bytes(totalSize(a))));
-  c.appendChild(mt);
-  c.addEventListener("click",function(){select(a.asset_key,c);});
-  return c;}
-
-// Duplicate membership is a panel count, not a card badge: that an asset shares a
-// size with another only matters once you are already looking at that asset.
-function dupGroups(a){
-  var files={}, out=[];
-  a.versions.forEach(function(v){files[v.file]=1;});
-  (DATA.duplicate_groups||[]).forEach(function(g){
-    if((g.members||[]).some(function(m){return files[m];}))out.push(g);});
-  return out;}
-
-function byKey(k){
-  for(var i=0;i<assets.length;i++){if(assets[i].asset_key===k)return assets[i];}
-  return null;}
-
-function badges(list){
-  var box=el("div","tags");
-  list.forEach(function(f){
-    box.appendChild(el("span","badge"+(f==="broken"||f==="suspicious"?" warn":""),f));});
-  return box;}
-
-function closePanel(){
-  var prev=document.querySelector("#out .card.pick");
-  if(prev)prev.className="card";
-  selected=null; detail(null);
-  paintRows(false);
-  syncHash();
-  // The close button was just destroyed, so focus would otherwise land on <body> and
-  // a keyboard user would restart from the top of the document.
-  var back=origin; origin=null;
-  if(back&&back.isConnected&&back.focus)back.focus();}
-
-// Selection is a module-scope asset_key, never a DOM reference, so Phase 4's chunked
-// append can rebuild every node underneath it without losing the panel.
-function select(key, node){
-  if(selected===key){closePanel(); return;}
-  openDetail(byKey(key), node);
-  if(node)node.className="card pick";}
-
-// Enter in table view always opens; it never toggles the row shut underneath itself.
-function openDetail(a, node){
-  var prev=document.querySelector("#out .card.pick");
-  if(prev)prev.className="card";
-  selected=a?a.asset_key:null;
-  origin=node||null;
-  detail(a||null);
-  paintRows(false);
-  syncHash();
-  // #out sits before #detail in DOM order, so without this the panel is ~835 tab
-  // stops away from the card that opened it.
-  if(a){var h=document.getElementById("detail"); h.focus();}}
-
-// Step through the current filter result without closing the panel: the common
-// "triage every duplicate" loop becomes two clicks instead of open-close-open.
-function stepSelection(dir){
-  if(!selected)return;
-  for(var i=0;i<view.length;i++){
-    if(view[i].asset_key===selected){
-      openDetail(view[(i+dir+view.length)%view.length], null);
-      return;}}}
-
-// Row state is painted from (selected, rowIdx), never mutated in place, so the two
-// cannot drift apart the way a directly-assigned class did.
-function paintRows(scroll){
-  var rows=document.querySelectorAll("#out tbody tr");
-  for(var i=0;i<rows.length;i++){
-    var cls=[];
-    if(i===rowIdx)cls.push("cur");
-    if(view[i]&&selected===view[i].asset_key)cls.push("pick");
-    rows[i].className=cls.join(" ");}
-  if(scroll&&rows[rowIdx])rows[rowIdx].scrollIntoView({block:"nearest"});}
-
-function moveRow(step){
-  if(!view.length)return;
-  rowIdx=Math.max(0,Math.min(view.length-1,rowIdx+step));
-  paintRows(true);}
-
-// Arrow-key walking for the grid. Column count comes from the first rendered row's
-// geometry, so it tracks the responsive auto-fill layout with no math of its own.
-// Focus jumps are keyboard-initiated: no animation, instant scroll.
-function gridNav(dx,dy){
-  var cards=document.querySelectorAll("#out .card");
-  if(!cards.length)return;
-  var idx=-1,i;
-  for(i=0;i<cards.length;i++){if(cards[i]===document.activeElement){idx=i;break;}}
-  if(idx<0){cards[0].focus(); return;}
-  var cols=1, top=cards[0].offsetTop;
-  for(i=1;i<cards.length;i++){if(cards[i].offsetTop===top)cols++; else break;}
-  var n=idx+dx+dy*cols;
-  if(n<0||n>=cards.length)return;
-  cards[n].focus();
-  cards[n].scrollIntoView({block:"nearest"});}
-
-function detail(a){
-  var host=document.getElementById("detail");
-  host.textContent="";
-  if(!a){host.className=""; return;}
-  host.className="on";
-  var v=latest(a);
-
-  var hd=el("div","dhd");
-  hd.appendChild(el("h2","dnm",a.name));
-  var nav=el("div","pnav");
-  var pb=el("button","pbtn","‹");
-  pb.setAttribute("type","button");
-  pb.setAttribute("title","Previous asset in results");
-  pb.setAttribute("aria-label","Previous asset in results");
-  pb.addEventListener("click",function(){stepSelection(-1);});
-  var nb=el("button","pbtn","›");
-  nb.setAttribute("type","button");
-  nb.setAttribute("title","Next asset in results");
-  nb.setAttribute("aria-label","Next asset in results");
-  nb.addEventListener("click",function(){stepSelection(1);});
-  var x=el("button",null,"close");
-  x.addEventListener("click",closePanel);
-  nav.appendChild(pb); nav.appendChild(nb); nav.appendChild(x);
-  hd.appendChild(nav);
-  host.appendChild(hd);
-
-  if(a.thumbnail&&a.thumbnail.remote){
-    var im=document.createElement("img");
-    im.setAttribute("src",a.thumbnail.remote); im.setAttribute("alt","");
-    im.setAttribute("loading","lazy"); im.setAttribute("decoding","async");
-    im.setAttribute("width","1950"); im.setAttribute("height","1300");
-    im.addEventListener("error",function(){im.parentNode&&im.parentNode.removeChild(im);});
-    var dth=el("div","dth"); dth.appendChild(im); host.appendChild(dth);}
-
-  if(a.local_name&&a.local_name!==a.name)
-    host.appendChild(el("div","local","on disk: "+a.local_name));
-  host.appendChild(el("div","mt",a.author||"author pending"));
-
-  // Full breadcrumb: all levels the store supplied, not just level 1.
-  var L=levels(a), bc=el("div","crumb");
-  if(L.length){L.forEach(function(seg,i){
-    if(i)bc.appendChild(el("span","sep","/"));
-    bc.appendChild(el("span",null,seg));});}
-  else bc.appendChild(el("span","pending","category pending"));
-  host.appendChild(bc);
-
-  if(a.rating)host.appendChild(el("div","mt","★ "+a.rating+
-    (a.reviews?" ("+a.reviews+")":"")+(a.price?" · $"+a.price:"")));
-  if(a.tags.length){var tg=el("div","tags");
-    a.tags.forEach(function(t){tg.appendChild(el("span","tag",t));});
-    host.appendChild(tg);}
-
-  var fl=flagsOf(a).filter(function(y,i,z){return z.indexOf(y)===i;});
-  if(fl.length)host.appendChild(badges(fl));
-  dupGroups(a).forEach(function(g){
-    host.appendChild(el("div","mt",
-      g.verdict+": "+g.members.length+" files, "+g.reason));});
-
-  host.appendChild(el("h2",null,"Versions"));
-  a.versions.forEach(function(y){
-    var vr=el("div","ver");
-    vr.appendChild(el("div","mt",(y.version?"v"+y.version:"no version")+
-      " · "+bytes(y.size_bytes)+(y.latest?" · latest":"")));
-    vr.appendChild(el("div","local",y.file));
-    var vf=[];
-    if(y.integrity)vf.push(y.integrity);
-    if(y.prerelease)vf.push("prerelease");
-    if(y.duplicate&&y.duplicate.verdict)vf.push(y.duplicate.verdict);
-    if(vf.length)vr.appendChild(badges(vf));
-    host.appendChild(vr);});
-
-  var row=el("div","row");
-  var open=document.createElement("a"); open.setAttribute("href",encodeURI("./"+v.file));
-  open.textContent="open"; row.appendChild(open);
-  var cp=el("button",null,"copy path");
-  cp.addEventListener("click",function(){
-    navigator.clipboard&&navigator.clipboard.writeText(v.file);
-    cp.textContent="copied"; setTimeout(function(){cp.textContent="copy path";},1200);});
-  row.appendChild(cp);
-  // The store slot is always present so the field is visibly accounted for whether or
-  // not enrichment has resolved it yet.
-  if(a.store){
-    var st=document.createElement("a"); st.setAttribute("href",a.store);
-    st.setAttribute("target","_blank"); st.setAttribute("rel","noreferrer");
-    st.textContent="store page"; row.appendChild(st);
-    var cs=el("button",null,"copy store URL");
-    cs.addEventListener("click",function(){
-      navigator.clipboard&&navigator.clipboard.writeText(a.store);
-      cs.textContent="copied"; setTimeout(function(){cs.textContent="copy store URL";},1200);});
-    row.appendChild(cs);
-  } else {
-    row.appendChild(el("span","pending",a.non_store?"not an Asset Store package"
-                                                  :"store link pending"));
-  }
-  if(a.resolution&&a.resolution.id_verified)
-    host.appendChild(el("div","local","store id verified"));
-  host.appendChild(row);}
-
-function setSort(key){
-  sortBy=key;
-  prefs.set("sort",key);
-  document.getElementById("sort").value=key;
-  render();}
-
-function table(list){
-  var wrap=el("div","wrap"), t=el("table"), hd=el("tr");
-  ["Name (store)","Name (on disk)","Author","Category (full path)","Version","Size",
-   "Files","Store URL","Package path"]
-    .forEach(function(h){
-      var th=el("th",null,h), key=SORTABLE[h];
-      if(key){
-        th.className="sortable";
-        th.setAttribute("tabindex","0");
-        th.setAttribute("role","button");
-        th.setAttribute("aria-sort",sortBy===key?"descending":"none");
-        th.addEventListener("click",function(){setSort(key);});
-        th.addEventListener("keydown",function(e){
-          if(e.key==="Enter"||e.key===" "){e.preventDefault(); setSort(key);}});}
-      hd.appendChild(th);});
-  t.appendChild(el("thead")).appendChild(hd);
-  var tb=el("tbody");
-  list.forEach(function(a,i){
-    var v=latest(a),r=el("tr");
-    r.addEventListener("click",function(e){
-      if(e.target.tagName==="A")return;   // let the store link do its own job
-      rowIdx=i; openDetail(a,r);});
-    [a.name,(a.local_name&&a.local_name!==a.name)?a.local_name:"-",
-     a.author||"-",catPath(a)||"-",v.version||"-",bytes(totalSize(a)),
-     a.versions.length].forEach(function(x){r.appendChild(el("td",null,x));});
-    var st=el("td");
-    if(a.store){var link=document.createElement("a");
-      link.setAttribute("href",a.store); link.setAttribute("target","_blank");
-      link.setAttribute("rel","noreferrer"); link.textContent=a.store; st.appendChild(link);}
-    else st.appendChild(el("span","pending",a.non_store?"n/a":"pending"));
-    r.appendChild(st);
-    r.appendChild(el("td",null,v.file));
-    tb.appendChild(r);});
-  t.appendChild(tb); wrap.appendChild(t); return wrap;}
-
-function appendChunk(g){
-  var end=Math.min(cursor+CHUNK,view.length);
-  for(var i=cursor;i<end;i++)g.appendChild(card(view[i]));
-  cursor=end;}
-
-function emptyState(){
-  var d=el("div","empty");
-  d.appendChild(el("div","eh","Nothing matches"));
-  d.appendChild(el("div","es","Try a different search, or remove some filters."));
-  var b=el("button",null,"Clear all filters");
-  b.setAttribute("type","button");
-  b.addEventListener("click",clearAll);
-  d.appendChild(b);
-  return d;}
-
-// The URL carries the whole view state, so a filtered result set or a single asset
-// can be pasted into a note or a review thread and reopened exactly.
-function syncHash(){
-  var p=[], q=document.getElementById("q").value.trim();
-  if(q)p.push("q="+encodeURIComponent(q));
-  if(sortBy!=="name")p.push("s="+sortBy);
-  if(!grid)p.push("v=list");
-  if(density!=="m")p.push("d="+density);
-  [["category","c"],["tag","t"],["author","a"],["flag","f"]].forEach(function(fm){
-    var vals=[];
-    sel[fm[0]].forEach(function(v){vals.push(v);});
-    if(vals.length)p.push(fm[1]+"="+encodeURIComponent(vals.join(";")));});
-  if(selected)p.push("k="+encodeURIComponent(selected));
-  var h=p.length?"#"+p.join("&"):"";
-  if(h===location.hash)return;
-  try{history.replaceState(null,"",h||location.pathname+location.search);}
-  catch(e){}}
-
-function applyHash(){
-  var h=location.hash.replace(/^#/,"");
-  if(h){
-    h.split("&").forEach(function(kv){
-      var i=kv.indexOf("="); if(i<0)return;
-      var k=kv.slice(0,i), v;
-      try{v=decodeURIComponent(kv.slice(i+1));}catch(e){v=kv.slice(i+1);}
-      if(k==="q")document.getElementById("q").value=v;
-      else if(k==="s"&&["name","size","rating","date"].indexOf(v)>=0)sortBy=v;
-      else if(k==="v"&&v==="list")grid=false;
-      else if(k==="d"&&["s","m","l"].indexOf(v)>=0)density=v;
-      else if(k==="k")pendingKey=v;
-      else if("ctaf".indexOf(k)>=0&&v){
-        var fam={c:"category",t:"tag",a:"author",f:"flag"}[k];
-        v.split(";").forEach(function(x){if(x)sel[fam].add(x);});}});}
-  document.getElementById("sort").value=sortBy;
-  document.getElementById("view").textContent=grid?"List view":"Grid view";
-  document.body.classList.toggle("list",!grid);
-  syncDensityButtons();}
-
-function syncDensityButtons(){
-  var host=document.getElementById("density");
-  var bs=host.querySelectorAll("button");
-  for(var i=0;i<bs.length;i++){
-    var on=bs[i].getAttribute("data-d")===density;
-    bs[i].className=on?"on":"";
-    bs[i].setAttribute("aria-pressed",on?"true":"false");}}
-
-function setDensity(d){
-  if(density===d)return;
-  density=d; prefs.set("density",d);
-  syncDensityButtons(); render();}
-
-function render(){
-  query=document.getElementById("q").value.trim().toLowerCase();
-  var list=assets.filter(function(a){return matches(a,query);});
-  list.sort(function(x,y){
-    if(sortBy==="size")return totalSize(y)-totalSize(x);
-    if(sortBy==="rating"){
-      // rating is a float on 552 assets; the other 283 sort last rather than as an
-      // implicit zero, which would bury them among the genuine 1-star packages.
-      var rx=x.rating,ry=y.rating;
-      if(rx==null&&ry==null)return x.name.localeCompare(y.name);
-      if(rx==null)return 1;
-      if(ry==null)return -1;
-      return ry-rx||x.name.localeCompare(y.name);}
-    if(sortBy==="date"){
-      // Populated on 214 of 861 versions. The old comparator coerced the other 75% to
-      // "" and sorted them into one indistinguishable block at an arbitrary end;
-      // nulls-last makes the coverage gap legible instead of silently wrong.
-      var dx=latest(x).release_date,dy=latest(y).release_date;
-      if(!dx&&!dy)return x.name.localeCompare(y.name);
-      if(!dx)return 1;
-      if(!dy)return -1;
-      return dy.localeCompare(dx);}
-    return x.name.localeCompare(y.name);});
-
-  // Reset the append cursor and drop the previous observer before anything is built,
-  // so a rapid filter change cannot leave a stale sentinel appending into a dead grid.
-  var mine=++gen;
-  if(obs){obs.disconnect(); obs=null;}
-  view=list; cursor=0; rowIdx=-1;
-  document.body.classList.toggle("list",!grid);
-
-  // The header always reports the full filtered total, independent of how many chunks
-  // have actually rendered, so chunking never reads as missing results. The byte
-  // total turns the grid into a disk-budget view at a glance.
-  var files=0, total=0;
-  list.forEach(function(a){files+=a.versions.length; total+=totalSize(a);});
-  var parts=[list.length+" / "+assets.length+" assets", files+" files"];
-  if(total)parts.push(bytes(total));
-  document.getElementById("count").textContent=parts.join(" · ");
-
-  var tree=categoryTree(), counts=facetCounts();
-  renderFacets(tree, counts);
-  renderChips(counts);
-  renderFilterBar();
-
-  var out=document.getElementById("out"); out.textContent="";
-  if(!list.length){out.appendChild(emptyState()); syncHash(); return;}
-  if(!grid){out.appendChild(table(list)); paintRows(false); syncHash(); return;}
-  var g=el("div","grid d-"+density); out.appendChild(g);
-  appendChunk(g);
-  if(cursor>=view.length){syncHash(); return;}
-  if(!window.IntersectionObserver){
-    while(cursor<view.length)appendChunk(g);
-    syncHash(); return;}
-  var sen=el("div","sentinel"); out.appendChild(sen);
-  obs=new IntersectionObserver(function(entries){
-    // disconnect() unregisters targets but does NOT drop entries already queued, so a
-    // superseded render's observer still gets one delivery. Without this guard it
-    // appends the new list into the old detached grid, advances the shared cursor past
-    // those items, and then disconnects whichever observer `obs` now points at.
-    if(mine!==gen)return;
-    if(!entries[0].isIntersecting)return;
-    appendChunk(g);
-    if(cursor>=view.length){obs.disconnect(); obs=null; out.removeChild(sen);}},
-    {rootMargin:"400px"});
-  obs.observe(sen);
-  syncHash();}
-
-// Manual-only triggering means a stale index is indistinguishable from a fresh one
-// unless we say so. This stamp is the whole mitigation for that trigger choice.
-(function(){
-  var stamp=document.getElementById("generated");
-  if(!stamp||!DATA.generated){return;}
-  var t=Date.parse(DATA.generated);
-  if(isNaN(t)){stamp.textContent="indexed "+DATA.generated; return;}
-  var days=Math.floor((Date.now()-t)/86400000);
-  var age=days<1?"today":days===1?"1 day ago":days+" days ago";
-  stamp.textContent="indexed "+age;
-  stamp.setAttribute("title",DATA.generated);
-  if(days>=7){stamp.className="stamp stale";}
-})();
-
-document.addEventListener("keydown",function(e){
-  var focused=document.activeElement, tag=focused?focused.tagName:"";
-  var typing=(tag==="INPUT"||tag==="SELECT"||tag==="TEXTAREA");
-  if(e.key==="/"&&!typing){
-    e.preventDefault(); document.getElementById("q").focus(); return;}
-  if(e.key==="Escape"){
-    var box=document.getElementById("q");
-    // Clear a live search first: it is the wider undo of the two.
-    if(box.value){clearTimeout(qt); box.value=""; render(); return;}
-    closePanel(); return;}
-  // [ and ] walk the panel through the current result set, matching its prev/next.
-  if((e.key==="["||e.key==="]")&&!typing&&selected){
-    e.preventDefault(); stepSelection(e.key==="["?-1:1); return;}
-  if(grid){
-    if(typing)return;
-    if(e.key==="ArrowRight"){e.preventDefault(); gridNav(1,0); return;}
-    if(e.key==="ArrowLeft"){e.preventDefault(); gridNav(-1,0); return;}
-    if(e.key==="ArrowDown"){e.preventDefault(); gridNav(0,1); return;}
-    if(e.key==="ArrowUp"){e.preventDefault(); gridNav(0,-1); return;}
-    return;}
-  if(typing)return;
-  if(e.key==="ArrowDown"){e.preventDefault(); moveRow(rowIdx<0?0:1); return;}
-  if(e.key==="ArrowUp"){e.preventDefault(); moveRow(-1); return;}
-  if(e.key==="Enter"&&rowIdx>=0){
-    e.preventDefault();
-    openDetail(view[rowIdx],document.querySelectorAll("#out tbody tr")[rowIdx]);}});
-// The rail is a disclosure only where it would otherwise eat the whole first screen.
-// This has to track the breakpoint, not sample it once: on desktop the summary is
-// display:none, so a rail left closed after a resize has no affordance to reopen it.
-var narrow=window.matchMedia&&window.matchMedia("(max-width:760px)");
-function syncRail(){document.getElementById("facetbox").open=!(narrow&&narrow.matches);}
-if(narrow){
-  syncRail();
-  if(narrow.addEventListener)narrow.addEventListener("change",syncRail);
-  else if(narrow.addListener)narrow.addListener(syncRail);}
-
-// Boot: hash first (it is the explicit request), stored prefs already applied above.
-applyHash();
-if(pendingKey){
-  var ka=byKey(pendingKey);
-  if(ka){selected=ka.asset_key; detail(ka);}
-  pendingKey=null;}
-document.getElementById("q").addEventListener("input",function(){
-  clearTimeout(qt); qt=setTimeout(render,120);});
-document.getElementById("sort").addEventListener("change",function(e){sortBy=e.target.value;prefs.set("sort",sortBy);render();});
-document.getElementById("view").addEventListener("click",function(e){
-  grid=!grid; e.target.textContent=grid?"List view":"Grid view"; prefs.set("view",grid?"grid":"list"); render();});
-render();
-var dbs=document.querySelectorAll("#density button");
-for(var di=0;di<dbs.length;di++){
-  (function(b){b.addEventListener("click",function(){setDensity(b.getAttribute("data-d"));});})(dbs[di]);}
-window.addEventListener("hashchange",function(){applyHash(); render();});
-})();
-</script>
-</body>
-</html>
-"""
-
-
-def annotate_pending(data, queue_path):
-    """Mark assets awaiting a web search. Read at emit time, not build time: `update`
-    writes the queue after scanning, so annotating in build() would land the flag on the
-    following run. A missing or malformed queue is a no-op, never a failed emit."""
-    keys = set()
-    if os.path.exists(queue_path):
-        try:
-            with open(queue_path, encoding="utf-8") as fh:
-                keys = {e["asset_key"] for e in json.load(fh).get("pending", [])}
-        except (ValueError, KeyError, TypeError):
-            print(f"emit: {os.path.basename(queue_path)} unreadable — pending flags skipped")
-    for asset in data.get("assets", []):
-        if asset["asset_key"] in keys:
-            asset["pending_enrichment"] = True
-    return data
-
-
-def emit_html(data, path):
-    write_atomic(path, HTML_TEMPLATE.replace("__DATA__", safe_json(data)))
 
 
 # ---------------------------------------------------------------------------
@@ -1795,14 +901,36 @@ def load_config():
     with open(os.path.join(repo_dir(), "config.json"), encoding="utf-8") as fh:
         return json.load(fh)
 
+def output_dir(root, cfg=None):
+    """Directory for generated CSV output. Configured "output_dir" resolves
+    against this repo; without one, output targets the vault root itself."""
+    if cfg is None:
+        cfg = load_config()
+    out_dir = cfg.get("output_dir")
+    if out_dir:
+        return os.path.abspath(os.path.join(repo_dir(), out_dir))
+    return root
 
-def main(argv=None):
+
+def main(argv=None, state_lock_held=False):
+    probe = argparse.ArgumentParser(add_help=False)
+    probe.add_argument("--state", default=None)
+    probe.add_argument("--state-lock-held", action="store_true")
+    probe_args, _ = probe.parse_known_args(argv)
+    held = state_lock_held or probe_args.state_lock_held
+    index_dir = os.path.abspath(probe_args.state) if probe_args.state else state_dir()
+    if held:
+        return _main_unlocked(argv)
+    with state_write_lock(index_dir, "index_assets", blocking=True):
+        return _main_unlocked(argv)
+def _main_unlocked(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("steps", nargs="+", choices=["scan", "emit", "update"])
     ap.add_argument("--root", default=None,
                     help="vault root override (default: config.json vault_root)")
     ap.add_argument("--state", default=None,
                     help="state dir override (default: repo state/)")
+    ap.add_argument("--state-lock-held", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
 
     cfg = {} if args.root else load_config()
@@ -1895,12 +1023,10 @@ def main(argv=None):
                 data = json.load(fh)
         data = annotate_pending(
             data, os.path.join(index_dir, "pending-enrichment.json"))
-        out_dir = cfg.get("output_dir")  # relative paths resolve against the repo
-        out_dir = os.path.abspath(os.path.join(repo_dir(), out_dir)) if out_dir else root
-        emit_html(data, os.path.join(out_dir, "index.html"))
+        out_dir = output_dir(root, cfg)
         rows = emit_csv(data, os.path.join(out_dir, "assets.csv"))
         emit_review_queue(data, os.path.join(index_dir, "review-queue.md"))
-        print(f"emit: index.html, assets.csv ({rows} rows), review-queue -> {index_dir}")
+        print(f"emit: assets.csv ({rows} rows), review-queue -> {index_dir}")
     return 0
 
 

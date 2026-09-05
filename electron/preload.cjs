@@ -1,0 +1,14 @@
+const { contextBridge, ipcRenderer } = require("electron");
+
+contextBridge.exposeInMainWorld("uai", {
+  getState: () => ipcRenderer.invoke("backend:state"),
+  getAssets: () => ipcRenderer.invoke("backend:assets"),
+  resync: () => ipcRenderer.invoke("backend:resync"),
+  cleanupApply: (planHash) => ipcRenderer.invoke("backend:cleanup-apply", planHash),
+  organizePlan: () => ipcRenderer.invoke("backend:organize-plan"),
+  organizeApply: (planHash) => ipcRenderer.invoke("backend:organize-apply", planHash),
+  enrichStart: () => ipcRenderer.invoke("backend:enrich-start"),
+  enrichCancel: () => ipcRenderer.invoke("backend:enrich-cancel"),
+  getJob: (jobId) => ipcRenderer.invoke("backend:job", jobId),
+  openExternal: (url) => ipcRenderer.invoke("shell:open-external", url),
+});

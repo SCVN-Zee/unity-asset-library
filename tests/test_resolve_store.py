@@ -987,6 +987,225 @@ class TestEnrichmentDoesNotMirror(unittest.TestCase):
             with self.subTest(parameter=dead):
                 self.assertNotIn(dead, params)
 
+class _FakePacer:
+    def __init__(self, base=0.0):
+        pass
+
+    def ok(self):
+        pass
+
+    def wait(self):
+        pass
+
+    def blocked(self):
+        return 0.0
+
+
+class _FakePool:
+    transports = [("fake", None, None)]
+
+    def __init__(self, session=None):
+        pass
+
+    def summary(self):
+        return {}
+
+
+class TestPendingResolveScope(unittest.TestCase):
+    """`resolve --pending` attempts only queued unresolved store assets. A missing,
+    empty, or malformed queue must attempt NOTHING — never widen into a full
+    store-eligible sweep. Non-store assets stay excluded even when queued."""
+
+    def setUp(self):
+        import tempfile
+        self.state = tempfile.mkdtemp()
+        self.patchers = []
+        self.started = False
+
+    def tearDown(self):
+        for p in reversed(self.patchers):
+            p.stop()
+
+    def _write(self, name, obj):
+        with open(os.path.join(self.state, name), "w", encoding="utf-8") as fh:
+            if isinstance(obj, str):
+                fh.write(obj)
+            else:
+                json.dump(obj, fh)
+
+    def _asset(self, key, non_store=False):
+        return {"asset_key": key, "name": key.upper(), "non_store": non_store}
+
+    def _run(self, args, assets, cache=None, queue=None):
+        import fcntl
+        from unittest import mock
+        import index_assets as ia
+        self._write("assets.json", {"assets": assets})
+        if cache is not None:
+            self._write("cache.json", cache)
+        if queue is not None:
+            self._write("pending-enrichment.json", queue)
+        attempted = []
+
+        def fake_resolve(asset, pool, session=None):
+            attempted.append(asset["asset_key"])
+            return {"status": "resolved", "id": "42", "transport": "fake"}
+
+        if not self.started:
+            self.patchers = [
+                mock.patch.object(ia, "state_dir", return_value=self.state),
+                mock.patch.object(rs, "resolve_asset", side_effect=fake_resolve),
+                mock.patch.object(rs, "fetch_detail", return_value={"author": "p"}),
+                mock.patch.object(rs, "Pacer", _FakePacer),
+                mock.patch.object(rs, "SearchPool", _FakePool),
+                mock.patch.object(rs.requests, "Session", lambda: None),
+                mock.patch.object(rs.time, "sleep", lambda s: None),
+            ]
+            for p in self.patchers:
+                p.start()
+            self.started = True
+            self.fcntl = fcntl
+        code = rs.main(["resolve"] + args)
+        return code, attempted
+
+    def test_pending_resume_attempts_only_queued_unresolved(self):
+        cache = {"resolved": {"b": {"status": "resolved"}}}
+        queue = {"pending": [{"asset_key": "a"}, {"asset_key": "b"}]}
+        code, attempted = self._run(
+            ["--pending", "--resume"],
+            [self._asset("a"), self._asset("b"), self._asset("c")],
+            cache=cache, queue=queue)
+        self.assertEqual(code, 0)
+        self.assertEqual(attempted, ["a"])
+
+    def test_pending_without_resume_retries_resolved_entry(self):
+        cache = {"resolved": {"b": {"status": "resolved"}}}
+        queue = {"pending": [{"asset_key": "a"}, {"asset_key": "b"}]}
+        code, attempted = self._run(
+            ["--pending"],
+            [self._asset("a"), self._asset("b")],
+            cache=cache, queue=queue)
+        self.assertEqual(code, 0)
+        self.assertEqual(attempted, ["a", "b"])
+
+    def test_empty_queue_attempts_zero(self):
+        code, attempted = self._run(
+            ["--pending", "--resume"], [self._asset("a")],
+            cache={"resolved": {}}, queue={"pending": []})
+        self.assertEqual(code, 0)
+        self.assertEqual(attempted, [])
+
+    def test_missing_queue_attempts_zero(self):
+        code, attempted = self._run(
+            ["--pending", "--resume"], [self._asset("a")], cache={"resolved": {}})
+        self.assertEqual(code, 0)
+        self.assertEqual(attempted, [])
+
+    def test_malformed_queue_attempts_zero(self):
+        code, attempted = self._run(
+            ["--pending", "--resume"], [self._asset("a")],
+            cache={"resolved": {}}, queue="{ not json")
+        self.assertEqual(code, 0)
+        self.assertEqual(attempted, [])
+
+    def test_no_pending_flag_keeps_full_scope(self):
+        queue = {"pending": [{"asset_key": "a"}]}
+        code, attempted = self._run(
+            ["--resume"], [self._asset("a"), self._asset("b"), self._asset("c")],
+            cache={"resolved": {}}, queue=queue)
+        self.assertEqual(code, 0)
+        self.assertEqual(attempted, ["a", "b", "c"])
+
+    def test_non_store_queued_is_skipped(self):
+        queue = {"pending": [{"asset_key": "n"}]}
+        code, attempted = self._run(
+            ["--pending"],
+            [self._asset("a"), self._asset("n", non_store=True)],
+            cache={"resolved": {}}, queue=queue)
+        self.assertEqual(code, 0)
+        self.assertEqual(attempted, [])
+
+
+class TestCacheWriteLock(unittest.TestCase):
+    """resolve/spike/import-ids lifetime-hold cache-write.lock and fail fast on
+    contention with a nonzero exit and zero cache writes — a second whole-snapshot
+    writer would silently drop the first writer's per-asset entries."""
+
+    def setUp(self):
+        import tempfile
+        self.state = tempfile.mkdtemp()
+        self.patchers = []
+
+    def tearDown(self):
+        for p in reversed(self.patchers):
+            p.stop()
+
+    def _asset(self, key):
+        return {"asset_key": key, "name": key.upper(), "non_store": False}
+
+    def _start(self):
+        import tempfile
+        from unittest import mock
+        import index_assets as ia
+        self._write("assets.json", {"assets": [self._asset("a")]})
+        self._write("cache.json", {"resolved": {}})
+        self.patchers = [
+            mock.patch.object(ia, "state_dir", return_value=self.state),
+            mock.patch.object(rs, "resolve_asset",
+                              side_effect=AssertionError("resolver ran under contention")),
+            mock.patch.object(rs, "Pacer", _FakePacer),
+            mock.patch.object(rs, "SearchPool", _FakePool),
+            mock.patch.object(rs.requests, "Session", lambda: None),
+        ]
+        for p in self.patchers:
+            p.start()
+
+    def _write(self, name, obj):
+        import json as _json
+        with open(os.path.join(self.state, name), "w", encoding="utf-8") as fh:
+            _json.dump(obj, fh)
+
+    def _read_cache(self):
+        with open(os.path.join(self.state, "cache.json"), encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_contended_lock_fails_fast_then_runs_after_release(self):
+        import fcntl
+        self._start()
+        lock_path = os.path.join(self.state, "cache-write.lock")
+        holder = open(lock_path, "a")
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        try:
+            with self.assertRaises(SystemExit) as cm:
+                rs.main(["resolve", "--pending"])
+            self.assertEqual(cm.exception.code, 3)
+        finally:
+            fcntl.flock(holder, fcntl.LOCK_UN)
+            holder.close()
+        self.assertEqual(self._read_cache(), '{"resolved": {}}')
+        # After release the identical command runs and the lock is reusable.
+        self.assertEqual(rs.main(["resolve", "--pending"]), 0)
+        self.assertEqual(rs.main(["resolve", "--pending"]), 0)
+
+    def test_lock_file_lives_in_state_dir(self):
+        self._start()
+        self.assertEqual(rs.main(["resolve", "--pending"]), 0)
+        self.assertTrue(os.path.exists(os.path.join(self.state, "cache-write.lock")))
+
+
+    def test_enrich_lock_handoff_skips_nested_lock(self):
+        from unittest import mock
+        with mock.patch.object(rs, "_main_unlocked", return_value=7) as run:
+            self.assertEqual(rs.main(["enrich"], state_lock_held=True), 7)
+        run.assert_called_once_with(["enrich"])
+    def test_enrich_acquires_shared_state_lock(self):
+        import index_assets as ia
+        from unittest import mock
+        with mock.patch.object(ia, "state_dir", return_value=self.state), \
+                mock.patch.object(rs, "_main_unlocked", return_value=8) as run:
+            self.assertEqual(rs.main(["enrich"]), 8)
+        run.assert_called_once_with(["enrich"])
+        self.assertTrue(os.path.exists(os.path.join(self.state, "state-write.lock")))
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

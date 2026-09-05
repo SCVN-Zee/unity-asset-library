@@ -30,7 +30,9 @@ Usage:
 """
 
 import argparse
+import contextlib
 import difflib
+import fcntl
 import html as _html
 import json
 import os
@@ -810,7 +812,60 @@ def merge(data, cache, overrides):
 # ---------------------------------------------------------------------------
 
 
-def main(argv=None):
+@contextlib.contextmanager
+def _cache_write_lock(index_dir, command):
+    """Lifetime hold for the whole-snapshot cache writers (resolve/spike/
+    import-ids). Fail-fast and non-blocking: a concurrent second writer would
+    silently drop the first one's per-asset entries in its whole-snapshot
+    rewrite, so contention is an immediate nonzero exit, never a wait."""
+    path = os.path.join(index_dir, "cache-write.lock")
+    fh = open(path, "a")
+    got = False
+    try:
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            got = True
+        except BlockingIOError:
+            print(f"{command}: another cache writer holds cache-write.lock — "
+                  "run this after the current resolve/spike/import-ids finishes")
+            raise SystemExit(3)
+        yield
+    finally:
+        if got:
+            try:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+        fh.close()
+
+
+def load_pending_keys(index_dir, label):
+    """Queued asset_keys as a set. Missing, empty, or malformed queues yield an
+    EMPTY set — never None — so a broken queue can never widen a --pending run
+    into a full store-eligible sweep."""
+    path = os.path.join(index_dir, "pending-enrichment.json")
+    keys = set()
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                keys = {e["asset_key"] for e in json.load(fh).get("pending", [])}
+        except (ValueError, KeyError, TypeError):
+            print(f"{label}: pending queue unreadable — attempting nothing")
+    return keys
+
+
+def main(argv=None, state_lock_held=False):
+    probe = argparse.ArgumentParser(add_help=False)
+    probe.add_argument("command", choices=["spike", "resolve", "enrich", "export-titles", "import-ids"])
+    probe.add_argument("--state-lock-held", action="store_true")
+    probe_args, _ = probe.parse_known_args(argv)
+    held = state_lock_held or probe_args.state_lock_held
+    if probe_args.command == "enrich" and not held:
+        from index_assets import state_dir, state_write_lock
+        with state_write_lock(state_dir(), "resolve_store enrich", blocking=True):
+            return _main_unlocked(argv)
+    return _main_unlocked(argv)
+def _main_unlocked(argv=None):
     # This run takes hours and is normally watched through a pipe or a log file.
     # Without line buffering Python blocks progress output until exit, which makes a
     # long resumable job look hung.
@@ -829,6 +884,7 @@ def main(argv=None):
     ap.add_argument("--pending", action="store_true",
                     help="export-titles: only assets queued in pending-enrichment.json")
     ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--state-lock-held", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--limit", type=int, default=30)
     ap.add_argument("--base-delay", type=float, default=4.0)
     args = ap.parse_args(argv)
@@ -844,17 +900,7 @@ def main(argv=None):
     if args.command == "export-titles":
         # Work list for an external searcher. Non-store assets are excluded so no
         # lookup effort is spent on archives that have no store page at all.
-        pending_keys = None
-        if args.pending:
-            queue_path = os.path.join(index_dir, "pending-enrichment.json")
-            pending_keys = set()
-            if os.path.exists(queue_path):
-                try:
-                    with open(queue_path, encoding="utf-8") as fh:
-                        pending_keys = {e["asset_key"]
-                                        for e in json.load(fh).get("pending", [])}
-                except (ValueError, KeyError, TypeError):
-                    print("export-titles: pending queue unreadable — emitting nothing")
+        pending_keys = load_pending_keys(index_dir, "export-titles") if args.pending else None
         rows = filter_worklist(data["assets"], pending_keys)
         out = args.out or os.path.join(index_dir, "search-worklist.json")
         write_atomic_json(out, rows)
@@ -873,43 +919,44 @@ def main(argv=None):
             print("import-ids requires --ids-file"); return 2
         with open(args.ids_file, encoding="utf-8") as fh:
             supplied = json.load(fh)
-        by_key = {a["asset_key"]: a for a in data["assets"]}
-        cache = load_cache(cache_path)
-        session = requests.Session()
-        stats = {"resolved": 0, "unverified": 0, "no-result": 0, "unknown-key": 0}
+        with _cache_write_lock(index_dir, args.command):
+            by_key = {a["asset_key"]: a for a in data["assets"]}
+            cache = load_cache(cache_path)
+            session = requests.Session()
+            stats = {"resolved": 0, "unverified": 0, "no-result": 0, "unknown-key": 0}
 
-        print(f"import-ids: {len(supplied)} entries from {args.ids_file}")
-        for n, (key, ids) in enumerate(sorted(supplied.items()), 1):
-            asset = by_key.get(key)
-            if asset is None:
-                stats["unknown-key"] += 1
-                print(f"  [{n}] unknown asset_key {key!r} — ignored")
-                continue
-            if isinstance(ids, dict):
-                ids = ids.get("ids", [])
-            ids = [str(i) for i in (ids or []) if str(i).isdigit()]
-            if not ids:
-                rec = {"status": "no-result", "title": asset["name"], "transport": "external"}
-            else:
-                rec = verify_candidates(asset, ids, session=session)
-            if rec["status"] == "resolved":
-                rec = attach_detail(rec, session=session)
-            cache["resolved"][key] = rec
-            stats[rec["status"]] = stats.get(rec["status"], 0) + 1
-            mark = {"resolved": "ok", "unverified": "??", "no-result": "--"}[rec["status"]]
-            # Publisher can come from either verification source, so never index
-            # blindly: the detail-page fallback leaves rec["legacy"] empty.
-            pub = ((rec.get("legacy") or {}).get("publisher")
-                   or (rec.get("detail") or {}).get("author") or "?")
-            print(f"  [{n}/{len(supplied)}] {mark} {asset['name'][:52]}"
-                  + (f"  -> {rec['id']} ({pub}, via {rec.get('verified_via','?')})"
-                     if rec["status"] == "resolved" else ""))
-            save_cache(cache_path, cache)
-        print(f"\nimport-ids done: {stats}")
-        elig = sum(1 for a in data["assets"] if not a.get("non_store"))
-        print(f"verified: {stats['resolved']}/{elig} store-eligible "
-              f"({100*stats['resolved']/elig:.1f}%)")
-        return 0
+            print(f"import-ids: {len(supplied)} entries from {args.ids_file}")
+            for n, (key, ids) in enumerate(sorted(supplied.items()), 1):
+                asset = by_key.get(key)
+                if asset is None:
+                    stats["unknown-key"] += 1
+                    print(f"  [{n}] unknown asset_key {key!r} — ignored")
+                    continue
+                if isinstance(ids, dict):
+                    ids = ids.get("ids", [])
+                ids = [str(i) for i in (ids or []) if str(i).isdigit()]
+                if not ids:
+                    rec = {"status": "no-result", "title": asset["name"], "transport": "external"}
+                else:
+                    rec = verify_candidates(asset, ids, session=session)
+                if rec["status"] == "resolved":
+                    rec = attach_detail(rec, session=session)
+                cache["resolved"][key] = rec
+                stats[rec["status"]] = stats.get(rec["status"], 0) + 1
+                mark = {"resolved": "ok", "unverified": "??", "no-result": "--"}[rec["status"]]
+                # Publisher can come from either verification source, so never index
+                # blindly: the detail-page fallback leaves rec["legacy"] empty.
+                pub = ((rec.get("legacy") or {}).get("publisher")
+                       or (rec.get("detail") or {}).get("author") or "?")
+                print(f"  [{n}/{len(supplied)}] {mark} {asset['name'][:52]}"
+                      + (f"  -> {rec['id']} ({pub}, via {rec.get('verified_via','?')})"
+                         if rec["status"] == "resolved" else ""))
+                save_cache(cache_path, cache)
+            print(f"\nimport-ids done: {stats}")
+            elig = sum(1 for a in data["assets"] if not a.get("non_store"))
+            print(f"verified: {stats['resolved']}/{elig} store-eligible "
+                  f"({100*stats['resolved']/elig:.1f}%)")
+            return 0
 
     if args.command == "enrich":
         cache = load_cache(cache_path)
@@ -932,111 +979,120 @@ def main(argv=None):
             print(f"  warn: {w}")
         return 0
 
-    cache = load_cache(cache_path)
-    eligible = [a for a in data["assets"] if not a.get("non_store")]
-    def already_done(asset):
-        # Only a resolved record is terminal. 'unverified' and 'no-result' are retried,
-        # otherwise one throttled or degraded run would permanently exclude an asset
-        # from every future --resume.
-        rec = cache["resolved"].get(asset["asset_key"])
-        return bool(rec) and rec.get("status") == "resolved"
+    with _cache_write_lock(index_dir, args.command):
+        cache = load_cache(cache_path)
+        eligible = [a for a in data["assets"] if not a.get("non_store")]
+        if args.pending:
+            pending_keys = load_pending_keys(index_dir, args.command)
+            eligible = [a for a in eligible if a["asset_key"] in pending_keys]
+            if not pending_keys:
+                print("  (pending queue is empty — attempting nothing)")
 
-    todo = [a for a in eligible if not (args.resume and already_done(a))]
-    if args.command == "spike":
-        random.seed(20260730)
-        todo = random.sample(todo, min(args.limit, len(todo)))
+        def already_done(asset):
+            # Only a resolved record is terminal. 'unverified' and 'no-result' are retried,
+            # otherwise one throttled or degraded run would permanently exclude an asset
+            # from every future --resume.
+            rec = cache["resolved"].get(asset["asset_key"])
+            return bool(rec) and rec.get("status") == "resolved"
 
-    pacer = Pacer(base=args.base_delay)
-    session = requests.Session()
-    pool = SearchPool(session=session)
-    stats = {"resolved": 0, "unverified": 0, "no-result": 0}
-    all_blocked_streak = 0
+        todo = [a for a in eligible if not (args.resume and already_done(a))]
+        if args.command == "spike":
+            random.seed(20260730)
+            todo = random.sample(todo, min(args.limit, len(todo)))
 
-    print(f"{args.command}: {len(todo)} assets to attempt "
-          f"({len(eligible)} store-eligible, "
-          f"{len(data['assets']) - len(eligible)} non-store skipped)")
-    print(f"transport pool: {', '.join(n for n, _, _ in pool.transports)}")
+        pacer = Pacer(base=args.base_delay)
+        session = requests.Session()
+        pool = SearchPool(session=session)
+        stats = {"resolved": 0, "unverified": 0, "no-result": 0}
+        all_blocked_streak = 0
 
-    for i, asset in enumerate(todo, 1):
-        try:
-            rec = resolve_asset(asset, pool, session=session)
-            all_blocked_streak = 0
-            pacer.ok()
-        except AllTransportsBlocked as exc:
-            # A single frontend blocking costs that frontend a cooldown, not the asset —
-            # the pool retries the same query elsewhere. Reaching here means every
-            # transport is cooling at once, so waiting is the only option.
-            all_blocked_streak += 1
-            wait = max(30.0, pool.cooldown_remaining() + 5)
-            print(f"  [{i}/{len(todo)}] all transports cooling ({exc}) — "
-                  f"waiting {wait:.0f}s. Nothing cached; --resume will retry.")
-            if all_blocked_streak >= 6:
-                print("  aborting: pool exhausted 6 times in a row. Cache is intact; "
-                      "re-run with --resume later.")
-                break
-            time.sleep(wait)
-            continue
-        except Blocked as exc:
-            # Legacy API blocked. Distinct from the search pool and much rarer.
-            delay = pacer.blocked()
-            print(f"  [{i}/{len(todo)}] legacy API blocked ({exc}) — backing off "
-                  f"{delay:.0f}s. Nothing cached; --resume will retry.")
-            time.sleep(delay)
-            continue
-        except requests.RequestException as exc:
-            print(f"  [{i}/{len(todo)}] network error: {exc}")
-            continue
+        print(f"{args.command}: {len(todo)} assets to attempt "
+              f"({len(eligible)} store-eligible, "
+              f"{len(data['assets']) - len(eligible)} non-store skipped)")
+        if args.pending:
+            print("  scope: pending queue only")
+        print(f"transport pool: {', '.join(n for n, _, _ in pool.transports)}")
 
-        if rec["status"] == "resolved":
-            # Guarded separately from the search step: this hits a different host and
-            # can independently block or time out. Leaving it unguarded meant one
-            # transient store-side 429 four hundred assets in would kill the whole
-            # unattended run with a traceback.
+        for i, asset in enumerate(todo, 1):
             try:
-                detail = fetch_detail(
-                    rec["id"], session=session,
-                    url_hint=f"https://{STORE_HOST}/packages/slug/{rec['id']}")
+                rec = resolve_asset(asset, pool, session=session)
+                all_blocked_streak = 0
+                pacer.ok()
+            except AllTransportsBlocked as exc:
+                # A single frontend blocking costs that frontend a cooldown, not the asset —
+                # the pool retries the same query elsewhere. Reaching here means every
+                # transport is cooling at once, so waiting is the only option.
+                all_blocked_streak += 1
+                wait = max(30.0, pool.cooldown_remaining() + 5)
+                print(f"  [{i}/{len(todo)}] all transports cooling ({exc}) — "
+                      f"waiting {wait:.0f}s. Nothing cached; --resume will retry.")
+                if all_blocked_streak >= 6:
+                    print("  aborting: pool exhausted 6 times in a row. Cache is intact; "
+                          "re-run with --resume later.")
+                    break
+                time.sleep(wait)
+                continue
             except Blocked as exc:
+                # Legacy API blocked. Distinct from the search pool and much rarer.
                 delay = pacer.blocked()
-                print(f"  [{i}/{len(todo)}] store blocked on detail fetch ({exc}) — "
-                      f"backing off {delay:.0f}s. Not cached; --resume will retry.")
+                print(f"  [{i}/{len(todo)}] legacy API blocked ({exc}) — backing off "
+                      f"{delay:.0f}s. Nothing cached; --resume will retry.")
                 time.sleep(delay)
                 continue
             except requests.RequestException as exc:
-                print(f"  [{i}/{len(todo)}] detail fetch failed ({exc}) — "
-                      "not cached; --resume will retry.")
+                print(f"  [{i}/{len(todo)}] network error: {exc}")
                 continue
 
-            if detail and not detail.get("_rejected"):
-                rec["detail"] = detail
-            elif detail and detail.get("_rejected"):
-                rec["status"] = "unverified"
-                rec["detail_rejected"] = detail["_rejected"]
+            if rec["status"] == "resolved":
+                # Guarded separately from the search step: this hits a different host and
+                # can independently block or time out. Leaving it unguarded meant one
+                # transient store-side 429 four hundred assets in would kill the whole
+                # unattended run with a traceback.
+                try:
+                    detail = fetch_detail(
+                        rec["id"], session=session,
+                        url_hint=f"https://{STORE_HOST}/packages/slug/{rec['id']}")
+                except Blocked as exc:
+                    delay = pacer.blocked()
+                    print(f"  [{i}/{len(todo)}] store blocked on detail fetch ({exc}) — "
+                          f"backing off {delay:.0f}s. Not cached; --resume will retry.")
+                    time.sleep(delay)
+                    continue
+                except requests.RequestException as exc:
+                    print(f"  [{i}/{len(todo)}] detail fetch failed ({exc}) — "
+                          "not cached; --resume will retry.")
+                    continue
 
-        cache["resolved"][asset["asset_key"]] = rec
-        stats[rec["status"]] = stats.get(rec["status"], 0) + 1
-        mark = {"resolved": "ok", "unverified": "??", "no-result": "--"}[rec["status"]]
-        via = rec.get("transport", "?")
-        pub = ((rec.get("legacy") or {}).get("publisher")
-               or (rec.get("detail") or {}).get("author") or "?")
-        print(f"  [{i}/{len(todo)}] {mark} [{via}] {asset['name'][:52]}"
-              + (f"  -> {rec['id']} ({pub})" if rec["status"] == "resolved" else ""))
-        save_cache(cache_path, cache)
-        pacer.wait()
+                if detail and not detail.get("_rejected"):
+                    rec["detail"] = detail
+                elif detail and detail.get("_rejected"):
+                    rec["status"] = "unverified"
+                    rec["detail_rejected"] = detail["_rejected"]
 
-    attempted = sum(stats.values())
-    print(f"\n{args.command} done: {stats} of {attempted} attempted")
-    print("transport health:")
-    for name, st in pool.summary().items():
-        print(f"  {name:10} hits={st['hits']:<4} empty={st['empty']:<4} blocks={st['blocks']}")
-    if attempted:
-        rate = 100 * stats["resolved"] / attempted
-        print(f"verified rate: {rate:.1f}%")
-        if args.command == "spike":
-            gate = "PROCEED" if rate >= 85 else ("PROCEED WITH CAUTION" if rate >= 70
-                                                 else "STOP — re-open the transport question")
-            print(f"gate (>=85 proceed / 70-85 caution / <70 stop): {gate}")
-    return 0
+            cache["resolved"][asset["asset_key"]] = rec
+            stats[rec["status"]] = stats.get(rec["status"], 0) + 1
+            mark = {"resolved": "ok", "unverified": "??", "no-result": "--"}[rec["status"]]
+            via = rec.get("transport", "?")
+            pub = ((rec.get("legacy") or {}).get("publisher")
+                   or (rec.get("detail") or {}).get("author") or "?")
+            print(f"  [{i}/{len(todo)}] {mark} [{via}] {asset['name'][:52]}"
+                  + (f"  -> {rec['id']} ({pub})" if rec["status"] == "resolved" else ""))
+            save_cache(cache_path, cache)
+            pacer.wait()
+
+        attempted = sum(stats.values())
+        print(f"\n{args.command} done: {stats} of {attempted} attempted")
+        print("transport health:")
+        for name, st in pool.summary().items():
+            print(f"  {name:10} hits={st['hits']:<4} empty={st['empty']:<4} blocks={st['blocks']}")
+        if attempted:
+            rate = 100 * stats["resolved"] / attempted
+            print(f"verified rate: {rate:.1f}%")
+            if args.command == "spike":
+                gate = "PROCEED" if rate >= 85 else ("PROCEED WITH CAUTION" if rate >= 70
+                                                     else "STOP — re-open the transport question")
+                print(f"gate (>=85 proceed / 70-85 caution / <70 stop): {gate}")
+        return 0
 
 
 if __name__ == "__main__":

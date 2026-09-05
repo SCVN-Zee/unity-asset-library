@@ -13,7 +13,7 @@ import stat
 import sys
 import tempfile
 from collections import defaultdict
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import index_assets as ia  # noqa: E402
@@ -208,10 +208,12 @@ def _remove_empty_tree(path):
     os.rmdir(path)
 
 
-def apply_cleanup(root, state, scanned, plan, root_override=False, snapshot=None):
+def apply_cleanup(root, state, scanned, plan, root_override=False, snapshot=None,
+                  lock_already_held=False):
     snapshot = snapshot or capture_snapshot(root, scanned)
     candidate_paths = {row["rel_path"] for row in plan["removals"]}
-    with _cleanup_lock(root):
+    lock = nullcontext() if lock_already_held else _cleanup_lock(root)
+    with lock:
         print(render_plan(plan, apply=True))
         preflight(root, scanned, snapshot)
         quarantine = os.path.join(root, "_Quarantine")

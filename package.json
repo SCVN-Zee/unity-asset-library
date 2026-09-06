@@ -57,5 +57,9 @@
     "mac": {
       "category": "public.app-category.developer-tools"
     }
+  },
+  "allowScripts": {
+    "electron@37.10.3": true,
+    "esbuild@0.28.2": true
   }
 }

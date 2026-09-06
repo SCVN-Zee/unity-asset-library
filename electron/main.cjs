@@ -99,26 +99,32 @@ async function stopOwnedBackend() {
   await waitForBackendExit(child, 2000);
 }
 function preparePackagedBackend() {
-  if (!app.isPackaged) return path.resolve(__dirname, "..");
-
   const template = path.join(process.resourcesPath, "uai-backend");
-  // __dirname is inside app resources when packaged; keep all mutable backend
-  // state and generated output in one user-writable workspace instead.
-  const root = path.join(app.getPath("userData"), "backend");
+  // Keep per-user configuration and inventory out of application resources.
+  const root = app.isPackaged
+    ? path.join(app.getPath("userData"), "backend")
+    : path.resolve(__dirname, "..");
   const configPath = path.join(root, "config.json");
   fs.mkdirSync(path.join(root, "state"), { recursive: true });
-  fs.mkdirSync(root, { recursive: true });
-  fs.cpSync(path.join(template, "bin"), path.join(root, "bin"), { recursive: true });
+  if (app.isPackaged) {
+    fs.cpSync(path.join(template, "bin"), path.join(root, "bin"), { recursive: true });
+  }
   if (!fs.existsSync(configPath)) {
-    fs.copyFileSync(path.join(template, "config.json"), configPath);
+    const folders = dialog.showOpenDialogSync({
+      title: "Choose your Unity asset folder",
+      properties: ["openDirectory"],
+    });
+    if (!folders?.length) return null;
+    fs.writeFileSync(configPath, `${JSON.stringify({ vault_root: folders[0], output_dir: "." }, null, 2)}\n`);
   }
   const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
   if (config.output_dir !== ".") {
     config.output_dir = ".";
     fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
   }
-  if (!fs.existsSync(path.join(root, "state", "assets.json"))) {
-    fs.cpSync(path.join(template, "state"), path.join(root, "state"), { recursive: true });
+  const cachePath = path.join(root, "state", "cache.json");
+  if (app.isPackaged && !fs.existsSync(cachePath)) {
+    fs.copyFileSync(path.join(template, "state", "cache.json"), cachePath);
   }
   return root;
 }
@@ -136,6 +142,7 @@ async function ensureBackend() {
   }
 
   const root = preparePackagedBackend();
+  if (!root) return false;
   const script = path.join(root, "bin", "server.py");
   backendOutput.length = 0;
   const child = spawn(pythonCommand(), [script, "--port", String(PORT)], {
@@ -219,7 +226,10 @@ function createWindow() {
 app.whenReady().then(async () => {
   registerIpc();
   try {
-    await ensureBackend();
+    if (await ensureBackend() === false) {
+      app.quit();
+      return;
+    }
     createWindow();
   } catch (error) {
     dialog.showErrorBox("Unity Asset Index could not start", String(error.message || error));

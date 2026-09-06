@@ -1,8 +1,0 @@
-./3D/Synty/POLYGON_Prototype_SourceFiles_v4.zip
-./3D/Synty/POLYGON_Prototype_Unity_2022_3_v1_9_1.unitypackage
-./Tools/Editor Console Pro v3.981 (14 Jan 2026).unitypackage
-./Tools/Feel v6.0.unitypackage
-./Tools/Find Reference 2 v2.5.1.unitypackage
-./Tools/RapidIcon In-Editor Icon Generator v1.7.2.unitypackage
-./VFX/Shaders/Amplify Shader Editor v1.9.9.9 (08 Apr 2026).unitypackage
-./VFX/Shaders/Toony Colors Pro 2 v2.9.21 (13 Jan 2026).unitypackage

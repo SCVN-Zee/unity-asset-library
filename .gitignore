@@ -2,4 +2,14 @@ __pycache__/
 *.pyc
 .DS_Store
 node_modules/
-/state/server-instance.lock
+/dist/
+/.agents/
+/config.json
+/assets.csv
+
+# Local inventory and runtime state; only Store crawl data is shared.
+/state/*
+!/state/cache.json
+
+# Atomic-write leftovers
+/tmp*.tmp

@@ -40,18 +40,8 @@
         "to": "uai-backend/bin"
       },
       {
-        "from": "config.json",
-        "to": "uai-backend/config.json"
-      },
-      {
-        "from": "state",
-        "to": "uai-backend/state",
-        "filter": [
-          "**/*",
-          "!server-instance.lock",
-          "!state-write.lock",
-          "!cache-write.lock"
-        ]
+        "from": "state/cache.json",
+        "to": "uai-backend/state/cache.json"
       }
     ],
     "mac": {

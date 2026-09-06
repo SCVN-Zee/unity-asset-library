@@ -206,7 +206,21 @@ function App() {
       <div className="brand"><div className="brand-mark">UI</div><div><div className="eyebrow">UNITY ASSET INDEX</div><h1>Asset library</h1></div></div>
       <div className="top-actions">
         <div className={`connection ${error ? "offline" : ""}`}><span className="connection-dot" />{error ? "Needs attention" : loading ? "Starting Python" : "Connected"}</div>
-        <button className="button primary" onClick={() => void runAction("resync")} disabled={Boolean(busy) || loading}><Icon name="refresh" />{busy === "resync" ? "Syncing…" : "Resync"}</button>
+        <button className="button primary" popoverTarget="library-actions">Library actions <span aria-hidden="true">▾</span></button>
+        <div id="library-actions" className="library-actions" popover="auto" aria-label="Library actions">
+          <p className="actions-intro">Choose an action for your library.</p>
+          <button className="library-action" popoverTarget="library-actions" popoverTargetAction="hide" onClick={() => void runAction("resync")} disabled={Boolean(busy) || loading}>
+            <Icon name="refresh" /><span><strong>{busy === "resync" ? "Syncing…" : "Resync"}</strong><span>Scan local files and review index changes before applying. Old-version cleanup is a separate confirmation.</span></span>
+          </button>
+          <button className="library-action" popoverTarget="library-actions" popoverTargetAction="hide" onClick={() => void startEnrich()} disabled={Boolean(busy) || loading || Boolean(jobRunning)}>
+            <Icon name="spark" /><span><strong>{jobRunning ? "Enrich · running" : "Enrich"}</strong><span>Look up pending assets online to add Store details, categories, thumbnails, and ratings. Does not change package files.</span></span>
+          </button>
+          <button className="library-action" popoverTarget="library-actions" popoverTargetAction="hide" onClick={() => void runAction("organize")} disabled={Boolean(busy) || loading}>
+            <Icon name="folder" /><span><strong>{busy === "organize" ? "Planning…" : "Organize"}</strong><span>Preview moving archives into Store-category folders. Moves files only after confirmation; never renames or unpacks them.</span></span>
+          </button>
+          {jobRunning && <button className="button quiet danger-text" popoverTarget="library-actions" popoverTargetAction="hide" onClick={() => void cancelEnrich()}>Cancel enrich</button>}
+          <p className="actions-hint">Suggested order: Resync → Enrich → Organize</p>
+        </div>
       </div>
     </header>
 
@@ -227,7 +241,7 @@ function App() {
 
       <section className="content-column">
         <div className="content-head"><div><div className="eyebrow">YOUR COLLECTION</div><h2>{category === "All assets" ? "Everything in one place" : category}</h2><p>{filtered.length} of {assets.length} assets visible</p></div><div className="view-controls"><button className={`icon-button ${view === "grid" ? "selected" : ""}`} onClick={() => setView("grid")} aria-label="Grid view"><Icon name="grid" /></button><button className={`icon-button ${view === "list" ? "selected" : ""}`} onClick={() => setView("list")} aria-label="List view"><Icon name="list" /></button><select value={sort} onChange={(event) => setSort(event.target.value as SortMode)} aria-label="Sort assets"><option value="name">Name</option><option value="author">Author</option><option value="size">Size</option></select></div></div>
-        <div className="summary-strip"><div><span className="summary-label">INDEXED</span><strong>{assets.length}</strong></div><div><span className="summary-label">PENDING</span><strong className={pendingCount ? "accent-text" : ""}>{pendingCount}</strong></div><div><span className="summary-label">FLAGGED</span><strong>{flaggedCount}</strong></div><div className="summary-spacer" /><button className="button quiet" onClick={() => void runAction("organize")} disabled={Boolean(busy) || loading}><Icon name="folder" />{busy === "organize" ? "Planning…" : "Organize"}</button>{jobRunning ? <button className="button quiet danger-text" onClick={() => void cancelEnrich()}>Cancel enrich</button> : <button className="button quiet" onClick={() => void startEnrich()} disabled={Boolean(busy) || loading}><Icon name="spark" />Enrich{pendingCount ? ` · ${pendingCount}` : ""}</button>}</div>
+        <div className="summary-strip"><div><span className="summary-label">INDEXED</span><strong>{assets.length}</strong></div><div><span className="summary-label">PENDING</span><strong className={pendingCount ? "accent-text" : ""}>{pendingCount}</strong></div><div><span className="summary-label">FLAGGED</span><strong>{flaggedCount}</strong></div></div>
         {state?.job && state.job.status !== "completed" && state.job.status !== "cancelled" && <div className={`job-line ${state.job.status === "failed" ? "failed" : ""}`}><span className={state.job.status === "failed" ? "status-mark failed" : "spinner"} />{state.job.status === "failed" ? "Enrichment failed" : state?.job?.stage ? `Enrichment · ${state.job.stage}` : "Starting enrichment"}<span className="job-error">{state?.job?.error || ""}</span></div>}
         {loading ? <div className="loading-state"><span className="spinner" />Loading your library</div> : filtered.length ? <div className={view === "grid" ? "asset-grid" : "asset-list"}>{filtered.map((asset) => <AssetCard key={asset.asset_key} asset={asset} selected={asset.asset_key === selected?.asset_key} view={view} onClick={() => setSelectedKey(asset.asset_key)} />)}</div> : <div className="empty-state"><div className="empty-mark">∅</div><h3>No assets match</h3><p>Try clearing a filter or searching for a broader term.</p><button className="button quiet" onClick={() => { setQuery(""); setCategory("All assets"); setQuick("all"); }}>Clear filters</button></div>}
       </section>

@@ -147,12 +147,12 @@ function App() {
   const pendingCount = state?.pending_enrichment ?? assets.filter(isPending).length;
   const storeCount = assets.filter((asset) => !asset.non_store).length;
 
-  async function runAction(name: "resync" | "organize") {
+  async function runAction(name: "resync" | "cleanup" | "organize") {
     try {
       setBusy(name);
       setError("");
-      const result = name === "resync" ? await api.resync() : await api.organizePlan();
-      setDialog({ mode: name, title: name === "resync" ? "Review resync" : "Review organization", result });
+      const result = name === "resync" ? await api.resync() : name === "cleanup" ? await api.cleanupPlan() : await api.organizePlan();
+      setDialog({ mode: name, title: name === "resync" ? "Review resync" : name === "cleanup" ? "Clean up old versions" : "Review organization", result });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The action failed.");
     } finally {
@@ -183,15 +183,10 @@ function App() {
     try {
       setBusy(dialog.mode);
       setError("");
-      if (dialog.mode === "resync") {
-        const result = await api.resyncApply(dialog.result.plan_hash);
-        setDialog(result.preview ? { mode: "cleanup", title: "Review disk cleanup", result } : null);
-        if (result.cleanup_error) setError("Resync completed, but cleanup could not be previewed: " + result.cleanup_error);
-      } else {
-        if (dialog.mode === "cleanup") await api.cleanupApply(dialog.result.plan_hash);
-        else await api.organizeApply(dialog.result.plan_hash);
-        setDialog(null);
-      }
+      if (dialog.mode === "resync") await api.resyncApply(dialog.result.plan_hash);
+      else if (dialog.mode === "cleanup") await api.cleanupApply(dialog.result.plan_hash);
+      else await api.organizeApply(dialog.result.plan_hash);
+      setDialog(null);
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The plan changed before it could be applied.");
@@ -211,7 +206,7 @@ function App() {
           <div className={`actions-intro connection ${error ? "offline" : ""}`}><span className="connection-dot" />{error ? "Needs attention" : loading ? "Starting Python" : "Connected"}</div>
           <p className="actions-intro">Choose an action for your library.</p>
           <button className="library-action" popoverTarget="library-actions" popoverTargetAction="hide" onClick={() => void runAction("resync")} disabled={Boolean(busy) || loading}>
-            <Icon name="refresh" /><span><strong>{busy === "resync" ? "Syncing…" : "Resync"}</strong><span>Scan local files and review index changes before applying. Old-version cleanup is a separate confirmation.</span></span>
+            <Icon name="refresh" /><span><strong>{busy === "resync" ? "Syncing…" : "Resync index"}</strong><span>Scan local files and review index changes before applying. Never deletes files from disk.</span></span>
           </button>
           <button className="library-action" popoverTarget="library-actions" popoverTargetAction="hide" onClick={() => void startEnrich()} disabled={Boolean(busy) || loading || Boolean(jobRunning)}>
             <Icon name="spark" /><span><strong>{jobRunning ? "Enrich · running" : "Enrich"}</strong><span>Look up pending assets online to add Store details, categories, thumbnails, and ratings. Does not change package files.</span></span>
@@ -219,8 +214,11 @@ function App() {
           <button className="library-action" popoverTarget="library-actions" popoverTargetAction="hide" onClick={() => void runAction("organize")} disabled={Boolean(busy) || loading}>
             <Icon name="folder" /><span><strong>{busy === "organize" ? "Planning…" : "Organize"}</strong><span>Preview moving archives into Store-category folders. Moves files only after confirmation; never renames or unpacks them.</span></span>
           </button>
+          <button className="library-action" popoverTarget="library-actions" popoverTargetAction="hide" onClick={() => void runAction("cleanup")} disabled={Boolean(busy) || loading}>
+            <Icon name="folder" /><span><strong>{busy === "cleanup" ? "Planning…" : "Clean up old versions"}</strong><span>Review old archives to delete and the versions to keep. Deletes files only after confirmation.</span></span>
+          </button>
           {jobRunning && <button className="button quiet danger-text" popoverTarget="library-actions" popoverTargetAction="hide" onClick={() => void cancelEnrich()}>Cancel enrich</button>}
-          <p className="actions-hint">Suggested order: Resync → Enrich → Organize</p>
+          <p className="actions-hint">Suggested order: Resync index → Enrich → Organize → Clean up old versions (optional)</p>
         </div>
       </div>
     </header>
@@ -280,7 +278,7 @@ function ActionDialog({ dialog, busy, onClose, onConfirm }: { dialog: NonNullabl
   ];
   return <dialog ref={modal} className="action-dialog" aria-labelledby="action-title" aria-describedby="action-description" onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}>
     <div className="dialog-top"><div><div className="eyebrow">CONFIRMATION REQUIRED</div><h2 id="action-title">{dialog.title}</h2></div><button className="icon-button" onClick={onClose} disabled={busy} aria-label="Close dialog">×</button></div>
-    <p id="action-description" className="dialog-lead">{resync ? "Review the vault-relative paths below before updating the index. No files will be deleted from disk." : dialog.mode === "cleanup" ? "The index is synced. This separate cleanup will delete the listed files from disk only if you confirm." : "Review these moves before anything changes on disk."}</p>
+    <p id="action-description" className="dialog-lead">{resync ? "Review the vault-relative paths below before updating the index. No files will be deleted from disk." : dialog.mode === "cleanup" ? "Compare the archives to delete with the versions kept on disk. Only files marked Delete will be removed, and only after you confirm." : "Review these moves before anything changes on disk."}</p>
     {resync ? <>
       <div className="dialog-stats">{groups.map((group) => <div key={group.tone}><strong className={group.tone === "add" ? "added-text" : group.tone === "remove" ? "danger-text" : ""}>{group.rows.length}</strong><span>{group.label}</span></div>)}</div>
       <div className="resync-groups">{groups.filter((group) => group.tone !== "resize" || group.rows.length > 0).map((group) => <section className="change-group" key={group.tone} aria-label={group.label}>
@@ -290,7 +288,14 @@ function ActionDialog({ dialog, busy, onClose, onConfirm }: { dialog: NonNullabl
       </section>)}</div>
     </> : <>
       <div className="dialog-stats"><div><strong>{totals.files ?? totals.moves ?? rows.length}</strong><span>{dialog.mode === "cleanup" ? "files to delete" : "moves planned"}</span></div><div><strong>{formatBytes(totals.bytes ?? totals.move_bytes ?? 0)}</strong><span>storage</span></div></div>
-      <div className="plan-list">{rows.map((row, index) => <div key={row.path || row.src || index}><span>{row.path || row.src}</span><span className="plan-arrow">→</span><span>{row.dst || formatBytes(row.size_bytes ?? 0)}</span></div>)}{!rows.length && <div className="plan-more">No file changes are planned.</div>}</div>
+      {dialog.mode === "cleanup" ? <div className="resync-groups">{(preview.families || []).filter((family) => family.removals.length > 0).map((family) => <section className="change-group" key={family.asset_key}>
+        <h3>{family.asset_key}</h3>
+        <p>{family.reason === "superseded" ? "Older version replaced by the retained archive." : family.reason}</p>
+        <ul className="change-list">
+          {family.survivor && <li><span><strong className="added-text">Keep</strong> · {family.survivor.path}</span><small>{formatBytes(family.survivor.size_bytes ?? 0)}</small></li>}
+          {family.removals.map((row) => <li key={row.path}><span><strong className="danger-text">Delete</strong> · {row.path}</span><small>{formatBytes(row.size_bytes ?? 0)}</small></li>)}
+        </ul>
+      </section>)}{!rows.length && <p className="change-empty">No old versions to delete.</p>}</div> : <div className="plan-list">{rows.map((row, index) => <div key={row.src || index}><span>{row.src}</span><span className="plan-arrow">→</span><span>{row.dst}</span></div>)}{!rows.length && <div className="plan-more">No file changes are planned.</div>}</div>}
     </>}
     <div className="dialog-foot"><button className="button quiet" onClick={onClose} disabled={busy} autoFocus>Cancel</button><button className="button primary" onClick={onConfirm} disabled={busy || !dialog.result.plan_hash || (!resync && !rows.length)}>{busy ? "Applying…" : resync ? "Apply resync" : dialog.mode === "cleanup" ? "Delete files from disk" : "Confirm changes"}</button></div>
   </dialog>;

@@ -5,7 +5,8 @@ Serves the React/Electron app's fixed JSON API:
 
     GET  /api/state          pending count, capability token, latest job summary
     POST /api/resync/plan    read-only index change preview
-    POST /api/resync/apply   confirm index changes, then preview cleanup
+    POST /api/resync/apply   confirm index changes only
+    POST /api/cleanup/plan   preview old-version disk cleanup
     POST /api/cleanup/apply  confirm a cleanup preview by plan_hash
     POST /api/organize/plan  category-folder plan from the organize engine
     POST /api/organize/apply confirm an organize preview by plan_hash
@@ -285,7 +286,7 @@ class ViewerService:
             job = self._job_snapshot(self._job)
         return {
             "service": "unity-asset-index",
-            "api_version": 2,  # Preview/apply resync contract; bump on breaking API changes.
+            "api_version": 3,  # Independent resync and cleanup; bump on breaking API changes.
             "ready": True,
             "pending_enrichment": self._pending_count(),
             "job": job,
@@ -334,11 +335,13 @@ class ViewerService:
             update_result = self._index_update(scanned)
             if update_result != 0:
                 raise SafetyError(f"index update exited {update_result}")
-            try:
-                preview, digest = self.cleanup_preview(self._strict_scan())
-            except (OSError, SafetyError) as exc:
-                return {"state_refreshed": True, "cleanup_error": str(exc)}
-        return {"preview": preview, "plan_hash": digest, "state_refreshed": True}
+        return {"state_refreshed": True}
+
+    def op_cleanup_plan(self):
+        with self.mutation_gate("cleanup-plan"), self.state_write_lock(), \
+                self.engine_lock_attempt():
+            preview, digest = self.cleanup_preview(self._strict_scan())
+        return {"preview": preview, "plan_hash": digest}
 
     def op_cleanup_apply(self, plan_hash_value):
         with self.mutation_gate("cleanup-apply"), self.state_write_lock():
@@ -689,6 +692,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         schema_by_path = {
             "/api/resync/plan": ["csrf"],
             "/api/resync/apply": ["plan_hash", "csrf"],
+            "/api/cleanup/plan": ["csrf"],
             "/api/cleanup/apply": ["plan_hash", "csrf"],
             "/api/organize/plan": ["csrf"],
             "/api/organize/apply": ["plan_hash", "csrf"],
@@ -706,6 +710,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(service.op_resync())
             elif path == "/api/resync/apply":
                 self._send_json(service.op_resync_apply(body["plan_hash"]))
+            elif path == "/api/cleanup/plan":
+                self._send_json(service.op_cleanup_plan())
             elif path == "/api/cleanup/apply":
                 self._send_json(service.op_cleanup_apply(body["plan_hash"]))
             elif path == "/api/organize/plan":

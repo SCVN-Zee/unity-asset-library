@@ -33,9 +33,9 @@ try {
   context.fetch = async () => ({ ok: true, text: async () => JSON.stringify(state) });
   await assert.rejects(vm.runInContext("ensureBackend()", context), /incompatible.*restart/i);
   await assert.rejects(vm.runInContext('postJson("/api/resync/plan")', context), /incompatible.*restart/i);
-  state.api_version = 1;
-  await assert.rejects(vm.runInContext("ensureBackend()", context), /incompatible.*restart/i);
   state.api_version = 2;
+  await assert.rejects(vm.runInContext("ensureBackend()", context), /incompatible.*restart/i);
+  state.api_version = 3;
   await vm.runInContext("ensureBackend()", context);
   const prepare = () => vm.runInContext("preparePackagedBackend()", context);
   const root = path.join(temp, "user", "backend");

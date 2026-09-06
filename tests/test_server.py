@@ -365,8 +365,9 @@ class TestApiAndBoundary(ServerHarnessTestCase):
 class TestResyncAndCleanup(ServerHarnessTestCase):
 
     def cleanup_preview(self):
-        _, _, plan = self.post("/api/resync/plan")
-        status, _, result = self.post("/api/resync/apply", {"plan_hash": plan["plan_hash"]})
+        before = (len(self.h.update_calls), len(self.h.apply_cleanup_calls))
+        status, _, result = self.post("/api/cleanup/plan")
+        self.assertEqual((len(self.h.update_calls), len(self.h.apply_cleanup_calls)), before)
         self.assertEqual(status, 200, result)
         return result
 
@@ -397,6 +398,7 @@ class TestResyncAndCleanup(ServerHarnessTestCase):
             status, _, result = self.post("/api/resync/apply", {"plan_hash": plan["plan_hash"]})
         self.assertEqual(status, 200, result)
         self.assertTrue(result["state_refreshed"])
+        self.assertNotIn("preview", result)
         self.assertEqual(ia.manifest_of(service._load_assets()), {"a.unitypackage": 3, "b.unitypackage": 5})
         self.assertEqual(sorted(os.listdir(self.h.vault)), ["a.unitypackage", "b.unitypackage"])
         self.assertEqual(self.h.apply_cleanup_calls, [])

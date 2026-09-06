@@ -16,7 +16,7 @@ function isViewerState(value) {
   return Boolean(
     value &&
       value.service === SERVICE &&
-      value.api_version === 2 &&
+      value.api_version === 3 &&
       value.ready === true &&
       typeof value.csrf === "string" &&
       value.csrf.length > 0,
@@ -195,6 +195,7 @@ function registerIpc() {
   ipcMain.handle("backend:assets", () => requestJson("/api/assets"));
   ipcMain.handle("backend:resync", () => postJson("/api/resync/plan"));
   ipcMain.handle("backend:resync-apply", (_event, planHash) => postJson("/api/resync/apply", { plan_hash: planHash }));
+  ipcMain.handle("backend:cleanup-plan", () => postJson("/api/cleanup/plan"));
   ipcMain.handle("backend:cleanup-apply", (_event, planHash) => postJson("/api/cleanup/apply", { plan_hash: planHash }));
   ipcMain.handle("backend:organize-plan", () => postJson("/api/organize/plan"));
   ipcMain.handle("backend:organize-apply", (_event, planHash) => postJson("/api/organize/apply", { plan_hash: planHash }));

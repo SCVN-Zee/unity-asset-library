@@ -710,6 +710,35 @@
    "status": "resolved",
    "title": "8 KI levels"
   },
+  "90-animated-emojis-2d-bubbles": {
+   "candidates_rejected": [],
+   "detail": {
+    "author": "Pirate Parrot",
+    "category_levels": [
+     "2D",
+     "GUI"
+    ],
+    "category_path": "2D/GUI",
+    "name": "90+ Animated emojis 2D + Bubbles",
+    "price": "20.00",
+    "rating": 5.0,
+    "reviews": 5,
+    "store": "https://assetstore.unity.com/packages/2d/gui/90-animated-emojis-2d-bubbles-246121",
+    "thumbnail_remote": "https://assetstorev1-prd-cdn.unity3d.com/key-image/f5b8a200-5ae2-481b-bd0b-53e4c297ce22.jpg"
+   },
+   "id": "246121",
+   "legacy": {
+    "category": "Textures & Materials/GUI Skins",
+    "id": "246121",
+    "name": "90+ Animated emojis 2D + Bubbles",
+    "publisher": "Pirate Parrot",
+    "version": "1.13"
+   },
+   "score": 1.0,
+   "status": "resolved",
+   "title": "90 Animated emojis 2D Bubbles",
+   "transport": "bing-rss"
+  },
   "a-pathfinding-project-pro": {
    "candidates_rejected": [],
    "detail": {

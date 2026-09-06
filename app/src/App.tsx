@@ -41,6 +41,20 @@ function Icon({ name }: { name: "search" | "refresh" | "folder" | "spark" | "gri
   return <svg aria-hidden="true" viewBox="0 0 24 24" className="icon"><path d={paths[name]} /></svg>;
 }
 
+type CategoryNode = { name: string; path: string; count: number; children: Map<string, CategoryNode> };
+
+function CategoryBranch({ node, selected, onSelect }: { node: CategoryNode; selected: string; onSelect: (path: string) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasChildren = node.children.size > 0;
+  return <li>
+    <div className={`category-row ${selected === node.path ? "active" : ""}`}>
+      {hasChildren ? <button className="category-toggle" aria-label={`${expanded ? "Collapse" : "Expand"} ${node.path}`} aria-expanded={expanded} onClick={() => setExpanded(!expanded)}><svg aria-hidden="true" viewBox="0 0 24 24" className="icon"><path d={expanded ? "m6 9 6 6 6-6" : "m9 6 6 6-6 6"} /></svg></button> : <span className="category-toggle-space" />}
+      <button className={`nav-row ${selected === node.path ? "active" : ""}`} title={node.path} aria-current={selected === node.path ? "true" : undefined} onClick={() => { onSelect(node.path); if (hasChildren) setExpanded(true); }}><span className="category-name"><Icon name="folder" /><span>{node.name}</span></span><span className="nav-count">{node.count}</span></button>
+    </div>
+    {hasChildren && <ul hidden={!expanded}>{[...node.children.values()].sort((a, b) => a.name.localeCompare(b.name)).map((child) => <CategoryBranch key={child.path} node={child} selected={selected} onSelect={onSelect} />)}</ul>}
+  </li>;
+}
+
 function App() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [state, setState] = useState<State | null>(null);
@@ -91,13 +105,23 @@ function App() {
     return () => window.clearInterval(timer);
   }, [state?.job?.id, state?.job?.status]);
 
-  const categoryCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    assets.forEach((asset) => {
-      const key = asset.category?.path || "Uncategorized";
-      counts.set(key, (counts.get(key) || 0) + 1);
-    });
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  const categoryTree = useMemo(() => {
+    const roots = new Map<string, CategoryNode>();
+    for (const asset of assets) {
+      let children = roots;
+      let path = "";
+      for (const name of (asset.category?.path || "Uncategorized").split("/")) {
+        path = path ? `${path}/${name}` : name;
+        let node = children.get(name);
+        if (!node) {
+          node = { name, path, count: 0, children: new Map() };
+          children.set(name, node);
+        }
+        node.count += 1;
+        children = node.children;
+      }
+    }
+    return roots;
   }, [assets]);
 
   const filtered = useMemo(() => {
@@ -105,7 +129,8 @@ function App() {
     return assets.filter((asset) => {
       const haystack = [asset.name, asset.local_name, asset.author, asset.category?.path, ...(asset.tags || []), ...(asset.flags || [])].filter(Boolean).join(" ").toLowerCase();
       if (needle && !haystack.includes(needle)) return false;
-      if (category !== "All assets" && (asset.category?.path || "Uncategorized") !== category) return false;
+      const assetCategory = asset.category?.path || "Uncategorized";
+      if (category !== "All assets" && assetCategory !== category && !assetCategory.startsWith(`${category}/`)) return false;
       if (quick === "pending" && !isPending(asset)) return false;
       if (quick === "flagged" && !(asset.flags || []).length) return false;
       if (quick === "non-store" && !asset.non_store) return false;
@@ -195,9 +220,9 @@ function App() {
         <section className="side-section"><div className="section-label">Library</div>
           {([ ["all", "All assets", assets.length], ["pending", "Needs enrichment", pendingCount], ["flagged", "Flagged", flaggedCount], ["non-store", "Local only", assets.filter((asset) => asset.non_store).length] ] as const).map(([key, label, count]) => <button key={key} className={`nav-row ${quick === key ? "active" : ""}`} onClick={() => setQuick(key)}><span>{label}</span><span className="nav-count">{count}</span></button>)}
         </section>
-        <section className="side-section categories"><div className="section-label">Categories <span>{categoryCounts.length}</span></div>
+        <section className="side-section categories"><div className="section-label">Categories <span>{categoryTree.size}</span></div>
           <button className={`nav-row ${category === "All assets" ? "active" : ""}`} onClick={() => setCategory("All assets")}><span>All categories</span><span className="nav-count">{assets.length}</span></button>
-          {categoryCounts.slice(0, 12).map(([name, count]) => <button key={name} className={`nav-row ${category === name ? "active" : ""}`} onClick={() => { setCategory(name); setQuick("all"); }}><span className="category-name"><Icon name="folder" />{name}</span><span className="nav-count">{count}</span></button>)}
+          <ul className="category-tree">{[...categoryTree.values()].sort((a, b) => a.name.localeCompare(b.name)).map((node) => <CategoryBranch key={node.path} node={node} selected={category} onSelect={(path) => { setCategory(path); setQuick("all"); }} />)}</ul>
         </section>
         <div className="sidebar-foot"><div className="mini-status"><span className="connection-dot" /><span>{storeCount} store records</span></div><span className="muted">Python engine online</span></div>
       </aside>

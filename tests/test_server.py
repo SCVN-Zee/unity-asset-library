@@ -137,7 +137,7 @@ class Harness:
         service._capture_organize_snapshot = lambda root, plan, scanned: {"snap": True}
         service._apply_organize = lambda *a, **k: \
             self.apply_organize_calls.append((a, k)) or {"moves_applied": 1}
-        service._index_update = lambda: self.update_calls.append(1) or 0
+        service._index_update = lambda scanned: self.update_calls.append(1) or 0
 
     # -- transport ----------------------------------------------------------
 
@@ -257,10 +257,6 @@ class StateLockContentionTest(unittest.TestCase):
                 pass
 
 
-    def test_server_update_passes_held_lock_to_index_cli(self):
-        with mock.patch.object(srv.ia, "main", return_value=0) as run:
-            self.assertEqual(self.service._index_update_impl(), 0)
-        run.assert_called_once_with(["update"], state_lock_held=True)
 
 class ServerHarnessTestCase(unittest.TestCase):
     def setUp(self):
@@ -311,7 +307,7 @@ class TestApiAndBoundary(ServerHarnessTestCase):
 
     def test_no_cors_header_anywhere(self):
         _, headers_get, _ = self.h.request("GET", "/api/state")
-        status, headers_post, _ = self.h.post("/api/resync", token="wrong")
+        status, headers_post, _ = self.h.post("/api/resync/plan", token="wrong")
         self.assertNotIn("access-control-allow-origin", headers_get)
         self.assertNotIn("access-control-allow-origin", headers_post)
         self.assertEqual(status, 403)
@@ -323,7 +319,7 @@ class TestApiAndBoundary(ServerHarnessTestCase):
                 self.assertIn(b"bad_host", data)
 
     def test_cross_origin_rejected(self):
-        status, _, data = self.h.post("/api/resync", token=self.h.token,
+        status, _, data = self.h.post("/api/resync/plan", token=self.h.token,
                                       headers={"Content-Type": "application/json",
                                                "Origin": "https://evil.example"})
         self.assertEqual(status, 403, data)
@@ -331,18 +327,18 @@ class TestApiAndBoundary(ServerHarnessTestCase):
 
     def test_non_json_post_rejected(self):
         status, _, data = self.h.request(
-            "POST", "/api/resync", headers={"Content-Type": "text/plain"})
+            "POST", "/api/resync/plan", headers={"Content-Type": "text/plain"})
         self.assertEqual(status, 415)
         self.assertIn(b"json_required", data)
 
     def test_unknown_keys_rejected(self):
-        status, _, data = self.h.post("/api/resync", {"csrf": self.h.token, "root": "/x"})
+        status, _, data = self.h.post("/api/resync/plan", {"csrf": self.h.token, "root": "/x"})
         self.assertEqual(status, 400)
         self.assertIn(b"unexpected_keys", data)
 
     def test_missing_or_wrong_token_is_403_with_zero_operations(self):
         for token in ("", "wrong"):
-            status, _, data = self.h.post("/api/resync", token=token)
+            status, _, data = self.h.post("/api/resync/plan", token=token)
             with self.subTest(token=token):
                 self.assertEqual(status, 403)
                 self.assertIn(b"bad_token", data)
@@ -352,7 +348,7 @@ class TestApiAndBoundary(ServerHarnessTestCase):
         conn = http.client.HTTPConnection("127.0.0.1", self.h.port, timeout=10)
         try:
             payload = b'{"csrf": "' + b"x" * (srv.MAX_BODY + 1) + b'"}'
-            conn.request("POST", "/api/resync", body=payload,
+            conn.request("POST", "/api/resync/plan", body=payload,
                          headers={"Content-Type": "application/json"})
             resp = conn.getresponse()
             data = resp.read()
@@ -368,36 +364,79 @@ class TestApiAndBoundary(ServerHarnessTestCase):
 
 class TestResyncAndCleanup(ServerHarnessTestCase):
 
-    def test_resync_scans_before_update_and_returns_preview(self):
-        order = []
-        real_scan = self.h.service._scan
-        real_update = self.h.service._index_update
-        self.h.service._scan = lambda *a, **k: order.append("scan") or real_scan(*a, **k)
-        self.h.service._index_update = lambda: order.append("update") or real_update()
-        status, _, body = self.post("/api/resync")
-        self.assertEqual(status, 200)
-        self.assertEqual(order[0], "scan")
-        self.assertEqual(order[-2], "update")
-        self.assertEqual(order[-1], "scan")
-        self.assertTrue(body["state_refreshed"])
-        self.assertEqual(body["preview"]["kind"], "cleanup")
-        self.assertEqual(body["preview"]["removals"][0]["path"], "a.unitypackage")
-        family = body["preview"]["families"][0]
-        self.assertEqual(family["asset_key"], "k1")
-        self.assertEqual(family["survivor"], None)
-        self.assertEqual(family["removals"], [])
-        self.assertTrue(body["plan_hash"])
+    def cleanup_preview(self):
+        _, _, plan = self.post("/api/resync/plan")
+        status, _, result = self.post("/api/resync/apply", {"plan_hash": plan["plan_hash"]})
+        self.assertEqual(status, 200, result)
+        return result
+
+    def test_resync_preview_and_apply_real_index_without_disk_deletion(self):
+        service = self.h.service
+        service._scan = ia.scan
+        service._load_assets = service._load_assets_impl
+        service._index_update = service._index_update_impl
+        path = os.path.join(self.h.state, "assets.json")
+        previous = {"assets": [{"versions": [
+            {"file": "gone.unitypackage", "size_bytes": 9},
+            {"file": "a.unitypackage", "size_bytes": 1}]}]}
+        with open(path, "w") as fh:
+            json.dump(previous, fh)
+        with open(path, "rb") as fh:
+            before = fh.read()
+        status, _, plan = self.post("/api/resync/plan")
+        self.assertEqual(status, 200, plan)
+        self.assertEqual(plan["preview"]["additions"], [{"path": "b.unitypackage", "size_bytes": 5}])
+        self.assertEqual(plan["preview"]["removals"], [{"path": "gone.unitypackage", "size_bytes": 9}])
+        self.assertEqual(plan["preview"]["resized"], [{"path": "a.unitypackage", "size_bytes": 3, "previous_size_bytes": 1}])
+        self.assertEqual(plan["preview"]["totals"], {"added": 1, "removed": 1, "resized": 1})
+        with open(path, "rb") as fh:
+            self.assertEqual(fh.read(), before)  # Closing the preview needs no write request.
+        self.assertFalse(os.path.exists(os.path.join(self.h.state, "pending-enrichment.json")))
+        with mock.patch.object(ia, "output_dir", return_value=self.h.static), \
+                mock.patch.object(ia, "scan", side_effect=AssertionError("unreviewed rescan")):
+            status, _, result = self.post("/api/resync/apply", {"plan_hash": plan["plan_hash"]})
+        self.assertEqual(status, 200, result)
+        self.assertTrue(result["state_refreshed"])
+        self.assertEqual(ia.manifest_of(service._load_assets()), {"a.unitypackage": 3, "b.unitypackage": 5})
+        self.assertEqual(sorted(os.listdir(self.h.vault)), ["a.unitypackage", "b.unitypackage"])
+        self.assertEqual(self.h.apply_cleanup_calls, [])
+        _, _, unchanged = self.post("/api/resync/plan")
+        self.assertEqual(unchanged["preview"]["totals"], {"added": 0, "removed": 0, "resized": 0})
+
+    def test_resync_drift_requires_new_confirmation(self):
+        _, _, plan = self.post("/api/resync/plan")
+        self.h._make_archive("c.unitypackage", b"new")
+        self.h.service._scan = ia.scan
+        status, _, changed = self.post("/api/resync/apply", {"plan_hash": plan["plan_hash"]})
+        self.assertEqual(status, 409, changed)
+        self.assertEqual(changed["error"], "plan_changed")
+        self.assertEqual(self.h.update_calls, [])
+        self.assertIn("c.unitypackage", [r["path"] for r in changed["plan"]["additions"]])
+        status, _, result = self.post("/api/resync/apply", {"plan_hash": changed["plan_hash"]})
+        self.assertEqual(status, 200, result)
+        self.assertEqual(len(self.h.update_calls), 1)
+
+    def test_resync_index_drift_and_first_index(self):
+        _, _, plan = self.post("/api/resync/plan")
+        self.h.service._load_assets = lambda: {"assets": []}
+        status, _, result = self.post("/api/resync/apply", {"plan_hash": plan["plan_hash"]})
+        self.assertEqual(status, 409, result)
+        self.assertEqual(self.h.update_calls, [])
+        self.h.service._load_assets = self.h.service._load_assets_impl
+        _, _, first = self.post("/api/resync/plan")
+        self.assertEqual(first["preview"]["totals"], {"added": 2, "removed": 0, "resized": 0})
+
 
     def test_resync_walk_error_is_clean_503_with_zero_writes(self):
         def boom(root, strict=True):
             raise OSError("walk failed")
         self.h.service._scan = boom
-        status, _, body = self.post("/api/resync")
+        status, _, body = self.post("/api/resync/plan")
         self.assertEqual(status, 503, body)
         self.assertEqual(self.h.update_calls, [])
 
     def test_cleanup_apply_happy_path_calls_engine_once(self):
-        _, _, resync = self.post("/api/resync")
+        resync = self.cleanup_preview()
         status, _, body = self.post("/api/cleanup/apply",
                                     {"plan_hash": resync["plan_hash"]})
         self.assertEqual(status, 200, body)
@@ -413,7 +452,7 @@ class TestResyncAndCleanup(ServerHarnessTestCase):
         self.assertEqual(self.h.apply_cleanup_calls, [])
 
     def test_cleanup_apply_inode_change_drifts_mtime_change_does_not(self):
-        _, _, resync = self.post("/api/resync")
+        resync = self.cleanup_preview()
         h1 = resync["plan_hash"]
         # mtime-only churn: rewrite in place, same size
         self.h._make_archive("b.unitypackage", b"xxxxx")
@@ -422,7 +461,7 @@ class TestResyncAndCleanup(ServerHarnessTestCase):
         # inode change: recreate at the same size
         os.remove(os.path.join(self.h.vault, "b.unitypackage"))
         self.h._make_archive("b.unitypackage", b"bbbbb")
-        _, _, resync2 = self.post("/api/resync")
+        resync2 = self.cleanup_preview()
         self.assertNotEqual(resync2["plan_hash"], h1)
         status, _, body = self.post("/api/cleanup/apply", {"plan_hash": h1})
         self.assertEqual(status, 409)
@@ -433,13 +472,13 @@ class TestResyncAndCleanup(ServerHarnessTestCase):
         fh = open(os.path.join(self.h.state, "state-write.lock"), "a")
         fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
         try:
-            status, _, body = self.post("/api/resync")
+            status, _, body = self.post("/api/resync/plan")
             self.assertEqual(status, 409)
             self.assertEqual(body["error"], "busy")
         finally:
             fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
             fh.close()
-        status, _, _ = self.post("/api/resync")
+        status, _, _ = self.post("/api/resync/plan")
         self.assertEqual(status, 200)
 
     def test_engine_lock_contention_is_busy_409(self):
@@ -449,7 +488,7 @@ class TestResyncAndCleanup(ServerHarnessTestCase):
         fh = open(path, "a")
         fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
         try:
-            status, _, body = self.post("/api/resync")
+            status, _, body = self.post("/api/resync/plan")
             self.assertEqual(status, 409, body)
             self.assertEqual(body["error"], "busy")
         finally:
@@ -458,10 +497,10 @@ class TestResyncAndCleanup(ServerHarnessTestCase):
 
     def test_manual_gate_hold_is_busy_409(self):
         with self.h.service._gate:
-            status, _, body = self.post("/api/resync")
+            status, _, body = self.post("/api/resync/plan")
         self.assertEqual(status, 409)
         self.assertEqual(body["error"], "busy")
-        status, _, _ = self.post("/api/resync")
+        status, _, _ = self.post("/api/resync/plan")
         self.assertEqual(status, 200)
 
 
@@ -491,7 +530,7 @@ class TestRealEngineApply(unittest.TestCase):
             service._plan_cleanup = cv.plan_cleanup
             service._capture_cleanup_snapshot = cv.capture_snapshot
             service._apply_cleanup = cv.apply_cleanup
-            service._index_update = lambda: 0
+            service._index_update = lambda scanned: 0
             scanned = service._strict_scan()
             _, digest = service.cleanup_preview(scanned)
             result, errors = [], []
@@ -592,7 +631,7 @@ class TestEnrichJob(ServerHarnessTestCase):
         job_id = body["job_id"]
         self.assertTrue(_await(lambda: len(calls) == 1))
         # resolve is running (blocked in wait()) — resync must succeed
-        status, _, _ = self.post("/api/resync")
+        status, _, _ = self.post("/api/resync/plan")
         self.assertEqual(status, 200)
         status, _, body2 = self.post("/api/enrich/start")
         self.assertEqual(status, 409)
@@ -700,7 +739,7 @@ class TestEnrichJob(ServerHarnessTestCase):
         self.assertTrue(_await(lambda: (self.h.service.op_job(job_id) or {}).get("status")
                                == "cancelled"))
         # gate is free: a mutation succeeds right after cancellation
-        status, _, _ = self.post("/api/resync")
+        status, _, _ = self.post("/api/resync/plan")
         count = {"n": 0}
 
         def runner(argv):
@@ -714,7 +753,7 @@ class TestEnrichJob(ServerHarnessTestCase):
         job_id = body["job_id"]
         self.assertTrue(_await(lambda: (self.h.service.op_job(job_id) or {}).get("status")
                                == "failed"))
-        status, _, rbody = self.post("/api/resync")
+        status, _, rbody = self.post("/api/resync/plan")
         self.assertEqual(status, 200, rbody)
         self.assertIn("worker crashed", self.h.service.op_job(job_id)["error"])
 

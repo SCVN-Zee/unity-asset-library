@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type QuickFilter = "all" | "pending" | "flagged" | "non-store";
 type ViewMode = "grid" | "list";
 type SortMode = "name" | "author" | "size";
-type DialogState = { mode: "cleanup" | "organize"; title: string; result: ActionResult } | null;
+type DialogState = { mode: "resync" | "cleanup" | "organize"; title: string; result: ActionResult } | null;
 
 const api = window.uai;
 
@@ -152,16 +152,7 @@ function App() {
       setBusy(name);
       setError("");
       const result = name === "resync" ? await api.resync() : await api.organizePlan();
-      if (name === "resync") {
-        try {
-          const refreshed = await api.getAssets();
-          setAssets(refreshed.assets || []);
-          setSelectedKey((current) => current && refreshed.assets.some((asset) => asset.asset_key === current) ? current : refreshed.assets[0]?.asset_key || null);
-        } catch (refreshCause) {
-          setError(refreshCause instanceof Error ? `Resync completed, but the library could not refresh: ${refreshCause.message}` : "Resync completed, but the library could not refresh.");
-        }
-      }
-      setDialog({ mode: name === "resync" ? "cleanup" : "organize", title: name === "resync" ? "Review cleanup" : "Review organization", result });
+      setDialog({ mode: name, title: name === "resync" ? "Review resync" : "Review organization", result });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The action failed.");
     } finally {
@@ -188,12 +179,19 @@ function App() {
   }
 
   async function confirmDialog() {
-    if (!dialog?.result.plan_hash) return;
+    if (!dialog?.result.plan_hash || busy) return;
     try {
       setBusy(dialog.mode);
-      if (dialog.mode === "cleanup") await api.cleanupApply(dialog.result.plan_hash);
-      else await api.organizeApply(dialog.result.plan_hash);
-      setDialog(null);
+      setError("");
+      if (dialog.mode === "resync") {
+        const result = await api.resyncApply(dialog.result.plan_hash);
+        setDialog(result.preview ? { mode: "cleanup", title: "Review disk cleanup", result } : null);
+        if (result.cleanup_error) setError("Resync completed, but cleanup could not be previewed: " + result.cleanup_error);
+      } else {
+        if (dialog.mode === "cleanup") await api.cleanupApply(dialog.result.plan_hash);
+        else await api.organizeApply(dialog.result.plan_hash);
+        setDialog(null);
+      }
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The plan changed before it could be applied.");
@@ -251,10 +249,37 @@ function Inspector({ asset, onOpen }: { asset: Asset; onOpen: (url: string) => v
 }
 
 function ActionDialog({ dialog, busy, onClose, onConfirm }: { dialog: NonNullable<DialogState>; busy: boolean; onClose: () => void; onConfirm: () => void }) {
+  const modal = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const element = modal.current!;
+    element.showModal();
+    return () => element.close();
+  }, []);
   const preview = dialog.result.preview || {};
+  const resync = dialog.mode === "resync";
   const rows = dialog.mode === "cleanup" ? preview.removals || [] : preview.moves || [];
   const totals = preview.totals || {};
-  return <div className="modal-backdrop" role="presentation"><section className="action-dialog" role="dialog" aria-modal="true" aria-labelledby="action-title"><div className="dialog-top"><div><div className="eyebrow">CONFIRMATION REQUIRED</div><h2 id="action-title">{dialog.title}</h2></div><button className="icon-button" onClick={onClose} aria-label="Close dialog">×</button></div><p className="dialog-lead">This plan was generated from the current library. Review it before anything changes on disk.</p><div className="dialog-stats"><div><strong>{totals.files ?? totals.moves ?? rows.length}</strong><span>{dialog.mode === "cleanup" ? "files affected" : "moves planned"}</span></div><div><strong>{formatBytes(totals.bytes ?? totals.move_bytes ?? 0)}</strong><span>storage</span></div><div><strong>{totals.families ?? "—"}</strong><span>groups</span></div></div><div className="plan-list">{rows.slice(0, 8).map((row: any, index: number) => <div key={`${row.path || row.src}-${index}`}><span>{row.path || row.src}</span><span className="plan-arrow">→</span><span>{row.dst || (row.size_bytes ? formatBytes(row.size_bytes) : "remove")}</span></div>)}{rows.length > 8 && <div className="plan-more">+ {rows.length - 8} more items</div>}{!rows.length && <div className="plan-more">No file changes are planned.</div>}</div><div className="dialog-foot"><button className="button quiet" onClick={onClose}>Cancel</button><button className="button primary" onClick={onConfirm} disabled={busy}>{busy ? "Applying…" : "Confirm changes"}</button></div></section></div>;
+  const groups = [
+    { label: "Add to index", rows: preview.additions || [], tone: "add", hint: "Files found in the vault that are not indexed yet." },
+    { label: "Remove from index", rows: preview.removals || [], tone: "remove", hint: "Files no longer found in the vault. Does not delete files from disk." },
+    { label: "Update size in index", rows: preview.resized || [], tone: "resize", hint: "Existing paths whose file size changed." },
+  ];
+  return <dialog ref={modal} className="action-dialog" aria-labelledby="action-title" aria-describedby="action-description" onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}>
+    <div className="dialog-top"><div><div className="eyebrow">CONFIRMATION REQUIRED</div><h2 id="action-title">{dialog.title}</h2></div><button className="icon-button" onClick={onClose} disabled={busy} aria-label="Close dialog">×</button></div>
+    <p id="action-description" className="dialog-lead">{resync ? "Review the vault-relative paths below before updating the index. No files will be deleted from disk." : dialog.mode === "cleanup" ? "The index is synced. This separate cleanup will delete the listed files from disk only if you confirm." : "Review these moves before anything changes on disk."}</p>
+    {resync ? <>
+      <div className="dialog-stats">{groups.map((group) => <div key={group.tone}><strong className={group.tone === "add" ? "added-text" : group.tone === "remove" ? "danger-text" : ""}>{group.rows.length}</strong><span>{group.label}</span></div>)}</div>
+      <div className="resync-groups">{groups.filter((group) => group.tone !== "resize" || group.rows.length > 0).map((group) => <section className="change-group" key={group.tone} aria-label={group.label}>
+        <h3>{group.label} <span>{group.rows.length}</span></h3><p>{group.hint}</p>
+        <ul className="change-list">{group.rows.map((row) => <li key={row.path}><span>{row.path}</span><small>{group.tone === "resize" ? formatBytes(row.previous_size_bytes ?? 0) + " → " : ""}{formatBytes(row.size_bytes ?? 0)}</small></li>)}</ul>
+        {!group.rows.length && <p className="change-empty">No files to {group.tone === "add" ? "add" : "remove"}.</p>}
+      </section>)}</div>
+    </> : <>
+      <div className="dialog-stats"><div><strong>{totals.files ?? totals.moves ?? rows.length}</strong><span>{dialog.mode === "cleanup" ? "files to delete" : "moves planned"}</span></div><div><strong>{formatBytes(totals.bytes ?? totals.move_bytes ?? 0)}</strong><span>storage</span></div></div>
+      <div className="plan-list">{rows.map((row, index) => <div key={row.path || row.src || index}><span>{row.path || row.src}</span><span className="plan-arrow">→</span><span>{row.dst || formatBytes(row.size_bytes ?? 0)}</span></div>)}{!rows.length && <div className="plan-more">No file changes are planned.</div>}</div>
+    </>}
+    <div className="dialog-foot"><button className="button quiet" onClick={onClose} disabled={busy} autoFocus>Cancel</button><button className="button primary" onClick={onConfirm} disabled={busy || !dialog.result.plan_hash || (!resync && !rows.length)}>{busy ? "Applying…" : resync ? "Apply resync" : dialog.mode === "cleanup" ? "Delete files from disk" : "Confirm changes"}</button></div>
+  </dialog>;
 }
 
 export default App;

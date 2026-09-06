@@ -13,6 +13,14 @@ created: 2026-09-05
 
 A user launches one macOS desktop app. Electron starts or reuses the loopback Python backend, React renders the asset library, and Resync, Organize, and Enrich remain available without a terminal or command file.
 
+### Resync review update — 2026-09-06
+
+- Resync now calls read-only `POST /api/resync/plan`, listing every added, removed, and resized vault-relative path before updating the index.
+- Apply calls `POST /api/resync/apply` with the reviewed hash; vault or index-manifest drift requires a fresh review. The index writer consumes the validated scan.
+- Cancel leaves index data untouched. Index removal never deletes archives; disk cleanup remains a separate, explicit confirmation after sync.
+- Restart Electron and its Python backend after updating; the old immediate-mutation `/api/resync` route is removed.
+- Verification: real temporary-vault HTTP apply, full Python suite, TypeScript/Vite build, and browser-driven renderer review/cancel/apply/drift/empty-state checks.
+
 ## Constraints
 
 - Preserve the Python backend's fail-closed filesystem safety and preview/confirm/apply contracts.

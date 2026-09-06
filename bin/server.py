@@ -4,7 +4,8 @@
 Serves the React/Electron app's fixed JSON API:
 
     GET  /api/state          pending count, capability token, latest job summary
-    POST /api/resync         index update, then a fresh cleanup preview
+    POST /api/resync/plan    read-only index change preview
+    POST /api/resync/apply   confirm index changes, then preview cleanup
     POST /api/cleanup/apply  confirm a cleanup preview by plan_hash
     POST /api/organize/plan  category-folder plan from the organize engine
     POST /api/organize/apply confirm an organize preview by plan_hash
@@ -141,8 +142,9 @@ class ViewerService:
         with open(os.path.join(self.state, "assets.json"), encoding="utf-8") as fh:
             return json.load(fh)
 
-    def _index_update_impl(self):
-        return ia.main(["update"], state_lock_held=True)
+    def _index_update_impl(self, scanned):
+        return ia.main(["update", "--root", self.root, "--state", self.state],
+                       state_lock_held=True, scanned=scanned)
 
     def _pending_count(self):
         path = os.path.join(self.state, "pending-enrichment.json")
@@ -292,16 +294,49 @@ class ViewerService:
     def op_assets(self):
         return self._load_assets()
 
+    def resync_preview(self, scanned):
+        try:
+            previous = ia.manifest_of(self._load_assets())
+        except FileNotFoundError:
+            previous = {}
+        except ValueError as exc:
+            raise SafetyError("The index is unreadable; resync cannot safely preview changes.") from exc
+        current = {row["rel_path"]: row["size"] for row in scanned}
+        # First sync previews all files, unlike the historical changelog baseline.
+        diff = ia.diff_manifest(previous, current, had_previous=True)
+        preview = {
+            "kind": "resync",
+            "additions": [{"path": p, "size_bytes": current[p]} for p in diff["added"]],
+            "removals": [{"path": p, "size_bytes": previous[p]} for p in diff["removed"]],
+            "resized": [{"path": p, "size_bytes": new, "previous_size_bytes": old}
+                        for p, old, new in diff["resized"]],
+            "totals": {"added": len(diff["added"]), "removed": len(diff["removed"]),
+                       "resized": len(diff["resized"])},
+        }
+        return preview, plan_hash("resync", preview, self.root, scanned, extra=previous)
+
     def op_resync(self):
-        """Update the index from the vault, then return a fresh cleanup preview."""
+        """Preview index changes without changing the index or vault."""
         with self.mutation_gate("resync"), self.state_write_lock(), \
                 self.engine_lock_attempt():
-            self._strict_scan()                 # strict pre-scan: zero writes on error
-            update_result = self._index_update()
+            preview, digest = self.resync_preview(self._strict_scan())
+        return {"preview": preview, "plan_hash": digest}
+
+    def op_resync_apply(self, plan_hash_value):
+        with self.mutation_gate("resync-apply"), self.state_write_lock(), \
+                self.engine_lock_attempt():
+            scanned = self._strict_scan()
+            preview, digest = self.resync_preview(scanned)
+            if not hmac.compare_digest(digest, plan_hash_value):
+                raise Drift(preview, digest)
+            # Apply the validated scan, never a second unreviewed scan.
+            update_result = self._index_update(scanned)
             if update_result != 0:
                 raise SafetyError(f"index update exited {update_result}")
-            scanned = self._strict_scan()
-            preview, digest = self.cleanup_preview(scanned)
+            try:
+                preview, digest = self.cleanup_preview(self._strict_scan())
+            except (OSError, SafetyError) as exc:
+                return {"state_refreshed": True, "cleanup_error": str(exc)}
         return {"preview": preview, "plan_hash": digest, "state_refreshed": True}
 
     def op_cleanup_apply(self, plan_hash_value):
@@ -651,7 +686,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         service = self.service
         schema_by_path = {
-            "/api/resync": ["csrf"],
+            "/api/resync/plan": ["csrf"],
+            "/api/resync/apply": ["plan_hash", "csrf"],
             "/api/cleanup/apply": ["plan_hash", "csrf"],
             "/api/organize/plan": ["csrf"],
             "/api/organize/apply": ["plan_hash", "csrf"],
@@ -665,8 +701,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if body is None:
             return
         try:
-            if path == "/api/resync":
+            if path == "/api/resync/plan":
                 self._send_json(service.op_resync())
+            elif path == "/api/resync/apply":
+                self._send_json(service.op_resync_apply(body["plan_hash"]))
             elif path == "/api/cleanup/apply":
                 self._send_json(service.op_cleanup_apply(body["plan_hash"]))
             elif path == "/api/organize/plan":

@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld("uai", {
   getState: () => ipcRenderer.invoke("backend:state"),
   getAssets: () => ipcRenderer.invoke("backend:assets"),
   resync: () => ipcRenderer.invoke("backend:resync"),
+  resyncApply: (planHash) => ipcRenderer.invoke("backend:resync-apply", planHash),
   cleanupApply: (planHash) => ipcRenderer.invoke("backend:cleanup-apply", planHash),
   organizePlan: () => ipcRenderer.invoke("backend:organize-plan"),
   organizeApply: (planHash) => ipcRenderer.invoke("backend:organize-apply", planHash),

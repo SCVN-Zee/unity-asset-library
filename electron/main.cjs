@@ -37,7 +37,7 @@ async function requestJson(endpoint, options = {}) {
     throw new Error("The Python backend returned invalid JSON.");
   }
   if (!response.ok) {
-    throw new Error(value.detail || value.error || `Backend request failed (${response.status}).`);
+    throw new Error(value.error === "plan_changed" ? "The library changed. Run the action again to review a fresh plan before applying." : value.detail || value.error || `Backend request failed (${response.status}).`);
   }
   return value;
 }
@@ -180,7 +180,8 @@ async function postJson(endpoint, body = {}) {
 function registerIpc() {
   ipcMain.handle("backend:state", () => readState());
   ipcMain.handle("backend:assets", () => requestJson("/api/assets"));
-  ipcMain.handle("backend:resync", () => postJson("/api/resync"));
+  ipcMain.handle("backend:resync", () => postJson("/api/resync/plan"));
+  ipcMain.handle("backend:resync-apply", (_event, planHash) => postJson("/api/resync/apply", { plan_hash: planHash }));
   ipcMain.handle("backend:cleanup-apply", (_event, planHash) => postJson("/api/cleanup/apply", { plan_hash: planHash }));
   ipcMain.handle("backend:organize-plan", () => postJson("/api/organize/plan"));
   ipcMain.handle("backend:organize-apply", (_event, planHash) => postJson("/api/organize/apply", { plan_hash: planHash }));

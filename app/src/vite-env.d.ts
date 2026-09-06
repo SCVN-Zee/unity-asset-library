@@ -22,13 +22,14 @@ declare global {
   type AssetIndex = { assets: Asset[]; asset_count?: number; file_count?: number; generated?: string };
   type Job = { id: string; status: string; stage?: string | null; counts?: Record<string, number>; remaining?: number | null; error?: string | null } | null;
   type State = { service: string; ready: boolean; csrf: string; pending_enrichment: number; job: Job };
-  type PlanRow = { path?: string; src?: string; dst?: string; size_bytes?: number };
-  type ActionPreview = { removals?: PlanRow[]; moves?: PlanRow[]; totals?: Record<string, number> };
+  type PlanRow = { path?: string; src?: string; dst?: string; size_bytes?: number; previous_size_bytes?: number };
+  type ActionPreview = { additions?: PlanRow[]; removals?: PlanRow[]; resized?: PlanRow[]; moves?: PlanRow[]; totals?: Record<string, number> };
   type ActionResult = { preview?: ActionPreview; plan_hash?: string; [key: string]: unknown };
   type UaiBridge = {
     getState: () => Promise<State>;
     getAssets: () => Promise<AssetIndex>;
     resync: () => Promise<ActionResult>;
+    resyncApply: (planHash: string) => Promise<ActionResult>;
     cleanupApply: (planHash: string) => Promise<ActionResult>;
     organizePlan: () => Promise<ActionResult>;
     organizeApply: (planHash: string) => Promise<ActionResult>;

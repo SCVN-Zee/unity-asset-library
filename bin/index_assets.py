@@ -912,7 +912,7 @@ def output_dir(root, cfg=None):
     return root
 
 
-def main(argv=None, state_lock_held=False):
+def main(argv=None, state_lock_held=False, scanned=None):
     probe = argparse.ArgumentParser(add_help=False)
     probe.add_argument("--state", default=None)
     probe.add_argument("--state-lock-held", action="store_true")
@@ -920,10 +920,10 @@ def main(argv=None, state_lock_held=False):
     held = state_lock_held or probe_args.state_lock_held
     index_dir = os.path.abspath(probe_args.state) if probe_args.state else state_dir()
     if held:
-        return _main_unlocked(argv)
+        return _main_unlocked(argv, scanned=scanned)
     with state_write_lock(index_dir, "index_assets", blocking=True):
-        return _main_unlocked(argv)
-def _main_unlocked(argv=None):
+        return _main_unlocked(argv, scanned=scanned)
+def _main_unlocked(argv=None, scanned=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("steps", nargs="+", choices=["scan", "emit", "update"])
     ap.add_argument("--root", default=None,
@@ -953,7 +953,8 @@ def _main_unlocked(argv=None):
         else:
             print("update: no previous state — establishing baseline")
 
-        scanned = scan(root)
+        if scanned is None:
+            scanned = scan(root)
         data = build(scanned)
         diff = diff_manifest(prev, {r["rel_path"]: r["size"] for r in scanned},
                              had_previous=had_previous)

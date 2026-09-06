@@ -285,6 +285,7 @@ class ViewerService:
             job = self._job_snapshot(self._job)
         return {
             "service": "unity-asset-index",
+            "api_version": 2,  # Preview/apply resync contract; bump on breaking API changes.
             "ready": True,
             "pending_enrichment": self._pending_count(),
             "job": job,

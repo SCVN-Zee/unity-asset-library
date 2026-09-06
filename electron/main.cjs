@@ -6,6 +6,7 @@ const path = require("node:path");
 const PORT = 8765;
 const SERVICE = "unity-asset-index";
 const BASE_URL = `http://127.0.0.1:${PORT}`;
+const INCOMPATIBLE_BACKEND = `An incompatible backend is listening on port ${PORT}. Stop that Python server and restart the desktop app.`;
 let backendProcess = null;
 let ownsBackend = false;
 let quitting = false;
@@ -15,6 +16,7 @@ function isViewerState(value) {
   return Boolean(
     value &&
       value.service === SERVICE &&
+      value.api_version === 2 &&
       value.ready === true &&
       typeof value.csrf === "string" &&
       value.csrf.length > 0,
@@ -134,11 +136,15 @@ function pythonCommand() {
 }
 
 async function ensureBackend() {
+  let existing;
   try {
-    const existing = await readState();
-    if (isViewerState(existing)) return;
+    existing = await readState();
   } catch {
-    // No compatible viewer is listening yet. Start our owned backend below.
+    // No viewer is listening yet. Start our owned backend below.
+  }
+  if (existing) {
+    if (isViewerState(existing)) return;
+    throw new Error(INCOMPATIBLE_BACKEND);
   }
 
   const root = preparePackagedBackend();
@@ -176,7 +182,7 @@ async function ensureBackend() {
 
 async function postJson(endpoint, body = {}) {
   const state = await readState();
-  if (!isViewerState(state)) throw new Error("The Unity Asset Index backend is unavailable.");
+  if (!isViewerState(state)) throw new Error(INCOMPATIBLE_BACKEND);
   return requestJson(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

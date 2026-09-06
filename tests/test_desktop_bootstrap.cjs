@@ -5,6 +5,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "uai-bootstrap-"));
+(async () => {
 try {
   const resources = path.join(temp, "resources");
   const template = path.join(resources, "uai-backend");
@@ -28,6 +29,14 @@ try {
     __dirname: path.join(temp, "dev", "electron"),
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../electron/main.cjs"), "utf8"), context);
+  const state = { service: "unity-asset-index", ready: true, csrf: "token" };
+  context.fetch = async () => ({ ok: true, text: async () => JSON.stringify(state) });
+  await assert.rejects(vm.runInContext("ensureBackend()", context), /incompatible.*restart/i);
+  await assert.rejects(vm.runInContext('postJson("/api/resync/plan")', context), /incompatible.*restart/i);
+  state.api_version = 1;
+  await assert.rejects(vm.runInContext("ensureBackend()", context), /incompatible.*restart/i);
+  state.api_version = 2;
+  await vm.runInContext("ensureBackend()", context);
   const prepare = () => vm.runInContext("preparePackagedBackend()", context);
   const root = path.join(temp, "user", "backend");
   assert.equal(prepare(), null);
@@ -45,7 +54,8 @@ try {
   assert.equal(prepare(), null);
   selection = [temp];
   assert.equal(prepare(), path.join(temp, "dev"));
-  console.log("PASS: cancel, per-user config, cache-only seed, cache preservation, fresh development setup");
+  console.log("PASS: backend compatibility, cancel, per-user config, cache-only seed, cache preservation, fresh development setup");
 } finally {
   fs.rmSync(temp, { recursive: true, force: true });
 }
+})().catch((error) => { console.error(error); process.exitCode = 1; });

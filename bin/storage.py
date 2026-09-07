@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Storage configuration and crash-safe index rebuilds for the asset shelf."""
+"""Storage configuration and crash-safe index rebuilds for the asset library."""
 
 from __future__ import annotations
 

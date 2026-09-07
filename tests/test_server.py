@@ -315,7 +315,7 @@ class TestApiAndBoundary(ServerHarnessTestCase):
         body = json.loads(body)
         self.assertEqual(status, 200)
         self.assertEqual(body["pending_enrichment"], 2)
-        self.assertEqual(body["service"], "unity-asset-index")
+        self.assertEqual(body["service"], "unity-asset-library")
         self.assertTrue(body["csrf"])
         self.assertIsNone(body["job"])
 
@@ -655,17 +655,17 @@ class TestEnrichJob(ServerHarnessTestCase):
         joined = " ".join(argv)
         if len(argv) > 3 and argv[3] == "resolve":
             return _FakeProc([
-                "UAI_PROGRESS " + json.dumps({"stage": "resolve", "completed": 0,
+                "UL_PROGRESS " + json.dumps({"stage": "resolve", "completed": 0,
                                                "total": 2, "current_item": "a", "counts": {}}),
                 "resolve: 2 assets to attempt",
                 "[1/2] ok a",
-                "UAI_PROGRESS " + json.dumps({"stage": "resolve", "completed": 2,
+                "UL_PROGRESS " + json.dumps({"stage": "resolve", "completed": 2,
                                                "total": 2, "current_item": "b",
                                                "counts": {"total": 2, "done": 2}}),
                 "[2/2] ok b"], rc=0, release=release)
         if len(argv) > 3 and argv[3] == "enrich":
             return _FakeProc([
-                "UAI_PROGRESS " + json.dumps({"stage": "enrich", "completed": 2,
+                "UL_PROGRESS " + json.dumps({"stage": "enrich", "completed": 2,
                                                "total": 2, "current_item": None,
                                                "counts": {"store_eligible": 2}}),
                 "enrich: 2/2 store-eligible id-verified (100.0%)"], rc=0)
@@ -985,6 +985,106 @@ class TestLifecycle(unittest.TestCase):
             second.shutdown()
             h._tmp.cleanup()
 
+
+class FavoritesTest(unittest.TestCase):
+    """Persistent favorites: identity-keyed set API, restart/reindex survival,
+    idempotence, and strict input handling."""
+
+    def setUp(self):
+        self.h = Harness()
+
+    def tearDown(self):
+        self.h.stop()
+
+    def fav(self, asset_key, favorite, token=None):
+        return self.h.post("/api/favorites", {"asset_key": asset_key, "favorite": favorite},
+                           token=token or self.h.token)
+
+    def get_favorites(self):
+        status, _, raw = self.h.request("GET", "/api/favorites")
+        return status, json.loads(raw)
+
+    def test_set_get_remove_idempotent(self):
+        self.assertEqual(self.get_favorites(), (200, {"favorites": []}))
+        status, _, raw = self.fav("k1", True)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(raw), {"favorites": ["k1"]})
+        # Idempotent add and remove.
+        status, _, raw = self.fav("k1", True)
+        self.assertEqual((status, json.loads(raw)), (200, {"favorites": ["k1"]}))
+        status, _, raw = self.fav("k1", False)
+        self.assertEqual((status, json.loads(raw)), (200, {"favorites": []}))
+        status, _, raw = self.fav("k1", False)
+        self.assertEqual((status, json.loads(raw)), (200, {"favorites": []}))
+        self.assertEqual(self.get_favorites(), (200, {"favorites": []}))
+
+    def test_persist_across_restart_and_index_replacement(self):
+        self.assertEqual(self.fav("k1", True)[0], 200)
+        repo = os.path.dirname(self.h.vault)
+        self.h.httpd.shutdown()
+        self.h.httpd.server_close()
+        self.h._thread.join(timeout=5)
+        self.h.service.shutdown()
+        # Fresh service over the same repo, and a replaced index with a
+        # different asset list: favorites follow asset identity, not the index.
+        ia.write_atomic(os.path.join(self.h.state, "assets.json"),
+                        json.dumps({"assets": [{"asset_key": "k2", "name": "B",
+                                                "versions": []}]}))
+        second = srv.ViewerService(repo=repo,
+                                   config={"vault_root": self.h.vault, "output_dir": self.h.static})
+        httpd = srv._Server(("127.0.0.1", 0), srv.Handler, second)
+        port = httpd.server_address[1]
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            conn.request("GET", "/api/state")
+            state = json.loads(conn.getresponse().read())
+            conn.request("GET", "/api/favorites")
+            self.assertEqual(json.loads(conn.getresponse().read()), {"favorites": ["k1"]})
+            # The replaced index's key is settable; the old key stays stored.
+            conn.request("POST", "/api/favorites",
+                         body=json.dumps({"asset_key": "k2", "favorite": True, "csrf": state["csrf"]}),
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            body = json.loads(resp.read())
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(body, {"favorites": ["k1", "k2"]})
+            conn.close()
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=5)
+            second.shutdown()
+
+    def test_unknown_asset_rejected(self):
+        status, _, raw = self.fav("missing", True)
+        self.assertEqual((status, json.loads(raw)), (404, {"error": "unknown_asset"}))
+        self.assertEqual(self.get_favorites(), (200, {"favorites": []}))
+
+    def test_bad_input_and_csrf(self):
+        for payload in ({"asset_key": 7, "favorite": True},
+                        {"asset_key": "k1", "favorite": "yes"},
+                        {"asset_key": "", "favorite": True},
+                        {"asset_key": None, "favorite": True}):
+            self.assertEqual(self.fav(payload["asset_key"], payload["favorite"])[0], 400)
+        self.assertEqual(self.fav("k1", True, token="wrong")[0], 403)
+        # Extra/missing keys are rejected by the exact-key schema.
+        status, _, raw = self.h.post("/api/favorites", {"asset_key": "k1"})
+        self.assertEqual(status, 400)
+        self.assertEqual(self.get_favorites(), (200, {"favorites": []}))
+
+    def test_corrupt_store_surfaces_error_and_is_not_overwritten(self):
+        path = os.path.join(self.h.state, "favorites.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("{not json")
+        status, body = self.get_favorites()
+        self.assertEqual(status, 500)
+        self.assertEqual(body["error"], "operation_failed")
+        status, _, raw = self.fav("k1", True)
+        self.assertEqual(status, 500)
+        with open(path, encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "{not json")
 
 
 if __name__ == "__main__":

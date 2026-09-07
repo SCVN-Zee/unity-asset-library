@@ -45,10 +45,11 @@ import {
   Search,
   Settings,
   Sparkles,
+  Star,
   X,
 } from "lucide-react";
 
-type QuickFilter = "all" | "pending" | "flagged" | "non-store";
+type QuickFilter = "all" | "favorites" | "pending" | "flagged" | "non-store";
 type ViewMode = "grid" | "list";
 type SortMode = "name" | "author" | "size";
 type DialogState = {
@@ -57,7 +58,7 @@ type DialogState = {
   result: ActionResult;
 } | null;
 
-const api = window.uai;
+const api = window.ual;
 
 function formatBytes(bytes: number) {
   if (!bytes) return "0 B";
@@ -283,13 +284,13 @@ function StorageScreen({
   return (
     <div className="storage-shell">
       <header className="storage-topbar">
-        <div className="brand"><div className="brand-mark">US</div><div><div className="eyebrow">UNITY ASSET SHELF</div><h1>{onboarding ? "Set up your library" : "Settings"}</h1></div></div>
+        <div className="brand"><div className="brand-mark">UL</div><div><div className="eyebrow">UNITY ASSET LIBRARY</div><h1>{onboarding ? "Set up your library" : "Settings"}</h1></div></div>
         {storage?.ready && <Button type="button" className="button quiet" onPress={onCancel} isDisabled={busy}><Icon as={ArrowLeft} className="icon" aria-hidden="true" focusable={false} />Back to library</Button>}
       </header>
       <main className="storage-main">
         <section className="storage-card" aria-labelledby="storage-heading">
           <div className="storage-kicker">{onboarding ? "WELCOME" : "LIBRARY SETTINGS"}</div>
-          <h2 id="storage-heading">{onboarding ? "Where should Asset Shelf look?" : "Library location"}</h2>
+          <h2 id="storage-heading">{onboarding ? "Where should Asset Library look?" : "Library location"}</h2>
           <p className="storage-lead">{onboarding ? "Choose a folder containing your Unity asset packages. We’ll scan packages and subfolders, then keep the index up to date." : "Change the folder used for your asset index. The current library stays untouched until the new folder is ready."}</p>
           <label className="storage-label" htmlFor="storage-path">Library folder</label>
           <div className={`storage-input-row ${displayedError ? "invalid" : ""}`}>
@@ -298,7 +299,7 @@ function StorageScreen({
           </div>
           <p id="storage-help" className="storage-help">The full path is stored locally. Existing files are never moved or deleted.</p>
           {displayedError && <p id="storage-error" className="storage-error" role="alert">{displayedError}</p>}
-          {blocked && !busy && <p className="storage-notice" role="status">{blockedByExternalBackend ? "Another Asset Shelf backend is using this library. Stop it before changing folders." : "Library activity is in progress. You can change this folder when it finishes."}</p>}
+          {blocked && !busy && <p className="storage-notice" role="status">{blockedByExternalBackend ? "Another Unity Asset Library backend is using this library. Stop it before changing folders." : "Library activity is in progress. You can change this folder when it finishes."}</p>}
           {busy && <StorageProgress progress={storage?.progress ?? null} />}
           <div className="storage-actions">
             {!onboarding && <Button type="button" className="button quiet" onPress={onCancel} isDisabled={busy}>Cancel</Button>}
@@ -328,8 +329,8 @@ function App() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All assets");
   const [quick, setQuick] = useState<QuickFilter>("all");
-  const [sort, setSort] = useState<SortMode>(() => (localStorage.getItem("uai:sort") as SortMode) || "name");
-  const [view, setView] = useState<ViewMode>(() => (localStorage.getItem("uai:view") as ViewMode) || "grid");
+  const [sort, setSort] = useState<SortMode>(() => (localStorage.getItem("ual:sort") as SortMode) || "name");
+  const [view, setView] = useState<ViewMode>(() => (localStorage.getItem("ual:view") as ViewMode) || "grid");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [enrichCancelling, setEnrichCancelling] = useState(false);
@@ -342,6 +343,10 @@ function App() {
   const actionGenerationRef = useRef(0);
   const dismissedRef = useRef(dismissedIds);
   dismissedRef.current = dismissedIds;
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [favPending, setFavPending] = useState<Set<string>>(() => new Set());
+  const favEpochRef = useRef(new Map<string, number>());
+  const favRevRef = useRef(0);
   useEffect(() => {
     if (!actionsOpen) return;
     function handlePointerDown(event: PointerEvent) {
@@ -385,12 +390,14 @@ function App() {
       }
       setStorageView("library");
       storageReady = true;
-      const [nextState, nextIndex] = await Promise.all([api.getState(), api.getAssets()]);
+      const favRev = favRevRef.current;
+      const [nextState, nextIndex, nextFavorites] = await Promise.all([api.getState(), api.getAssets(), api.favorites()]);
       if (epoch !== storageEpochRef.current) return false;
       setState(nextState);
-      const saved = sessionStorage.getItem("uai:action");
+      if (favRev === favRevRef.current) setFavorites(nextFavorites.favorites || []);
+      const saved = sessionStorage.getItem("ual:action");
       let savedIdentity: { id: string; kind: "resync" | "cleanup" | "organize"; phase: "plan" | "apply" } | null = null;
-      try { if (saved) savedIdentity = JSON.parse(saved); } catch { sessionStorage.removeItem("uai:action"); }
+      try { if (saved) savedIdentity = JSON.parse(saved); } catch { sessionStorage.removeItem("ual:action"); }
       if (!uiRefreshRef.current && nextState.action && !dismissedRef.current.has(nextState.action.id)) setActionStatus(nextState.action);
       else if (!uiRefreshRef.current && savedIdentity && (!nextState.action || nextState.action.id !== savedIdentity.id)) setActionStatus({ id: savedIdentity.id, kind: savedIdentity.kind, phase: savedIdentity.phase, status: "running", stage: "Recovering operation", completed: 0, total: null, current_item: null, counts: {} });
       setAssets(nextIndex.assets || []);
@@ -464,7 +471,7 @@ function App() {
       setActionStatus(null);
       setDialog(null);
       setDismissedIds(new Set());
-      sessionStorage.removeItem("uai:action");
+      sessionStorage.removeItem("ual:action");
       actionGenerationRef.current += 1;
       setLoading(true);
       await load();
@@ -496,8 +503,8 @@ function App() {
 
 
   useEffect(() => { void load(); }, []);
-  useEffect(() => { localStorage.setItem("uai:sort", sort); }, [sort]);
-  useEffect(() => { localStorage.setItem("uai:view", view); }, [view]);
+  useEffect(() => { localStorage.setItem("ual:sort", sort); }, [sort]);
+  useEffect(() => { localStorage.setItem("ual:view", view); }, [view]);
   useEffect(() => {
     const job = actionStatus;
     if (!job || dismissedRef.current.has(job.id)) return;
@@ -571,6 +578,7 @@ function App() {
     }
     return roots;
   }, [assets]);
+  const favoriteSet = useMemo(() => new Set(favorites), [favorites]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -595,6 +603,7 @@ function App() {
           !assetCategory.startsWith(`${category}/`)
         )
           return false;
+        if (quick === "favorites" && !favoriteSet.has(asset.asset_key)) return false;
         if (quick === "pending" && !isPending(asset)) return false;
         if (quick === "flagged" && !(asset.flags || []).length) return false;
         if (quick === "non-store" && !asset.non_store) return false;
@@ -610,7 +619,7 @@ function App() {
           return assetSize(b) - assetSize(a) || a.name.localeCompare(b.name);
         return a.name.localeCompare(b.name);
       });
-  }, [assets, category, query, quick, sort]);
+  }, [assets, category, query, quick, sort, favoriteSet]);
 
   const selected =
     assets.find((asset) => asset.asset_key === selectedKey) ||
@@ -622,13 +631,44 @@ function App() {
   const pendingCount =
     state?.pending_enrichment ?? assets.filter(isPending).length;
   const storeCount = assets.filter((asset) => !asset.non_store).length;
+  const favoriteCount = assets.filter((asset) => favoriteSet.has(asset.asset_key)).length;
+  const selectedFavorited = Boolean(selected && favoriteSet.has(selected.asset_key));
+
+  async function toggleFavorite(assetKey: string, favorite: boolean) {
+    const epoch = (favEpochRef.current.get(assetKey) || 0) + 1;
+    favEpochRef.current.set(assetKey, epoch);
+    favRevRef.current += 1;
+    setFavPending((current) => new Set(current).add(assetKey));
+    try {
+      await api.setFavorite(assetKey, favorite);
+      if (favEpochRef.current.get(assetKey) !== epoch) return;
+      favRevRef.current += 1;
+      setFavorites((current) => {
+        const next = new Set(current);
+        if (favorite) next.add(assetKey);
+        else next.delete(assetKey);
+        return [...next];
+      });
+    } catch (cause) {
+      if (favEpochRef.current.get(assetKey) !== epoch) return;
+      setError(cause instanceof Error ? cause.message : "Favorites could not be saved.");
+    } finally {
+      if (favEpochRef.current.get(assetKey) === epoch) {
+        setFavPending((current) => {
+          const next = new Set(current);
+          next.delete(assetKey);
+          return next;
+        });
+      }
+    }
+  }
 
   async function runAction(name: "resync" | "cleanup" | "organize") {
     try {
       setBusy(name);
       setError("");
       const response = name === "resync" ? await api.resync() : name === "cleanup" ? await api.cleanupPlan() : await api.organizePlan();
-      sessionStorage.setItem("uai:action", JSON.stringify({ id: response.job_id, kind: name, phase: "plan" }));
+      sessionStorage.setItem("ual:action", JSON.stringify({ id: response.job_id, kind: name, phase: "plan" }));
       setActionStatus({ id: response.job_id, kind: name, phase: "plan", status: "queued", stage: "Starting", completed: 0, total: null, current_item: null, counts: {} });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The action could not start.");
@@ -667,7 +707,7 @@ function App() {
       setBusy(dialog.mode);
       setError("");
       const response = dialog.mode === "resync" ? await api.resyncApply(dialog.result.plan_hash) : dialog.mode === "cleanup" ? await api.cleanupApply(dialog.result.plan_hash) : await api.organizeApply(dialog.result.plan_hash);
-      sessionStorage.setItem("uai:action", JSON.stringify({ id: response.job_id, kind: dialog.mode, phase: "apply" }));
+      sessionStorage.setItem("ual:action", JSON.stringify({ id: response.job_id, kind: dialog.mode, phase: "apply" }));
       setActionStatus({ id: response.job_id, kind: dialog.mode, phase: "apply", status: "queued", stage: "Starting", completed: 0, total: null, current_item: null, counts: {} });
     } catch (cause) {
       setBusy(null);
@@ -682,7 +722,7 @@ function App() {
     const marker = job.id + ":" + job.status;
     if (actionTerminalRef.current === marker) return;
     actionTerminalRef.current = marker;
-    sessionStorage.removeItem("uai:action");
+    sessionStorage.removeItem("ual:action");
     if (job.phase === "plan") {
       setBusy(null);
       if (job.status === "completed" && job.result) {
@@ -739,9 +779,9 @@ function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="brand">
-          <div className="brand-mark">US</div>
+          <div className="brand-mark">UL</div>
           <div>
-            <div className="eyebrow">UNITY ASSET SHELF</div>
+            <div className="eyebrow">UNITY ASSET LIBRARY</div>
             <h1>Asset library</h1>
           </div>
         </div>
@@ -971,6 +1011,7 @@ function App() {
             {(
               [
                 ["all", "All assets", assets.length],
+                ["favorites", "Favorites", favoriteCount],
                 ["pending", "Needs enrichment", pendingCount],
                 ["flagged", "Flagged", flaggedCount],
                 [
@@ -1034,7 +1075,7 @@ function App() {
         <section className="content-column">
           <div className="content-head">
             <div>
-              <h2>{category}</h2>
+              <h2>{quick === "favorites" ? "Favorites" : category}</h2>
               <p>
                 {filtered.length} of {assets.length} assets visible
               </p>
@@ -1131,20 +1172,28 @@ function App() {
           ) : filtered.length ? (
             <div className={view === "grid" ? "asset-grid" : "asset-list"}>
               {filtered.map((asset) => (
-                <AssetCard
-                  key={asset.asset_key}
-                  asset={asset}
-                  selected={asset.asset_key === selected?.asset_key}
-                  view={view}
-                  onClick={() => setSelectedKey(asset.asset_key)}
-                />
+                <div className="asset-cell" key={asset.asset_key}>
+                  <AssetCard
+                    asset={asset}
+                    selected={asset.asset_key === selected?.asset_key}
+                    view={view}
+                    onClick={() => setSelectedKey(asset.asset_key)}
+                  />
+                  <StarButton
+                    assetKey={asset.asset_key}
+                    name={asset.name}
+                    favorited={favoriteSet.has(asset.asset_key)}
+                    pending={favPending.has(asset.asset_key)}
+                    onToggle={toggleFavorite}
+                  />
+                </div>
               ))}
             </div>
           ) : (
             <div className="empty-state">
-              <Icon as={CircleSlash} className="icon empty-mark" aria-hidden="true" focusable={false} />
-              <h3>No assets match</h3>
-              <p>Try clearing a filter or searching for a broader term.</p>
+              <Icon as={quick === "favorites" ? Star : CircleSlash} className="icon empty-mark" aria-hidden="true" focusable={false} />
+              <h3>{quick === "favorites" && favoriteCount === 0 ? "No favorites yet" : "No assets match"}</h3>
+              <p>{quick === "favorites" && favoriteCount === 0 ? "Star assets to pin them here." : "Try clearing a filter or searching for a broader term."}</p>
               <Button type="button" className="button quiet" onPress={() => { setQuery(""); setCategory("All assets"); setQuick("all"); }}>Clear filters</Button>
             </div>
           )}
@@ -1154,6 +1203,9 @@ function App() {
           {selected ? (
             <Inspector
               asset={selected}
+              favorited={selectedFavorited}
+              favoritePending={selected ? favPending.has(selected.asset_key) : false}
+              onToggleFavorite={toggleFavorite}
               onOpen={(url) => void api.openExternal(url)}
               onReveal={(filePath) => {
                 void api.revealItem(filePath).catch((cause) => {
@@ -1248,10 +1300,16 @@ function AssetCard({
 
 function Inspector({
   asset,
+  favorited,
+  favoritePending,
+  onToggleFavorite,
   onOpen,
   onReveal,
 }: {
   asset: Asset;
+  favorited: boolean;
+  favoritePending: boolean;
+  onToggleFavorite: (assetKey: string, favorite: boolean) => void;
   onOpen: (url: string) => void;
   onReveal: (filePath: string) => void;
 }) {
@@ -1269,6 +1327,14 @@ function Inspector({
       >
         <h2>{asset.name}</h2>
         <p>{asset.author || "Unknown author"}</p>
+        <StarButton
+          assetKey={asset.asset_key}
+          name={asset.name}
+          favorited={favorited}
+          pending={favoritePending}
+          onToggle={onToggleFavorite}
+          hero
+        />
       </div>
       <div className="inspector-actions">
         {asset.store && (
@@ -1349,6 +1415,37 @@ function Inspector({
         </div>
       </div>
     </div>
+  );
+}
+
+function StarButton({
+  assetKey,
+  name,
+  favorited,
+  pending,
+  onToggle,
+  hero,
+}: {
+  assetKey: string;
+  name: string;
+  favorited: boolean;
+  pending: boolean;
+  onToggle: (assetKey: string, favorite: boolean) => void;
+  hero?: boolean;
+}) {
+  const label = `${favorited ? "Remove" : "Add"} ${name} ${favorited ? "from" : "to"} favorites`;
+  return (
+    <Button
+      type="button"
+      className={`star-button ${favorited ? "favorited" : ""} ${hero ? "hero" : ""}`}
+      onPress={() => onToggle(assetKey, !favorited)}
+      isDisabled={pending}
+      aria-pressed={favorited}
+      aria-label={label}
+      title={favorited ? "Remove from favorites" : "Add to favorites"}
+    >
+      <Icon as={Star} className="icon" aria-hidden="true" focusable={false} />
+    </Button>
   );
 }
 

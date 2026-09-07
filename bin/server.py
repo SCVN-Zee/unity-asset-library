@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Loopback viewer server for the Unity asset index.
+"""Loopback viewer server for the Unity asset library.
 
 Serves the React/Electron app's fixed JSON API:
 
@@ -60,7 +60,7 @@ MAX_BODY = 16 * 1024
 LOG_LINES = 200
 DEFAULT_PORT = 8765
 
-PROGRESS_PREFIX = "UAI_PROGRESS "
+PROGRESS_PREFIX = "UL_PROGRESS "
 
 
 class Busy(Exception):
@@ -75,9 +75,17 @@ class Drift(Exception):
     """The confirmed plan_hash no longer matches the current filesystem."""
 
     def __init__(self, plan, plan_hash_value):
-        super().__init__("plan changed")
+        super().__init__(plan_hash_value)
         self.plan = plan
         self.plan_hash = plan_hash_value
+
+
+class UnknownAsset(Exception):
+    """A mutation named an asset_key that is not in the current index."""
+
+    def __init__(self, asset_key):
+        super().__init__(asset_key)
+        self.asset_key = asset_key
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +231,8 @@ class ViewerService:
         Probing and releasing would leave a TOCTOU window before the core's normal
         blocking flock acquisition, so callers keep this context until completion.
         """
+        # The filename predates the Unity Asset Library rename; it is a stable
+        # cross-version safety key, so old and new backends share one lock.
         name = hashlib.sha256(f"{cv._root_identity(self.root)}".encode()).hexdigest()[:20]
         path = os.path.join(tempfile.gettempdir(), f"unity-asset-cleanup-{name}.lock")
         fh = self._flock_nb(path)
@@ -314,7 +324,7 @@ class ViewerService:
             job = self._job_snapshot(self._job)
             action = self._action_snapshot(self._action)
         return {
-            "service": "unity-asset-index",
+            "service": "unity-asset-library",
             "api_version": 5,
             "ready": True,
             "vault_root": os.path.realpath(self.root),
@@ -328,6 +338,50 @@ class ViewerService:
 
     def op_assets(self):
         return self._load_assets()
+
+    # -- favorites ----------------------------------------------------------
+
+    def _favorites_path(self):
+        return os.path.join(self.state, "favorites.json")
+
+    def _read_favorites(self):
+        """Stored asset_key list. A missing file is empty; a corrupt one is an
+        error, never silently replaced."""
+        try:
+            with open(self._favorites_path(), encoding="utf-8") as fh:
+                data = json.load(fh)
+        except FileNotFoundError:
+            return []
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise SafetyError("the favorites store is unreadable; fix or remove state/favorites.json") from exc
+        if (not isinstance(data, dict) or set(data) != {"favorites"}
+                or not isinstance(data["favorites"], list)
+                or not all(isinstance(key, str) and key for key in data["favorites"])):
+            raise SafetyError("the favorites store is malformed")
+        return sorted(set(data["favorites"]))
+
+    def op_favorites(self):
+        return {"favorites": self._read_favorites()}
+
+    def op_set_favorite(self, asset_key, favorite):
+        """Atomic, idempotent set keyed on asset identity, under the shared
+        state write lock so CLI index writers cannot interleave."""
+        try:
+            keys = {a["asset_key"] for a in self._load_assets()["assets"]}
+        except (KeyError, TypeError, ValueError) as exc:
+            raise SafetyError("the asset index is unreadable") from exc
+        if asset_key not in keys:
+            raise UnknownAsset(asset_key)
+        with self.state_write_lock():
+            current = set(self._read_favorites())
+            if favorite:
+                current.add(asset_key)
+            else:
+                current.discard(asset_key)
+            result = sorted(current)
+            ia.write_atomic(self._favorites_path(),
+                            canonical({"favorites": result}))
+        return {"favorites": result}
 
     def resync_preview(self, scanned, progress=None):
         if progress:
@@ -802,7 +856,7 @@ class ViewerService:
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
-    server_version = "UnityAssetIndex/1.0"
+    server_version = "UnityAssetLibrary/1.0"
     protocol_version = "HTTP/1.1"
 
     @property
@@ -888,6 +942,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(service.op_state())
             elif path == "/api/assets":
                 self._send_json(service.op_assets())
+            elif path == "/api/favorites":
+                self._send_json(service.op_favorites())
             elif path.startswith("/api/action/"):
                 snapshot = service.op_action(path[len("/api/action/"):])
                 if snapshot is None:
@@ -920,6 +976,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "/api/enrich/start": ["csrf"],
             "/api/enrich/cancel": ["csrf"],
             "/api/storage/prepare-restart": ["csrf"],
+            "/api/favorites": ["asset_key", "csrf", "favorite"],
         }
         if path not in schema_by_path:
             self._send_json({"error": "unknown_route"}, 404)
@@ -946,6 +1003,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(service.op_enrich_cancel())
             elif path == "/api/storage/prepare-restart":
                 self._send_json(service.prepare_restart())
+            elif path == "/api/favorites":
+                asset_key = body.get("asset_key")
+                favorite = body.get("favorite")
+                if not isinstance(asset_key, str) or not asset_key or not isinstance(favorite, bool):
+                    self._reject(400, "bad_request")
+                else:
+                    self._send_json(service.op_set_favorite(asset_key, favorite))
+        except UnknownAsset:
+            self._send_json({"error": "unknown_asset"}, 404)
         except Busy as exc:
             payload = {"error": "busy"}
             if exc.job_id:
@@ -990,7 +1056,7 @@ def serve(service, port):
         service.shutdown()
         return 2
     url = f"http://127.0.0.1:{port}/"
-    print(f"unity-asset-index API: {url}  (Ctrl-C to stop)")
+    print(f"unity-asset-library API: {url}  (Ctrl-C to stop)")
     stopping = threading.Event()
     previous_sigterm = signal.getsignal(signal.SIGTERM)
 

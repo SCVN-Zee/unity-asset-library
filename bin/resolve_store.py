@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Store enrichment for the Unity asset index.
+Store enrichment for the Unity asset library.
 
 Resolution verifies by IDENTITY, not string similarity. The chain is:
 
@@ -892,7 +892,7 @@ def _main_unlocked(argv=None):
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--state-lock-held", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--progress-json", action="store_true",
-                    help="emit structured UAI_PROGRESS events to stdout")
+                    help="emit structured UL_PROGRESS events to stdout")
     ap.add_argument("--limit", type=int, default=30)
     ap.add_argument("--base-delay", type=float, default=4.0)
     args = ap.parse_args(argv)

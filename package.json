@@ -1,5 +1,5 @@
 {
-  "name": "unity-asset-index",
+  "name": "unity-asset-library",
   "version": "0.1.0",
   "private": true,
   "description": "A focused desktop library for Unity assets",
@@ -54,8 +54,8 @@
     "wait-on": "^8.0.3"
   },
   "build": {
-    "appId": "com.unityassetindex.viewer",
-    "productName": "Unity Asset Shelf",
+    "appId": "com.unityassetlibrary.viewer",
+    "productName": "Unity Asset Library",
     "files": [
       "dist/renderer/**/*",
       "electron/**/*",
@@ -64,11 +64,11 @@
     "extraResources": [
       {
         "from": "bin",
-        "to": "uai-backend/bin"
+        "to": "ual-backend/bin"
       },
       {
         "from": "state/cache.json",
-        "to": "uai-backend/state/cache.json"
+        "to": "ual-backend/state/cache.json"
       }
     ],
     "mac": {

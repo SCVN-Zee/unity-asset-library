@@ -27,4 +27,4 @@ def emit_progress(callback, stage, completed=0, total=None, current_item=None, *
 
 def json_progress(event):
     """Write one machine-readable progress event to stdout and flush it."""
-    print("UAI_PROGRESS " + json.dumps(event, sort_keys=True), flush=True)
+    print("UL_PROGRESS " + json.dumps(event, sort_keys=True), flush=True)

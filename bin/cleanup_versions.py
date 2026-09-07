@@ -175,6 +175,8 @@ def _update_args(state, root, root_override):
 def _cleanup_lock(root):
     """Serialize cooperating cleanup processes without creating a vault file."""
     name = hashlib.sha256(f"{_root_identity(root)}".encode()).hexdigest()[:20]
+    # Kept across the Unity Asset Library rename: old and new engines must
+    # contend on the same lock file.
     path = os.path.join(tempfile.gettempdir(), f"unity-asset-cleanup-{name}.lock")
     with open(path, "a+", encoding="utf-8") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)

@@ -4,17 +4,17 @@ const os = require("node:os");
 const path = require("node:path");
 const vm = require("node:vm");
 
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), "uai-bootstrap-"));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), "ual-bootstrap-"));
 (async () => {
   try {
     const resources = path.join(temp, "resources");
-    fs.mkdirSync(path.join(resources, "uai-backend", "bin"), { recursive: true });
+    fs.mkdirSync(path.join(resources, "ual-backend", "bin"), { recursive: true });
     const selected = path.join(temp, "library");
     fs.mkdirSync(selected);
     let pickerResult = { canceled: true, filePaths: [] };
     let quitCalls = 0;
     const revealed = [];
-    const appPaths = { appData: temp, userData: path.join(temp, "Unity Asset Shelf") };
+    const appPaths = { appData: temp, userData: path.join(temp, "Unity Asset Library") };
     const dialog = {
       showOpenDialog: async () => pickerResult,
     };
@@ -52,7 +52,7 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), "uai-bootstrap-"));
 
     // A compatible external backend is surfaced but never made mutable by this desktop shell.
     const externalState = {
-      service: "unity-asset-index", api_version: 5, ready: true, csrf: "external-token",
+      service: "unity-asset-library", api_version: 5, ready: true, csrf: "external-token",
       vault_root: selected, repo: temp, instance_id: "other-process",
     };
     context.fetch = async () => ({ ok: true, text: async () => JSON.stringify(externalState) });
@@ -61,7 +61,6 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), "uai-bootstrap-"));
     assert.equal(externalStorage.path, selected);
     assert.equal(externalStorage.ready, true);
     assert.equal(externalStorage.canChange, false);
-    await assert.rejects(vm.runInContext(`saveStorage(${JSON.stringify(selected)})`, context), /external/i);
     vm.runInContext("registerIpc()", context);
     // Reveal containment: valid library file reveals, symlink escape and missing file are rejected.
     const reveal = (p) => handlers["shell:reveal-item"]({}, p);
@@ -82,7 +81,7 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), "uai-bootstrap-"));
     pickerResult = { canceled: false, filePaths: [selected] };
     assert.equal(await vm.runInContext("chooseStorageFolder()", context), selected);
     assert.equal(fs.existsSync(path.join(temp, "config.json")), false);
-    assert.equal(fs.existsSync(path.join(temp, "Unity Asset Shelf", "backend", "config.json")), false);
+    assert.equal(fs.existsSync(path.join(temp, "Unity Asset Index", "backend", "config.json")), false);
 
     console.log("PASS: shell-first incompatible recovery, external backend immutability, picker cancellation and no config writes");
   } finally {

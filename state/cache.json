@@ -1744,9 +1744,33 @@
    "verified_via": "detail-page"
   },
   "animation-composer-system-acs": {
-   "status": "no-result",
+   "candidates_rejected": [],
+   "detail": {
+    "author": "Jorjouto",
+    "category_levels": [
+     "Tools",
+     "Animation"
+    ],
+    "category_path": "Tools/Animation",
+    "name": "Animation Composer System - ACS",
+    "price": "19.99",
+    "rating": 5.0,
+    "reviews": 16,
+    "store": "https://assetstore.unity.com/packages/tools/animation/animation-composer-system-acs-348598",
+    "thumbnail_remote": "https://assetstorev1-prd-cdn.unity3d.com/key-image/2332002c-8f2f-4266-962a-224d2b472bdd.jpg"
+   },
+   "id": "348598",
+   "legacy": {
+    "category": "Editor Extensions/Animation",
+    "id": "348598",
+    "name": "Animation Composer System - ACS",
+    "publisher": "Jorjouto",
+    "version": "1.3.9"
+   },
+   "score": 1.0,
+   "status": "resolved",
    "title": "Animation Composer System - ACS",
-   "transport": "all-empty"
+   "transport": "ddg-html"
   },
   "animation-designer": {
    "candidates_rejected": [],
@@ -2225,9 +2249,33 @@
    "title": "Bakery - GPU Lightmapper"
   },
   "bakery-real-time-preview": {
-   "status": "no-result",
+   "candidates_rejected": [],
+   "detail": {
+    "author": "Mr F",
+    "category_levels": [
+     "Tools",
+     "Level Design"
+    ],
+    "category_path": "Tools/Level Design",
+    "name": "Bakery Real-Time Preview",
+    "price": "35.00",
+    "rating": 4.0,
+    "reviews": 26,
+    "store": "https://assetstore.unity.com/packages/tools/level-design/bakery-real-time-preview-164462",
+    "thumbnail_remote": "https://assetstorev1-prd-cdn.unity3d.com/key-image/f9124f03-3e01-4904-9ec5-65629b9ddc60.jpg"
+   },
+   "id": "164462",
+   "legacy": {
+    "category": "Editor Extensions/Design",
+    "id": "164462",
+    "name": "Bakery Real-Time Preview",
+    "publisher": "Mr F",
+    "version": "1.198"
+   },
+   "score": 1.0,
+   "status": "resolved",
    "title": "Bakery Real-Time Preview",
-   "transport": "all-empty"
+   "transport": "ddg-html"
   },
   "bare-ninja-anim-set": {
    "candidates_rejected": [],
@@ -5894,6 +5942,11 @@
    "title": "Flat Kit Toon Shading and Water Unity2022[4.7.6]",
    "transport": "all-empty"
   },
+  "flexalon-pro-3d-ui-layouts": {
+   "status": "no-result",
+   "title": "Flexalon Pro 3D UI Layouts",
+   "transport": "all-empty"
+  },
   "flipbook-vfx-urp": {
    "candidates_rejected": [],
    "detail": {
@@ -6012,23 +6065,9 @@
    "transport": "external"
   },
   "fogvolume": {
-   "candidates_rejected": [
-    {
-     "id": "81802",
-     "reason": "numeric-token mismatch",
-     "score": 0.857,
-     "store_name": "Fog Volume 3"
-    },
-    {
-     "id": "48200",
-     "reason": "similarity 0.296 below floor 0.55",
-     "score": 0.296,
-     "store_name": "Dynamic Fog & Mist 2"
-    }
-   ],
-   "status": "unverified",
+   "status": "no-result",
    "title": "FogVolume",
-   "transport": "brave"
+   "transport": "all-empty"
   },
   "forest-ruins-pack-cute-series": {
    "candidates_rejected": [],
@@ -7611,6 +7650,11 @@
    "score": 1.0,
    "status": "resolved",
    "title": "HIGHLANDS - Stylized Environment"
+  },
+  "highlight-plus-2-all-in-one-outline-selection-effects": {
+   "status": "no-result",
+   "title": "Highlight Plus 2 - All in One Outline Selection Effects",
+   "transport": "all-empty"
   },
   "highlight-plus-all-in-one-outline-selection-effects": {
    "candidates_rejected": [],
@@ -10827,9 +10871,33 @@
    "title": "Missing Reference Fixer"
   },
   "mk-toon-stylized-shader": {
-   "status": "no-result",
+   "candidates_rejected": [],
+   "detail": {
+    "author": "Michael Kremmel",
+    "category_levels": [
+     "VFX",
+     "Shaders"
+    ],
+    "category_path": "VFX/Shaders",
+    "name": "MK Toon - Stylized Shader",
+    "price": "59.90",
+    "rating": 5.0,
+    "reviews": 96,
+    "store": "https://assetstore.unity.com/packages/vfx/shaders/mk-toon-stylized-shader-178415",
+    "thumbnail_remote": "https://assetstorev1-prd-cdn.unity3d.com/key-image/3de42073-05d4-4c29-8578-7a5c3b355ccb.jpg"
+   },
+   "id": "178415",
+   "legacy": {
+    "category": "Shaders",
+    "id": "178415",
+    "name": "MK Toon - Stylized Shader",
+    "publisher": "Michael Kremmel",
+    "version": "3.5.0B"
+   },
+   "score": 1.0,
+   "status": "resolved",
    "title": "MK Toon - Stylized Shader",
-   "transport": "all-empty"
+   "transport": "brave"
   },
   "mmorpg-kit-2d-3d-survival": {
    "candidates_rejected": [],
@@ -14937,6 +15005,11 @@
    "status": "resolved",
    "title": "Rapier Anim Set"
   },
+  "raycast-pro": {
+   "status": "no-result",
+   "title": "Raycast Pro",
+   "transport": "all-empty"
+  },
   "raycastpro": {
    "candidates_rejected": [],
    "detail": {
@@ -15013,6 +15086,11 @@
    "status": "resolved",
    "title": "Reach - Complete Sci-Fi UI"
   },
+  "realblend-mesh-painting-creation": {
+   "status": "no-result",
+   "title": "RealBlend - Mesh Painting Creation",
+   "transport": "all-empty"
+  },
   "realistic-car-controller-pro": {
    "candidates_rejected": [],
    "detail": {
@@ -15070,41 +15148,9 @@
    "title": "RealToon Pro AnimeToon Shader"
   },
   "replacewithprefabs": {
-   "candidates_rejected": [
-    {
-     "id": "184477",
-     "reason": "store name has extra token(s) ['objects', 'prefabs', 'replace', 'search']",
-     "score": 0.583,
-     "store_name": "Search & Replace Prefabs & Objects"
-    },
-    {
-     "id": "229947",
-     "reason": "similarity 0.364 below floor 0.55",
-     "score": 0.364,
-     "store_name": "Prefab Fixer & Replacer Tool"
-    },
-    {
-     "id": "294118",
-     "reason": "store name has extra token(s) ['back', 'prefab', 'replace', 'to']",
-     "score": 0.7,
-     "store_name": "Replace Back to Prefab"
-    },
-    {
-     "id": "113946",
-     "reason": "similarity 0.367 below floor 0.55",
-     "score": 0.367,
-     "store_name": "Icon Generator - Generate icons from prefabs"
-    },
-    {
-     "id": "41160",
-     "reason": "similarity 0.462 below floor 0.55",
-     "score": 0.462,
-     "store_name": "Multi-Prefabs Creator"
-    }
-   ],
-   "status": "unverified",
+   "status": "no-result",
    "title": "ReplaceWithPrefabs",
-   "transport": "brave"
+   "transport": "all-empty"
   },
   "retarget-pro": {
    "candidates_rejected": [
@@ -15166,6 +15212,11 @@
    "score": 1.0,
    "status": "resolved",
    "title": "Retarget Pro - Humanoid Baker"
+  },
+  "retarget-pro-v5": {
+   "status": "no-result",
+   "title": "Retarget Pro V5",
+   "transport": "all-empty"
   },
   "retro-horror-template": {
    "candidates_rejected": [],

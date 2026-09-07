@@ -1,8 +1,10 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
-contextBridge.exposeInMainWorld("uai", {
+contextBridge.exposeInMainWorld("ual", {
   getState: () => ipcRenderer.invoke("backend:state"),
   getAssets: () => ipcRenderer.invoke("backend:assets"),
+  favorites: () => ipcRenderer.invoke("backend:favorites"),
+  setFavorite: (assetKey, favorite) => ipcRenderer.invoke("backend:set-favorite", assetKey, favorite),
   resync: () => ipcRenderer.invoke("backend:resync"),
   resyncApply: (planHash) => ipcRenderer.invoke("backend:resync-apply", planHash),
   cleanupPlan: () => ipcRenderer.invoke("backend:cleanup-plan"),

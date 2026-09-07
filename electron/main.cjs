@@ -4,13 +4,12 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 
-// Preserve existing packaged libraries and preferences across display-name changes.
-if (app.isPackaged) {
-  app.setPath("userData", path.join(app.getPath("appData"), "Unity Asset Index"));
-}
+// Preserve existing libraries and preferences across the rename to Unity Asset
+// Library: keep each environment on its historical userData directory.
+app.setPath("userData", path.join(app.getPath("appData"), app.isPackaged ? "Unity Asset Index" : "unity-asset-index"));
 
 const PORT = 8765;
-const SERVICE = "unity-asset-index";
+const SERVICE = "unity-asset-library";
 const API_VERSION = 5;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 const INCOMPATIBLE_BACKEND = `An incompatible backend is listening on port ${PORT}. Stop that Python server and restart the desktop app.`;
@@ -155,7 +154,7 @@ async function stopOwnedBackend() {
 }
 
 function preparePackagedBackend() {
-  const template = path.join(process.resourcesPath, "uai-backend");
+  const template = path.join(process.resourcesPath, "ual-backend");
   const root = app.isPackaged
     ? path.join(app.getPath("userData"), "backend")
     : path.resolve(__dirname, "..");
@@ -168,7 +167,7 @@ function preparePackagedBackend() {
 }
 
 function pythonCommand() {
-  return process.env.UAI_PYTHON || (process.platform === "win32" ? "python" : "python3");
+  return process.env.UAL_PYTHON || (process.platform === "win32" ? "python" : "python3");
 }
 
 function newInstanceId() {
@@ -210,12 +209,12 @@ function runStorageCli(args, onProgress) {
       stdout = lines.pop() || "";
       for (const line of lines) {
         if (!line.trim()) continue;
-        if (line.startsWith("UAI_PROGRESS ")) {
+        if (line.startsWith("UL_PROGRESS ")) {
           try {
-            const progress = JSON.parse(line.slice("UAI_PROGRESS ".length));
+            const progress = JSON.parse(line.slice("UL_PROGRESS ".length));
             if (onProgress) onProgress(progress);
-          } catch {
             // Ignore non-protocol output; the final outcome remains authoritative.
+          } catch {
           }
           continue;
         }
@@ -499,9 +498,15 @@ async function postJson(endpoint, body = {}) {
 
 function registerIpc() {
   if (registered) return;
-  registered = true;
-  ipcMain.handle("backend:state", () => backendRequest("/api/state"));
   ipcMain.handle("backend:assets", () => backendRequest("/api/assets"));
+  ipcMain.handle("backend:favorites", () => backendRequest("/api/favorites"));
+  ipcMain.handle("backend:set-favorite", (_event, assetKey, favorite) => {
+    if (typeof assetKey !== "string" || !assetKey || typeof favorite !== "boolean") {
+      throw new Error("setFavorite expects an asset key string and a boolean.");
+    }
+    return postJson("/api/favorites", { asset_key: assetKey, favorite });
+  });
+  ipcMain.handle("backend:state", () => backendRequest("/api/state"));
   ipcMain.handle("backend:resync", () => postJson("/api/resync/plan"));
   ipcMain.handle("backend:resync-apply", (_event, planHash) => postJson("/api/resync/apply", { plan_hash: planHash }));
   ipcMain.handle("backend:cleanup-plan", () => postJson("/api/cleanup/plan"));
@@ -539,7 +544,7 @@ function createWindow() {
     minWidth: 980,
     minHeight: 680,
     backgroundColor: "#111214",
-    title: "Unity Asset Shelf",
+    title: "Unity Asset Library",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,

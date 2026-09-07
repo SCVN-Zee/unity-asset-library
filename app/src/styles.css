@@ -1127,9 +1127,9 @@ button:focus-visible {
 .progress-status { margin-left: 9px; color: var(--muted); font-size: 11px; }
 .progress-stage { margin-top: 9px; color: var(--muted); font-size: 11px; }
 .progress-stage time { font-variant-numeric: tabular-nums; }
+.progress-track { position: relative; margin: 9px 0 7px; height: 5px; overflow: hidden; border-radius: 99px; background: var(--panel-2); }
 .settings-link { width: 100%; height: 32px; justify-content: flex-start; padding: 0 9px; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 5px; font-size: 11px; }
 .settings-link .icon { width: 13px; height: 13px; margin-right: 7px; }
-.progress-track { position: relative; margin: 9px 0 7px; height: 5px; overflow: hidden; border-radius: 99px; background: var(--panel-2); }
 .progress-track progress { display: block; width: 100%; height: 100%; border: 0; appearance: none; background: transparent; }
 .progress-track progress::-webkit-progress-bar { background: transparent; }
 .progress-track progress::-webkit-progress-value { background: var(--accent); border-radius: 99px; }
@@ -1178,4 +1178,54 @@ button:focus-visible {
   .storage-card { padding: 24px; }
   .storage-input-row { align-items: stretch; flex-direction: column; }
   .storage-input { flex: none; }
+}
+
+/* Favorites */
+.asset-cell { position: relative; }
+.asset-grid .asset-cell { display: grid; }
+.asset-cell .star-button { position: absolute; top: 12px; right: 12px; z-index: 2; }
+.asset-list .asset-cell .star-button { top: 50%; right: 6px; transform: translateY(-50%); }
+.star-button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: rgba(12, 13, 14, 0.78);
+  color: #8d9298;
+}
+.star-button:hover:not(:disabled) {
+  color: var(--text);
+  background: rgba(12, 13, 14, 0.92);
+  border-color: #4d5158;
+}
+.star-button .icon {
+  width: 13px;
+  height: 13px;
+}
+.star-button.favorited {
+  color: #e8b04b;
+}
+.star-button.favorited .icon {
+  fill: currentColor;
+}
+.star-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.inspector-hero .star-button {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 2;
+}
+.star-button.hero {
+  width: 30px;
+  height: 30px;
+}
+.star-button.hero .icon {
+  width: 15px;
+  height: 15px;
 }

@@ -1155,8 +1155,8 @@ class TestStructuredProgress(unittest.TestCase):
             rs._progress(True, "resolve", 1, 2, "asset-a",
                          resolved=1, failed=0, blocked=0, skipped=0)
         line = stream.getvalue().strip()
-        self.assertTrue(line.startswith("UAI_PROGRESS "))
-        event = json.loads(line[len("UAI_PROGRESS "):])
+        self.assertTrue(line.startswith("UL_PROGRESS "))
+        event = json.loads(line[len("UL_PROGRESS "):])
         self.assertEqual(event, {
             "stage": "resolve", "completed": 1, "total": 2,
             "current_item": "asset-a",

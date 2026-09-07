@@ -29,7 +29,7 @@ declare global {
   type CleanupFamily = { asset_key: string; reason: string; survivor: PlanRow | null; removals: PlanRow[] };
   type ActionPreview = { families?: CleanupFamily[]; additions?: PlanRow[]; removals?: PlanRow[]; resized?: PlanRow[]; moves?: PlanRow[]; totals?: Record<string, number> };
   type ActionResult = { preview?: ActionPreview; plan_hash?: string; [key: string]: unknown };
-  type UaiBridge = {
+  type UalBridge = {
     getStorage: () => Promise<StorageState>;
     chooseStorageFolder: (currentPath?: string) => Promise<string | null>;
     saveStorage: (path: string) => Promise<StorageState>;
@@ -46,9 +46,11 @@ declare global {
     getJob: (jobId: string) => Promise<{ job: Job }>;
     getAction: (actionId: string) => Promise<{ action: ActionJob }>;
     openExternal: (url: string) => Promise<void>;
+    favorites: () => Promise<{ favorites: string[] }>;
+    setFavorite: (assetKey: string, favorite: boolean) => Promise<{ favorites: string[] }>;
     revealItem: (filePath: string) => Promise<void>;
   };
-  interface Window { uai: UaiBridge }
+  interface Window { ual: UalBridge }
 }
 
 export {};

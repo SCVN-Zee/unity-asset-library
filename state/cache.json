@@ -1062,6 +1062,35 @@
    "status": "unverified",
    "title": "Advanced Culling System 2 Revamped and Boosted Up"
   },
+  "advanced-dissolve": {
+   "candidates_rejected": [],
+   "detail": {
+    "author": "Amazing \u0410ssets",
+    "category_levels": [
+     "VFX",
+     "Shaders"
+    ],
+    "category_path": "VFX/Shaders",
+    "name": "Advanced Dissolve",
+    "price": "35.00",
+    "rating": 5.0,
+    "reviews": 85,
+    "store": "https://assetstore.unity.com/packages/vfx/shaders/advanced-dissolve-111598",
+    "thumbnail_remote": "https://assetstorev1-prd-cdn.unity3d.com/key-image/51fc691b-5521-4aa4-b6d1-eff3ac114191.jpg"
+   },
+   "id": "111598",
+   "legacy": {
+    "category": "Shaders",
+    "id": "111598",
+    "name": "Advanced Dissolve",
+    "publisher": "Amazing \u0410ssets",
+    "version": "2025.4"
+   },
+   "score": 1.0,
+   "status": "resolved",
+   "title": "Advanced Dissolve",
+   "transport": "ddg-html"
+  },
   "advanced-fps-counter": {
    "candidates_rejected": [],
    "detail": {
@@ -1140,6 +1169,35 @@
    "status": "resolved",
    "title": "Advanced Scene Manager",
    "verified_via": "detail-page"
+  },
+  "advanced-vertical-fogheight-fog-shader-for-mobile-desktop-and-vr": {
+   "candidates_rejected": [],
+   "detail": {
+    "author": "Tzar",
+    "category_levels": [
+     "VFX",
+     "Shaders"
+    ],
+    "category_path": "VFX/Shaders",
+    "name": "Advanced Vertical Fog/Height Fog Shader for Mobile, Desktop and VR",
+    "price": "4.99",
+    "rating": 4.0,
+    "reviews": 38,
+    "store": "https://assetstore.unity.com/packages/vfx/shaders/advanced-vertical-fog-height-fog-shader-for-mobile-desktop-and-v-181082",
+    "thumbnail_remote": "https://assetstorev1-prd-cdn.unity3d.com/key-image/0c469441-8a48-4899-9f5d-186fdf172d9f.jpg"
+   },
+   "id": "181082",
+   "legacy": {
+    "category": "Shaders",
+    "id": "181082",
+    "name": "Advanced Vertical Fog/Height Fog Shader for Mobile, Desktop and VR",
+    "publisher": "Tzar",
+    "version": "1.3.0"
+   },
+   "score": 0.992,
+   "status": "resolved",
+   "title": "Advanced Vertical FogHeight Fog Shader for Mobile Desktop and VR",
+   "transport": "bing-rss"
   },
   "adventure-creator": {
    "candidates_rejected": [],
@@ -1252,6 +1310,35 @@
    "score": 1.0,
    "status": "resolved",
    "title": "All In 1 3D-Shader"
+  },
+  "all-in-1-shader-nodes": {
+   "candidates_rejected": [],
+   "detail": {
+    "author": "Seaside Studios",
+    "category_levels": [
+     "VFX",
+     "Shaders"
+    ],
+    "category_path": "VFX/Shaders",
+    "name": "All In 1 Shader Nodes",
+    "price": "22.47",
+    "rating": 5.0,
+    "reviews": 425,
+    "store": "https://assetstore.unity.com/packages/vfx/shaders/all-in-1-shader-nodes-346742",
+    "thumbnail_remote": "https://assetstorev1-prd-cdn.unity3d.com/key-image/d377dcc8-ef24-4afa-ad56-e738f33a2b5f.jpg"
+   },
+   "id": "346742",
+   "legacy": {
+    "category": "Shaders",
+    "id": "346742",
+    "name": "All In 1 Shader Nodes",
+    "publisher": "Seaside Studios",
+    "version": "1.141"
+   },
+   "score": 1.0,
+   "status": "resolved",
+   "title": "All In 1 Shader Nodes",
+   "transport": "ddg-html"
   },
   "all-in-1-springs-toolkit": {
    "candidates_rejected": [],
@@ -1655,6 +1742,11 @@
    "status": "resolved",
    "title": "Animatext - Text Animation System",
    "verified_via": "detail-page"
+  },
+  "animation-composer-system-acs": {
+   "status": "no-result",
+   "title": "Animation Composer System - ACS",
+   "transport": "all-empty"
   },
   "animation-designer": {
    "candidates_rejected": [],
@@ -2132,6 +2224,11 @@
    "status": "resolved",
    "title": "Bakery - GPU Lightmapper"
   },
+  "bakery-real-time-preview": {
+   "status": "no-result",
+   "title": "Bakery Real-Time Preview",
+   "transport": "all-empty"
+  },
   "bare-ninja-anim-set": {
    "candidates_rejected": [],
    "detail": {
@@ -2425,6 +2522,11 @@
    "status": "resolved",
    "title": "Berserker Fighter Mecanim Animation Pack"
   },
+  "better-animation-events": {
+   "status": "no-result",
+   "title": "Better Animation Events",
+   "transport": "all-empty"
+  },
   "better-fog-height-fog-light-scattering-more": {
    "candidates_rejected": [],
    "detail": {
@@ -2452,6 +2554,11 @@
    "score": 1.0,
    "status": "resolved",
    "title": "Better Fog Height Fog Light Scattering More"
+  },
+  "better-lit-shader-2021": {
+   "status": "no-result",
+   "title": "Better Lit Shader 2021",
+   "transport": "all-empty"
   },
   "better-mesh-mesh-preview-full-insight-at-a-glance": {
    "candidates_rejected": [],
@@ -2493,6 +2600,11 @@
    ],
    "status": "unverified",
    "title": "Better Transform Size Notes Global Local workspace child parent"
+  },
+  "binding-system-2": {
+   "status": "no-result",
+   "title": "Binding System 2",
+   "transport": "all-empty"
   },
   "black-mage-spells": {
    "candidates_rejected": [],
@@ -2926,6 +3038,26 @@
    "score": 1.0,
    "status": "resolved",
    "title": "Capoeira Anim Set"
+  },
+  "cartoon-fx-2-remaster-r-1-2-4": {
+   "status": "no-result",
+   "title": "Cartoon FX 2 Remaster [R 1.2.4]",
+   "transport": "all-empty"
+  },
+  "cartoon-fx-3-remaster-r-1-1-4": {
+   "status": "no-result",
+   "title": "Cartoon FX 3 Remaster [R 1.1.4]",
+   "transport": "all-empty"
+  },
+  "cartoon-fx-4-remaster-r-1-1-4": {
+   "status": "no-result",
+   "title": "Cartoon FX 4 Remaster [R 1.1.4]",
+   "transport": "all-empty"
+  },
+  "cartoon-fx-remaster-r-1-2-4": {
+   "status": "no-result",
+   "title": "Cartoon FX Remaster [R 1.2.4]",
+   "transport": "all-empty"
   },
   "cartoon-gui-pack": {
    "candidates_rejected": [],
@@ -3496,6 +3628,11 @@
    "score": 1.0,
    "status": "resolved",
    "title": "COOKING SIMULATOR GAME SOUNDS"
+  },
+  "coral-forest-seaweed-valley": {
+   "status": "no-result",
+   "title": "Coral Forest - Seaweed Valley",
+   "transport": "all-empty"
   },
   "corgi-engine-2d-25d-platformer": {
    "candidates_rejected": [],
@@ -4836,6 +4973,16 @@
    "status": "resolved",
    "title": "Environment Nature VFX Pack (WindControlled)"
   },
+  "environment-weather-nature-vfx-pack": {
+   "status": "no-result",
+   "title": "Environment Weather Nature VFX pack",
+   "transport": "all-empty"
+  },
+  "epic-toon-fx": {
+   "status": "no-result",
+   "title": "Epic Toon FX",
+   "transport": "all-empty"
+  },
   "epic-toon-vfx-2": {
    "candidates_rejected": [],
    "detail": {
@@ -5742,6 +5889,11 @@
    "status": "resolved",
    "title": "Flat Kit Toon Shading and Water"
   },
+  "flat-kit-toon-shading-and-water-unity2022-4-7-6": {
+   "status": "no-result",
+   "title": "Flat Kit Toon Shading and Water Unity2022[4.7.6]",
+   "transport": "all-empty"
+  },
   "flipbook-vfx-urp": {
    "candidates_rejected": [],
    "detail": {
@@ -5797,6 +5949,35 @@
    "status": "resolved",
    "title": "FlowCanvas"
   },
+  "fluid-frenzy": {
+   "candidates_rejected": [],
+   "detail": {
+    "author": "Frenzy Byte",
+    "category_levels": [
+     "VFX",
+     "Shaders"
+    ],
+    "category_path": "VFX/Shaders",
+    "name": "Fluid Frenzy",
+    "price": "69.99",
+    "rating": 5.0,
+    "reviews": 14,
+    "store": "https://assetstore.unity.com/packages/vfx/shaders/fluid-frenzy-273366",
+    "thumbnail_remote": "https://assetstorev1-prd-cdn.unity3d.com/key-image/761b0021-33c7-4d89-b744-f8c3e13e72ca.jpg"
+   },
+   "id": "273366",
+   "legacy": {
+    "category": "Shaders",
+    "id": "273366",
+    "name": "Fluid Frenzy",
+    "publisher": "Frenzy Byte",
+    "version": "2.0.3"
+   },
+   "score": 1.0,
+   "status": "resolved",
+   "title": "Fluid Frenzy",
+   "transport": "brave"
+  },
   "flying-mage-animset": {
    "candidates_rejected": [],
    "detail": {
@@ -5829,6 +6010,25 @@
    "status": "no-result",
    "title": "FMOD InstrumentalEventPlayback",
    "transport": "external"
+  },
+  "fogvolume": {
+   "candidates_rejected": [
+    {
+     "id": "81802",
+     "reason": "numeric-token mismatch",
+     "score": 0.857,
+     "store_name": "Fog Volume 3"
+    },
+    {
+     "id": "48200",
+     "reason": "similarity 0.296 below floor 0.55",
+     "score": 0.296,
+     "store_name": "Dynamic Fog & Mist 2"
+    }
+   ],
+   "status": "unverified",
+   "title": "FogVolume",
+   "transport": "brave"
   },
   "forest-ruins-pack-cute-series": {
    "candidates_rejected": [],
@@ -7812,6 +8012,11 @@
    "status": "resolved",
    "title": "InsanePistolAction AnimSet"
   },
+  "interactive-dissolve-effects-2-0": {
+   "status": "no-result",
+   "title": "Interactive Dissolve Effects 2.0",
+   "transport": "all-empty"
+  },
   "interface-and-collectible-sounds-lite-edition-2-v2": {
    "candidates_rejected": [
     {
@@ -9729,6 +9934,11 @@
    "status": "unverified",
    "title": "Magical-Knight Set"
   },
+  "maintainer-2": {
+   "status": "no-result",
+   "title": "Maintainer 2",
+   "transport": "all-empty"
+  },
   "male-emotes": {
    "candidates_rejected": [],
    "detail": {
@@ -9925,6 +10135,11 @@
    "score": 1.0,
    "status": "resolved",
    "title": "Massive GreatSword AnimSet"
+  },
+  "mat-overlay": {
+   "status": "no-result",
+   "title": "Mat Overlay",
+   "transport": "all-empty"
   },
   "match-3-games-sound-effects-and-music-pack": {
    "candidates_rejected": [],
@@ -10611,6 +10826,11 @@
    "status": "resolved",
    "title": "Missing Reference Fixer"
   },
+  "mk-toon-stylized-shader": {
+   "status": "no-result",
+   "title": "MK Toon - Stylized Shader",
+   "transport": "all-empty"
+  },
   "mmorpg-kit-2d-3d-survival": {
    "candidates_rejected": [],
    "detail": {
@@ -10882,6 +11102,11 @@
    "score": 1.0,
    "status": "resolved",
    "title": "Modular City Alley Pack"
+  },
+  "modular-cyber-racing-cars-low-poly-3d-models": {
+   "status": "no-result",
+   "title": "Modular Cyber Racing Cars - Low Poly 3D Models",
+   "transport": "all-empty"
   },
   "modular-dungeon-catacombs-mobile": {
    "candidates_rejected": [],
@@ -11562,6 +11787,11 @@
    "score": 0.97,
    "status": "resolved",
    "title": "Now Were Talking"
+  },
+  "obfuscator-pro-plug-and-play-code-protection-2026": {
+   "status": "no-result",
+   "title": "Obfuscator Pro Plug and Play Code Protection 2026",
+   "transport": "all-empty"
   },
   "objectnet-easier-multiplayer-system": {
    "candidates_rejected": [],
@@ -13146,17 +13376,9 @@
    "title": "Polygon Material Painter - Sub-Mesh Editor"
   },
   "polygon-meadow-forest-nature-biomes-low-poly-3d-art-by-synty": {
-   "candidates_rejected": [
-    {
-     "id": "234255",
-     "reason": "numeric-token mismatch",
-     "score": 0.824,
-     "store_name": "POLYGON - Meadow Forest - Nature Biomes - 3D Environment Art by Synty",
-     "verified_via": "legacy-api"
-    }
-   ],
-   "status": "unverified",
-   "title": "POLYGON Meadow Forest - Nature Biomes - Low Poly 3D Art by Synty"
+   "status": "no-result",
+   "title": "POLYGON Meadow Forest - Nature Biomes - Low Poly 3D Art by Synty",
+   "transport": "all-empty"
   },
   "polygon-mech-pack-low-poly-3d-art-by-synty": {
    "candidates_rejected": [],
@@ -14847,6 +15069,43 @@
    "status": "resolved",
    "title": "RealToon Pro AnimeToon Shader"
   },
+  "replacewithprefabs": {
+   "candidates_rejected": [
+    {
+     "id": "184477",
+     "reason": "store name has extra token(s) ['objects', 'prefabs', 'replace', 'search']",
+     "score": 0.583,
+     "store_name": "Search & Replace Prefabs & Objects"
+    },
+    {
+     "id": "229947",
+     "reason": "similarity 0.364 below floor 0.55",
+     "score": 0.364,
+     "store_name": "Prefab Fixer & Replacer Tool"
+    },
+    {
+     "id": "294118",
+     "reason": "store name has extra token(s) ['back', 'prefab', 'replace', 'to']",
+     "score": 0.7,
+     "store_name": "Replace Back to Prefab"
+    },
+    {
+     "id": "113946",
+     "reason": "similarity 0.367 below floor 0.55",
+     "score": 0.367,
+     "store_name": "Icon Generator - Generate icons from prefabs"
+    },
+    {
+     "id": "41160",
+     "reason": "similarity 0.462 below floor 0.55",
+     "score": 0.462,
+     "store_name": "Multi-Prefabs Creator"
+    }
+   ],
+   "status": "unverified",
+   "title": "ReplaceWithPrefabs",
+   "transport": "brave"
+  },
   "retarget-pro": {
    "candidates_rejected": [
     {
@@ -15205,6 +15464,11 @@
    "score": 1.0,
    "status": "resolved",
    "title": "RoomGen - Procedural Generator"
+  },
+  "rope-swinging-system": {
+   "status": "no-result",
+   "title": "Rope Swinging System",
+   "transport": "all-empty"
   },
   "roulette-game": {
    "candidates_rejected": [],
@@ -16673,6 +16937,11 @@
    "status": "resolved",
    "title": "Soap - ScriptableObject Architecture Pattern"
   },
+  "sounds-good-easy-optimized-audio-manager": {
+   "status": "no-result",
+   "title": "Sounds Good - Easy Optimized Audio Manager",
+   "transport": "all-empty"
+  },
   "space-combat-kit": {
    "candidates_rejected": [],
    "detail": {
@@ -17652,6 +17921,11 @@
    "status": "resolved",
    "title": "Stylized Fantasy Zombie Animals"
   },
+  "stylized-grass-shader": {
+   "status": "no-result",
+   "title": "Stylized Grass Shader",
+   "transport": "all-empty"
+  },
   "stylized-house-interior": {
    "candidates_rejected": [],
    "detail": {
@@ -18343,6 +18617,11 @@
    "title": "SUPER Magic FX - 929 VFX",
    "verified_via": "detail-page"
   },
+  "super-realistic-diamond-shaders": {
+   "status": "no-result",
+   "title": "Super Realistic Diamond Shaders",
+   "transport": "all-empty"
+  },
   "superhero-animset": {
    "candidates_rejected": [],
    "detail": {
@@ -18861,6 +19140,11 @@
    "status": "resolved",
    "title": "Tension - Ambient Music Pack"
   },
+  "terrain-to-mesh": {
+   "status": "no-result",
+   "title": "Terrain To Mesh",
+   "transport": "all-empty"
+  },
   "text-animator-for-unity": {
    "candidates_rejected": [
     {
@@ -18921,6 +19205,11 @@
    "score": 1.0,
    "status": "resolved",
    "title": "The Beautiful Portal Level up Teleport Warp VFX"
+  },
+  "the-complete-ui-sound-effects-library": {
+   "status": "no-result",
+   "title": "The Complete UI Sound Effects Library",
+   "transport": "all-empty"
   },
   "tileworldcreator-3": {
    "candidates_rejected": [],
@@ -19959,6 +20248,11 @@
    "status": "resolved",
    "title": "Ultimate Joystick"
   },
+  "ultimate-jurassic-pack-dinosaurs-v2022": {
+   "status": "no-result",
+   "title": "Ultimate Jurassic Pack Dinosaurs v2022",
+   "transport": "all-empty"
+  },
   "ultimate-low-poly-mining-cave-blacksmith-pack-ores-gems-props-tools": {
    "candidates_rejected": [],
    "detail": {
@@ -20144,7 +20438,12 @@
   "umodeler": {
    "status": "no-result",
    "title": "UModeler",
-   "transport": "external"
+   "transport": "all-empty"
+  },
+  "umodeler-x-plus-version-x-plus-1-0-29-hub-1-1-4": {
+   "status": "no-result",
+   "title": "UModeler X Plus (version X Plus 1.0.29 - Hub 1.1.4)",
+   "transport": "all-empty"
   },
   "umotion-pro-animation-editor": {
    "candidates_rejected": [],
@@ -20257,6 +20556,11 @@
    "status": "unverified",
    "title": "Unique Projectiles Volume 1"
   },
+  "unityhfsm-v2-3-0": {
+   "status": "no-result",
+   "title": "UnityHFSM-v2.3.0",
+   "transport": "all-empty"
+  },
   "universal-fighting-engine-2/source": {
    "candidates_rejected": [
     {
@@ -20352,6 +20656,21 @@
    "score": 1.0,
    "status": "resolved",
    "title": "URBAN BUNDLE Low Poly City Pack"
+  },
+  "urp-claw-slashes-fx": {
+   "status": "no-result",
+   "title": "URP Claw Slashes FX",
+   "transport": "all-empty"
+  },
+  "urp-ghost-shaders": {
+   "status": "no-result",
+   "title": "URP - Ghost Shaders",
+   "transport": "all-empty"
+  },
+  "urp-glass-shaders": {
+   "status": "no-result",
+   "title": "URP - Glass Shaders",
+   "transport": "all-empty"
   },
   "urp-toon-shader": {
    "candidates_rejected": [],
@@ -20462,6 +20781,11 @@
    "score": 1.0,
    "status": "resolved",
    "title": "Vendors and Customers"
+  },
+  "very-animation": {
+   "status": "no-result",
+   "title": "Very Animation",
+   "transport": "all-empty"
   },
   "vfavorites-2": {
    "candidates_rejected": [],
@@ -20915,6 +21239,11 @@
    "status": "unverified",
    "title": "Warrior Pack Mega Bundle"
   },
+  "water-splashes-sprite-effects": {
+   "status": "no-result",
+   "title": "Water splashes sprite effects",
+   "transport": "all-empty"
+  },
   "web-builder-pro": {
    "candidates_rejected": [],
    "detail": {
@@ -21054,6 +21383,11 @@
    "score": 0.986,
    "status": "resolved",
    "title": "Wingman - Your Inspectors Best Friend"
+  },
+  "wireframe-shader-effect": {
+   "status": "no-result",
+   "title": "Wireframe Shader Effect",
+   "transport": "all-empty"
   },
   "witch-animation-set": {
    "candidates_rejected": [],

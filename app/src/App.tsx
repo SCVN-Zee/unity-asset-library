@@ -342,6 +342,23 @@ function App() {
   const actionGenerationRef = useRef(0);
   const dismissedRef = useRef(dismissedIds);
   dismissedRef.current = dismissedIds;
+  useEffect(() => {
+    if (!actionsOpen) return;
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(".top-actions, #library-actions")
+      ) {
+        return;
+      }
+      setActionsOpen(false);
+    }
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+    };
+  }, [actionsOpen]);
   async function load() {
     const epoch = storageEpochRef.current;
     let loaded = false;

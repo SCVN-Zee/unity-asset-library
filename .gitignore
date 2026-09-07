@@ -13,3 +13,6 @@ node_modules/
 
 # Atomic-write leftovers
 /tmp*.tmp
+
+/docs/
+/plans/

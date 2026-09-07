@@ -55,7 +55,7 @@
   },
   "build": {
     "appId": "com.unityassetindex.viewer",
-    "productName": "Unity Asset Index",
+    "productName": "Unity Asset Shelf",
     "files": [
       "dist/renderer/**/*",
       "electron/**/*",

@@ -3,6 +3,11 @@ const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 
+// Preserve existing packaged libraries and preferences across display-name changes.
+if (app.isPackaged) {
+  app.setPath("userData", path.join(app.getPath("appData"), "Unity Asset Index"));
+}
+
 const PORT = 8765;
 const SERVICE = "unity-asset-index";
 const BASE_URL = `http://127.0.0.1:${PORT}`;
@@ -222,7 +227,7 @@ function createWindow() {
     minWidth: 980,
     minHeight: 680,
     backgroundColor: "#111214",
-    title: "Unity Asset Index",
+    title: "Unity Asset Shelf",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -245,7 +250,7 @@ app.whenReady().then(async () => {
     }
     createWindow();
   } catch (error) {
-    dialog.showErrorBox("Unity Asset Index could not start", String(error.message || error));
+    dialog.showErrorBox("Unity Asset Shelf could not start", String(error.message || error));
     app.quit();
   }
 });

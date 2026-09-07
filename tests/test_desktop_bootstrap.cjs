@@ -15,9 +15,11 @@ try {
   fs.writeFileSync(path.join(template, "state", "assets.json"), '"private inventory"');
   fs.writeFileSync(path.join(template, "config.json"), '"private config"');
   let selection;
+  const appPaths = { appData: temp, userData: path.join(temp, "Unity Asset Shelf") };
   const app = {
     isPackaged: true,
-    getPath: () => path.join(temp, "user"),
+    getPath: (name) => appPaths[name],
+    setPath: (name, value) => { appPaths[name] = value; },
     whenReady: () => ({ then() {} }),
     on() {},
   };
@@ -40,7 +42,7 @@ try {
   state.api_version = 4;
   await vm.runInContext("ensureBackend()", context);
   const prepare = () => vm.runInContext("preparePackagedBackend()", context);
-  const root = path.join(temp, "user", "backend");
+  const root = path.join(temp, "Unity Asset Index", "backend");
   assert.equal(prepare(), null);
   assert.equal(fs.existsSync(path.join(root, "config.json")), false);
   selection = [temp];

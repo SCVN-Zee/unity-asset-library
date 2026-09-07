@@ -513,9 +513,9 @@ function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="brand">
-          <div className="brand-mark">UI</div>
+          <div className="brand-mark">US</div>
           <div>
-            <div className="eyebrow">UNITY ASSET INDEX</div>
+            <div className="eyebrow">UNITY ASSET SHELF</div>
             <h1>Asset library</h1>
           </div>
         </div>

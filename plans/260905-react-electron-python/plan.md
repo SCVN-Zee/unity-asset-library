@@ -21,6 +21,16 @@ A user launches one macOS desktop app. Electron starts or reuses the loopback Py
 - Restart Electron and its Python backend after updating; the old immediate-mutation `/api/resync` route is removed.
 - Verification: real temporary-vault HTTP apply, full Python suite, TypeScript/Vite build, and browser-driven renderer review/cancel/apply/drift/empty-state checks.
 
+### Gluestack renderer integration
+
+- Keep the existing Electron/Vite renderer and dense dark/coral workbench; do not introduce Next.js, Expo, or a second styling system.
+- Use the pinned gluestack v4 core factories through the web-only host boundary in `app/src/components/ui/index.tsx`. The version choice preserves web support; reassess its alpha API before upgrading.
+- Use its shared gluestack `Icon` with named Lucide imports instead of hand-maintained SVG paths or CSS icon glyphs; keep prose arrows as text. This preserves a consistent glyph vocabulary without introducing icon fonts or network assets.
+- `vite.config.ts` owns web-variant resolution and `app/src/main.tsx` owns the shared overlay provider. Both are required: native variants or duplicate provider contexts can leave overlays blank.
+- Dialog restoration follows actual portal detachment, not owner unmount; keep the persistent action trigger as the return target because menu items disappear before confirmation opens.
+- Verification: packaged Electron rendering; fixture-backed search/filter/sort, preview/apply hashes, busy guards, error/retry, enrichment cancellation, keyboard containment and focus restoration; Python regression suite and desktop bootstrap checks.
+- Verification limit: disposable-backend cleanup apply exposed an existing state-lock hang after deletion. Cleanup/organize UI applies were checked with a responding bridge; their real-backend previews were checked without claiming successful filesystem applies.
+
 ## Constraints
 
 - Preserve the Python backend's fail-closed filesystem safety and preview/confirm/apply contracts.

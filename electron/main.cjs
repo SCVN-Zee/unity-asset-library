@@ -520,6 +520,16 @@ function registerIpc() {
     if (!["https:", "http:"].includes(parsed.protocol)) throw new Error("Only web links can be opened.");
     return shell.openExternal(parsed.toString());
   });
+  ipcMain.handle("shell:reveal-item", (_event, filePath) => {
+    const vaultRoot = backendSession ? backendSession.vaultRoot : null;
+    if (typeof filePath !== "string" || !filePath || !vaultRoot) throw new Error("No library folder is connected.");
+    const root = canonicalPath(vaultRoot);
+    let target;
+    try { target = fs.realpathSync(path.resolve(root, filePath)); } catch { throw new Error("This file is no longer on disk."); }
+    // realpath resolves symlinks, so a link escaping the library fails the containment check below.
+    if (target !== root && !target.startsWith(root + path.sep)) throw new Error("This file is outside the library folder.");
+    return shell.showItemInFolder(target);
+  });
 }
 
 function createWindow() {

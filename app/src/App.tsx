@@ -1023,8 +1023,8 @@ function App() {
             <div className="mini-status">
               <span className="connection-dot" />
               <span>{storeCount} store records</span>
+              <span className="muted">Python engine online</span>
             </div>
-            <span className="muted">Python engine online</span>
             <Button type="button" className="settings-link" onPress={() => { setStoragePath(storage?.path || ""); setStorageError(""); setStorageView("settings"); }} isDisabled={storageBusy} aria-label="Open Settings">
               <Icon as={Settings} className="icon" aria-hidden="true" focusable={false} />Settings
             </Button>
@@ -1155,6 +1155,11 @@ function App() {
             <Inspector
               asset={selected}
               onOpen={(url) => void api.openExternal(url)}
+              onReveal={(filePath) => {
+                void api.revealItem(filePath).catch((cause) => {
+                  setError(cause instanceof Error ? cause.message : "The file could not be revealed.");
+                });
+              }}
             />
           ) : (
             <div className="inspector-empty">
@@ -1244,15 +1249,24 @@ function AssetCard({
 function Inspector({
   asset,
   onOpen,
+  onReveal,
 }: {
   asset: Asset;
   onOpen: (url: string) => void;
+  onReveal: (filePath: string) => void;
 }) {
+  const onDisk = (asset.versions || []).find((version) => version.file);
   return (
     <div className="inspector-inner">
       <div className="inspector-kicker">ASSET DETAILS</div>
-      <div className="inspector-hero">
-        <div className="hero-avatar">{initials(asset)}</div>
+      <div
+        className="inspector-hero"
+        style={
+          asset.thumbnail?.remote
+            ? { backgroundImage: `url(${asset.thumbnail.remote})` }
+            : undefined
+        }
+      >
         <h2>{asset.name}</h2>
         <p>{asset.author || "Unknown author"}</p>
       </div>
@@ -1269,7 +1283,22 @@ function Inspector({
               aria-hidden="true"
               focusable={false}
             />
-            Open Unity Asset Store
+            Open in Asset Store
+          </Button>
+        )}
+        {onDisk && (
+          <Button
+            type="button"
+            className="button wide"
+            onPress={() => onReveal(onDisk.file!)}
+          >
+            <Icon
+              as={FolderOpen}
+              className="icon"
+              aria-hidden="true"
+              focusable={false}
+            />
+            Reveal in Finder
           </Button>
         )}
       </div>

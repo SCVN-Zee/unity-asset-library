@@ -17,4 +17,5 @@ contextBridge.exposeInMainWorld("uai", {
   chooseStorageFolder: (currentPath) => ipcRenderer.invoke("storage:choose-folder", currentPath),
   saveStorage: (selectedPath) => ipcRenderer.invoke("storage:save", selectedPath),
   openExternal: (url) => ipcRenderer.invoke("shell:open-external", url),
+  revealItem: (filePath) => ipcRenderer.invoke("shell:reveal-item", filePath),
 });

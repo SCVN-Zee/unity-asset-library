@@ -46,6 +46,7 @@ declare global {
     getJob: (jobId: string) => Promise<{ job: Job }>;
     getAction: (actionId: string) => Promise<{ action: ActionJob }>;
     openExternal: (url: string) => Promise<void>;
+    revealItem: (filePath: string) => Promise<void>;
   };
   interface Window { uai: UaiBridge }
 }

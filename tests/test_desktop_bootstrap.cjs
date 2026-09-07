@@ -13,6 +13,7 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), "uai-bootstrap-"));
     fs.mkdirSync(selected);
     let pickerResult = { canceled: true, filePaths: [] };
     let quitCalls = 0;
+    const revealed = [];
     const appPaths = { appData: temp, userData: path.join(temp, "Unity Asset Shelf") };
     const dialog = {
       showOpenDialog: async () => pickerResult,
@@ -26,10 +27,11 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), "uai-bootstrap-"));
       on() {},
       quit: () => { quitCalls += 1; },
     };
-    const ipcMain = { handle() {} };
+    const handlers = {};
+    const ipcMain = { handle: (channel, fn) => { handlers[channel] = fn; } };
     const context = vm.createContext({
       require: (name) => name === "electron"
-        ? { app, dialog, ipcMain, BrowserWindow: class {}, shell: { openExternal() {} } }
+        ? { app, dialog, ipcMain, BrowserWindow: class {}, shell: { openExternal() {}, showItemInFolder: (p) => (revealed.push(p), p) } }
         : require(name),
       process: { ...process, resourcesPath: resources },
       __dirname: path.join(temp, "dev", "electron"),
@@ -60,6 +62,19 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), "uai-bootstrap-"));
     assert.equal(externalStorage.ready, true);
     assert.equal(externalStorage.canChange, false);
     await assert.rejects(vm.runInContext(`saveStorage(${JSON.stringify(selected)})`, context), /external/i);
+    vm.runInContext("registerIpc()", context);
+    // Reveal containment: valid library file reveals, symlink escape and missing file are rejected.
+    const reveal = (p) => handlers["shell:reveal-item"]({}, p);
+    const insideFile = path.join(selected, "file.txt");
+    fs.writeFileSync(insideFile, "x");
+    assert.equal(reveal("file.txt"), fs.realpathSync(insideFile));
+    const outsideFile = path.join(temp, "outside.txt");
+    fs.writeFileSync(outsideFile, "x");
+    const escapeLink = path.join(selected, "escape.txt");
+    fs.symlinkSync(outsideFile, escapeLink);
+    await assert.rejects(async () => reveal("escape.txt"), /outside the library/i);
+    await assert.rejects(async () => reveal("ghost.txt"), /no longer on disk/i);
+    assert.notEqual(reveal("file.txt"), escapeLink);
 
     // Native picker returns only a selected path and cancellation leaves storage untouched.
     pickerResult = { canceled: true, filePaths: [] };

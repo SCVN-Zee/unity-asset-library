@@ -15,6 +15,7 @@ import sys
 import tempfile
 import select
 import subprocess
+import socket
 import threading
 import time
 import unittest
@@ -900,6 +901,62 @@ class TestEnrichJob(ServerHarnessTestCase):
 # ---------------------------------------------------------------------------
 
 class TestLifecycle(unittest.TestCase):
+    def test_prepare_restart_rebinds_same_port_with_open_client(self):
+        with tempfile.TemporaryDirectory() as repo:
+            state = os.path.join(repo, "state")
+            root = os.path.join(repo, "vault")
+            os.makedirs(state)
+            os.makedirs(root)
+            with open(os.path.join(root, "x.unitypackage"), "wb") as fh:
+                fh.write(b"x")
+            with open(os.path.join(repo, "config.json"), "w", encoding="utf-8") as fh:
+                json.dump({"vault_root": root, "repo": repo, "output_dir": "."}, fh)
+            probe = socket.socket()
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+            probe.close()
+            script = os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                                  "bin", "server.py")
+
+            def start(identity):
+                return subprocess.Popen(
+                    [sys.executable, script, "--repo", repo, "--instance-id",
+                     identity, "--port", str(port)],
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+            first = start("restart-one")
+            second = None
+            client = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            try:
+                self.assertIn(str(port), first.stdout.readline())
+                client.request("GET", "/api/state")
+                state_body = json.loads(client.getresponse().read())
+                req = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+                req.request("POST", "/api/storage/prepare-restart",
+                            body=json.dumps({"csrf": state_body["csrf"]}),
+                            headers={"Content-Type": "application/json"})
+                self.assertEqual(req.getresponse().status, 200)
+                req.close()
+                first.terminate()
+                first.wait(timeout=10)
+                second = start("restart-two")
+                self.assertIn(str(port), second.stdout.readline())
+                client.close()
+                fresh = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+                fresh.request("GET", "/api/state")
+                self.assertEqual(json.loads(fresh.getresponse().read())["instance_id"],
+                                 "restart-two")
+                fresh.close()
+            finally:
+                client.close()
+                for proc in (first, second):
+                    if proc is not None and proc.stdout is not None:
+                        proc.stdout.close()
+                for proc in (first, second):
+                    if proc is not None and proc.poll() is None:
+                        proc.terminate()
+                        proc.wait(timeout=10)
+
 
     def test_second_instance_refuses_same_state(self):
         h = Harness()

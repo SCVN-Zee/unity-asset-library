@@ -6,60 +6,71 @@ const vm = require("node:vm");
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "uai-bootstrap-"));
 (async () => {
-try {
-  const resources = path.join(temp, "resources");
-  const template = path.join(resources, "uai-backend");
-  fs.mkdirSync(path.join(template, "bin"), { recursive: true });
-  fs.mkdirSync(path.join(template, "state"));
-  fs.writeFileSync(path.join(template, "state", "cache.json"), '{"resolved":{}}');
-  fs.writeFileSync(path.join(template, "state", "assets.json"), '"private inventory"');
-  fs.writeFileSync(path.join(template, "config.json"), '"private config"');
-  let selection;
-  const appPaths = { appData: temp, userData: path.join(temp, "Unity Asset Shelf") };
-  const app = {
-    isPackaged: true,
-    getPath: (name) => appPaths[name],
-    setPath: (name, value) => { appPaths[name] = value; },
-    whenReady: () => ({ then() {} }),
-    on() {},
-  };
-  const context = vm.createContext({
-    require: (name) => name === "electron"
-      ? { app, dialog: { showOpenDialogSync: () => selection } }
-      : require(name),
-    process: { resourcesPath: resources },
-    __dirname: path.join(temp, "dev", "electron"),
-  });
-  vm.runInContext(fs.readFileSync(path.join(__dirname, "../electron/main.cjs"), "utf8"), context);
-  const state = { service: "unity-asset-index", ready: true, csrf: "token" };
-  context.fetch = async () => ({ ok: true, text: async () => JSON.stringify(state) });
-  await assert.rejects(vm.runInContext("ensureBackend()", context), /incompatible.*restart/i);
-  await assert.rejects(vm.runInContext('postJson("/api/resync/plan")', context), /incompatible.*restart/i);
-  state.api_version = 2;
-  await assert.rejects(vm.runInContext("ensureBackend()", context), /incompatible.*restart/i);
-  state.api_version = 3;
-  await assert.rejects(vm.runInContext("ensureBackend()", context), /incompatible.*restart/i);
-  state.api_version = 4;
-  await vm.runInContext("ensureBackend()", context);
-  const prepare = () => vm.runInContext("preparePackagedBackend()", context);
-  const root = path.join(temp, "Unity Asset Index", "backend");
-  assert.equal(prepare(), null);
-  assert.equal(fs.existsSync(path.join(root, "config.json")), false);
-  selection = [temp];
-  assert.equal(prepare(), root);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(root, "config.json"))).vault_root, temp);
-  assert.equal(fs.existsSync(path.join(root, "state", "assets.json")), false);
-  assert.equal(fs.readFileSync(path.join(root, "state", "cache.json"), "utf8"), '{"resolved":{}}');
-  fs.writeFileSync(path.join(root, "state", "cache.json"), '"user cache"');
-  selection = undefined;
-  assert.equal(prepare(), root);
-  assert.equal(fs.readFileSync(path.join(root, "state", "cache.json"), "utf8"), '"user cache"');
-  app.isPackaged = false;
-  assert.equal(prepare(), null);
-  selection = [temp];
-  assert.equal(prepare(), path.join(temp, "dev"));
-  console.log("PASS: backend compatibility, cancel, per-user config, cache-only seed, cache preservation, fresh development setup");
-} finally {
-  fs.rmSync(temp, { recursive: true, force: true });
-}
+  try {
+    const resources = path.join(temp, "resources");
+    fs.mkdirSync(path.join(resources, "uai-backend", "bin"), { recursive: true });
+    const selected = path.join(temp, "library");
+    fs.mkdirSync(selected);
+    let pickerResult = { canceled: true, filePaths: [] };
+    let quitCalls = 0;
+    const appPaths = { appData: temp, userData: path.join(temp, "Unity Asset Shelf") };
+    const dialog = {
+      showOpenDialog: async () => pickerResult,
+    };
+    const app = {
+      isPackaged: true,
+      getPath: (name) => appPaths[name],
+      setPath: (name, value) => { appPaths[name] = value; },
+      getAppPath: () => temp,
+      whenReady: () => ({ then() {} }),
+      on() {},
+      quit: () => { quitCalls += 1; },
+    };
+    const ipcMain = { handle() {} };
+    const context = vm.createContext({
+      require: (name) => name === "electron"
+        ? { app, dialog, ipcMain, BrowserWindow: class {}, shell: { openExternal() {} } }
+        : require(name),
+      process: { ...process, resourcesPath: resources },
+      __dirname: path.join(temp, "dev", "electron"),
+      console,
+      setTimeout,
+      clearTimeout,
+    });
+    vm.runInContext(fs.readFileSync(path.join(__dirname, "../electron/main.cjs"), "utf8"), context);
+
+    // A legacy/incompatible listener remains recoverable in Settings and cannot be reconfigured.
+    const legacyState = { service: "unity-asset-index", api_version: 4, ready: true, csrf: "legacy" };
+    context.fetch = async () => ({ ok: true, text: async () => JSON.stringify(legacyState) });
+    await vm.runInContext("bootstrapStorage()", context);
+    assert.equal(vm.runInContext("getStorage().ready", context), false);
+    assert.equal(vm.runInContext("getStorage().canChange", context), false);
+    assert.match(vm.runInContext("getStorage().error", context), /incompatible backend/i);
+    assert.equal(quitCalls, 0);
+
+    // A compatible external backend is surfaced but never made mutable by this desktop shell.
+    const externalState = {
+      service: "unity-asset-index", api_version: 5, ready: true, csrf: "external-token",
+      vault_root: selected, repo: temp, instance_id: "other-process",
+    };
+    context.fetch = async () => ({ ok: true, text: async () => JSON.stringify(externalState) });
+    await vm.runInContext("bootstrapStorage()", context);
+    const externalStorage = vm.runInContext("getStorage()", context);
+    assert.equal(externalStorage.path, selected);
+    assert.equal(externalStorage.ready, true);
+    assert.equal(externalStorage.canChange, false);
+    await assert.rejects(vm.runInContext(`saveStorage(${JSON.stringify(selected)})`, context), /external/i);
+
+    // Native picker returns only a selected path and cancellation leaves storage untouched.
+    pickerResult = { canceled: true, filePaths: [] };
+    assert.equal(await vm.runInContext("chooseStorageFolder()", context), null);
+    pickerResult = { canceled: false, filePaths: [selected] };
+    assert.equal(await vm.runInContext("chooseStorageFolder()", context), selected);
+    assert.equal(fs.existsSync(path.join(temp, "config.json")), false);
+    assert.equal(fs.existsSync(path.join(temp, "Unity Asset Shelf", "backend", "config.json")), false);
+
+    console.log("PASS: shell-first incompatible recovery, external backend immutability, picker cancellation and no config writes");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

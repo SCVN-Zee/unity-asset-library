@@ -30,17 +30,20 @@ import {
   Spinner,
 } from "./components/ui";
 import {
+  ArrowLeft,
   ArrowRight,
   ChevronDown,
   ChevronRight,
   CircleSlash,
   ExternalLink,
   Folder,
+  FolderOpen,
   LayoutGrid,
   List,
   Plus,
   RefreshCw,
   Search,
+  Settings,
   Sparkles,
   X,
 } from "lucide-react";
@@ -227,9 +230,98 @@ function ActionProgress({ job, onDismiss, announce = true }: ProgressProps) {
     </section>
   );
 }
+type StorageView = "loading" | "onboarding" | "settings" | "library";
+
+function StorageProgress({ progress }: { progress: ProgressSnapshot | null }) {
+  if (!progress) return null;
+  const total = typeof progress.total === "number" && progress.total > 0 ? progress.total : null;
+  const completed = Math.max(0, progress.completed ?? 0);
+  const percent = total === null ? undefined : Math.min(100, Math.round((completed / total) * 100));
+  return (
+    <section className="storage-progress" aria-live="polite" aria-label="Storage setup progress">
+      <div className="progress-heading"><strong>{progress.stage || "Preparing library"}</strong><span>{percent === undefined ? "Working…" : `${percent}%`}</span></div>
+      <div className="progress-track"><progress value={percent} max="100" aria-label="Storage setup progress" />{percent === undefined && <span className="progress-indeterminate" aria-hidden="true" />}</div>
+      <div className="progress-meta"><span>{total === null ? `${completed} items processed` : `${completed} of ${total} items`}</span>{progress.current_item && <span className="progress-current" title={progress.current_item}>{progress.current_item}</span>}</div>
+    </section>
+  );
+}
+
+function StorageScreen({
+  mode,
+  storage,
+  path,
+  error,
+  busy,
+  blocked,
+  onPathChange,
+  onBrowse,
+  onSave,
+  onCancel,
+}: {
+  mode: "loading" | "onboarding" | "settings";
+  storage: StorageState | null;
+  path: string;
+  error: string;
+  busy: boolean;
+  blocked: boolean;
+  onPathChange: (path: string) => void;
+  onBrowse: () => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const [pathTouched, setPathTouched] = useState(false);
+  if (mode === "loading") {
+    return <div className="storage-shell"><div className="storage-loading"><div><Spinner className="spinner" aria-label="Loading storage configuration" /><span>Checking your library…</span>{storage?.busy && <StorageProgress progress={storage.progress} />}</div></div></div>;
+  }
+  const onboarding = mode === "onboarding";
+  const pathError = pathTouched && !path.trim() ? "Choose a library folder to continue." : "";
+  const displayedError = pathError || error || storage?.error || "";
+  const saveLabel = onboarding ? "Save & scan library" : "Save & reload library";
+  const blockedByExternalBackend = storage?.canChange === false && !busy;
+  const handlePathChange = (nextPath: string) => { setPathTouched(true); onPathChange(nextPath); };
+  const handleSave = () => { setPathTouched(true); onSave(); };
+  return (
+    <div className="storage-shell">
+      <header className="storage-topbar">
+        <div className="brand"><div className="brand-mark">US</div><div><div className="eyebrow">UNITY ASSET SHELF</div><h1>{onboarding ? "Set up your library" : "Settings"}</h1></div></div>
+        {storage?.ready && <Button type="button" className="button quiet" onPress={onCancel} isDisabled={busy}><Icon as={ArrowLeft} className="icon" aria-hidden="true" focusable={false} />Back to library</Button>}
+      </header>
+      <main className="storage-main">
+        <section className="storage-card" aria-labelledby="storage-heading">
+          <div className="storage-kicker">{onboarding ? "WELCOME" : "LIBRARY SETTINGS"}</div>
+          <h2 id="storage-heading">{onboarding ? "Where should Asset Shelf look?" : "Library location"}</h2>
+          <p className="storage-lead">{onboarding ? "Choose a folder containing your Unity asset packages. We’ll scan packages and subfolders, then keep the index up to date." : "Change the folder used for your asset index. The current library stays untouched until the new folder is ready."}</p>
+          <label className="storage-label" htmlFor="storage-path">Library folder</label>
+          <div className={`storage-input-row ${displayedError ? "invalid" : ""}`}>
+            <Input className="storage-input"><Icon as={Folder} className="icon" aria-hidden="true" focusable={false} /><InputField id="storage-path" value={path} onChangeText={handlePathChange} placeholder="/Users/you/Assets" aria-label="Library folder" aria-invalid={Boolean(displayedError)} aria-describedby={displayedError ? "storage-help storage-error" : "storage-help"} disabled={busy || blocked} /></Input>
+            <Button type="button" className="button" onPress={onBrowse} isDisabled={busy || blocked} aria-label="Browse for library folder"><Icon as={FolderOpen} className="icon" aria-hidden="true" focusable={false} />Browse</Button>
+          </div>
+          <p id="storage-help" className="storage-help">The full path is stored locally. Existing files are never moved or deleted.</p>
+          {displayedError && <p id="storage-error" className="storage-error" role="alert">{displayedError}</p>}
+          {blocked && !busy && <p className="storage-notice" role="status">{blockedByExternalBackend ? "Another Asset Shelf backend is using this library. Stop it before changing folders." : "Library activity is in progress. You can change this folder when it finishes."}</p>}
+          {busy && <StorageProgress progress={storage?.progress ?? null} />}
+          <div className="storage-actions">
+            {!onboarding && <Button type="button" className="button quiet" onPress={onCancel} isDisabled={busy}>Cancel</Button>}
+            {displayedError && !busy && <Button type="button" className="button quiet" onPress={handleSave} isDisabled={blocked || !path.trim()}>Retry</Button>}
+            <Button type="button" className="button primary" onPress={handleSave} isDisabled={busy || blocked || !path.trim()}>{busy ? "Saving…" : saveLabel}<Icon as={ArrowRight} className="icon" aria-hidden="true" focusable={false} /></Button>
+          </div>
+        </section>
+        <p className="storage-footnote">{onboarding ? "You can change this later from Settings." : storage?.path ? <>Current folder: <code title={storage.path}>{storage.path}</code></> : "No library folder is configured."}</p>
+      </main>
+    </div>
+  );
+}
+
 function App() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [state, setState] = useState<State | null>(null);
+  const [storage, setStorage] = useState<StorageState | null>(null);
+  const [storageView, setStorageView] = useState<StorageView>("loading");
+  const [storagePath, setStoragePath] = useState("");
+  const [storageError, setStorageError] = useState("");
+  const [storageBusy, setStorageBusy] = useState(false);
+  const storageEpochRef = useRef(0);
+  const [storageEpoch, setStorageEpoch] = useState(0);
   const [actionStatus, setActionStatus] = useState<ActionJob | null>(null);
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => new Set());
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -251,10 +343,33 @@ function App() {
   const dismissedRef = useRef(dismissedIds);
   dismissedRef.current = dismissedIds;
   async function load() {
+    const epoch = storageEpochRef.current;
     let loaded = false;
+    let storageReady = false;
     try {
       setError("");
+      let nextStorage = await api.getStorage();
+      while (nextStorage.busy) {
+        if (epoch !== storageEpochRef.current) return false;
+        setStorage(nextStorage);
+        setStoragePath((current) => current || nextStorage.path || "");
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 450));
+        nextStorage = await api.getStorage();
+      }
+      if (epoch !== storageEpochRef.current) return false;
+      setStorage(nextStorage);
+      setStoragePath((current) => current || nextStorage.path || "");
+      if (!nextStorage.ready) {
+        setAssets([]);
+        setSelectedKey(null);
+        setState(null);
+        setStorageView(nextStorage.needsSetup ? "onboarding" : "settings");
+        return false;
+      }
+      setStorageView("library");
+      storageReady = true;
       const [nextState, nextIndex] = await Promise.all([api.getState(), api.getAssets()]);
+      if (epoch !== storageEpochRef.current) return false;
       setState(nextState);
       const saved = sessionStorage.getItem("uai:action");
       let savedIdentity: { id: string; kind: "resync" | "cleanup" | "organize"; phase: "plan" | "apply" } | null = null;
@@ -265,12 +380,103 @@ function App() {
       setSelectedKey((current) => current && nextIndex.assets.some((asset) => asset.asset_key === current) ? current : nextIndex.assets[0]?.asset_key || null);
       loaded = true;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The backend could not be reached.");
+      if (epoch === storageEpochRef.current) {
+        if (!storageReady) setStorageView("settings");
+        setError(cause instanceof Error ? cause.message : "The backend could not be reached.");
+      }
     } finally {
-      setLoading(false);
+      if (epoch === storageEpochRef.current) setLoading(false);
     }
     return loaded;
   }
+
+  const libraryActivity = Boolean(busy) || Boolean(state?.job && ["queued", "running"].includes(state.job.status)) || Boolean(actionStatus && ["queued", "running"].includes(actionStatus.status));
+  const storageChangeBlocked = storageBusy || storage?.canChange === false || libraryActivity;
+
+  async function chooseStorageFolder() {
+    if (storageChangeBlocked) return;
+    try {
+      const selected = await api.chooseStorageFolder(storagePath || undefined);
+      if (selected) {
+        setStoragePath(selected);
+        setStorageError("");
+      }
+    } catch (cause) {
+      setStorageError(cause instanceof Error ? cause.message : "The folder picker could not be opened.");
+    }
+  }
+
+  async function saveStorageRoot() {
+    const nextPath = storagePath.trim();
+    if (!nextPath || storageChangeBlocked) {
+      setStorageError("Choose a library folder to continue.");
+      return;
+    }
+    const epoch = storageEpochRef.current;
+    setStorageBusy(true);
+    setStorageError("");
+    let stopped = false;
+    const poll = async () => {
+      if (stopped || epoch !== storageEpochRef.current) return;
+      try {
+        const next = await api.getStorage();
+        if (!stopped && epoch === storageEpochRef.current) setStorage(next);
+      } catch (cause) {
+        if (!stopped && epoch === storageEpochRef.current) setStorageError(cause instanceof Error ? cause.message : "Could not read library setup progress.");
+      }
+    };
+    const timer = window.setInterval(() => void poll(), 450);
+    try {
+      const nextStorage = await api.saveStorage(nextPath);
+      stopped = true;
+      window.clearInterval(timer);
+      if (epoch !== storageEpochRef.current) return;
+      if (!nextStorage.ready) throw new Error(nextStorage.error || "The new library folder is not ready.");
+      storageEpochRef.current += 1;
+      setStorageEpoch((current) => current + 1);
+      setStorage(nextStorage);
+      setStoragePath(nextStorage.path || nextPath);
+      setStorageView("library");
+      setStorageError("");
+      setAssets([]);
+      setSelectedKey(null);
+      setQuery("");
+      setCategory("All assets");
+      setQuick("all");
+      setState(null);
+      setActionStatus(null);
+      setDialog(null);
+      setDismissedIds(new Set());
+      sessionStorage.removeItem("uai:action");
+      actionGenerationRef.current += 1;
+      setLoading(true);
+      await load();
+    } catch (cause) {
+      stopped = true;
+      window.clearInterval(timer);
+      const message = cause instanceof Error ? cause.message : "The library could not be saved.";
+      setStorageError(message);
+      try {
+        const authoritative = await api.getStorage();
+        if (epoch === storageEpochRef.current) setStorage(authoritative);
+      } catch (refreshCause) {
+        const refreshMessage = refreshCause instanceof Error ? refreshCause.message : "Could not refresh the previous library state.";
+        setStorage((current) => current ? { ...current, busy: false, progress: null, error: message } : current);
+        setStorageError(`${message} ${refreshMessage}`);
+      }
+    } finally {
+      stopped = true;
+      window.clearInterval(timer);
+      setStorageBusy(false);
+    }
+  }
+
+  function cancelStorageChanges() {
+    setStorageError("");
+    setStoragePath(storage?.path || "");
+    setStorageView(storage?.ready ? "library" : "settings");
+  }
+
 
   useEffect(() => { void load(); }, []);
   useEffect(() => { localStorage.setItem("uai:sort", sort); }, [sort]);
@@ -509,6 +715,9 @@ function App() {
       : "";
   const jobRunning =
     state?.job && ["queued", "running"].includes(state.job.status);
+  if (storageView !== "library") {
+    return <StorageScreen mode={storageView} storage={storage} path={storagePath} error={storageError || (storage?.path === storagePath ? storage?.error || "" : "") || error} busy={storageBusy} blocked={storageChangeBlocked} onPathChange={(nextPath) => { setStoragePath(nextPath); setStorageError(""); }} onBrowse={() => void chooseStorageFolder()} onSave={() => void saveStorageRoot()} onCancel={cancelStorageChanges} />;
+  }
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -724,7 +933,7 @@ function App() {
         </Alert>
       )}
 
-      <main className="workspace">
+      <main className="workspace" key={storageEpoch}>
         <aside className="sidebar">
           <Input className="search-wrap">
             <Icon
@@ -799,9 +1008,12 @@ function App() {
               <span>{storeCount} store records</span>
             </div>
             <span className="muted">Python engine online</span>
+            <Button type="button" className="settings-link" onPress={() => { setStoragePath(storage?.path || ""); setStorageError(""); setStorageView("settings"); }} isDisabled={storageBusy} aria-label="Open Settings">
+              <Icon as={Settings} className="icon" aria-hidden="true" focusable={false} />Settings
+            </Button>
           </div>
-        </aside>
 
+        </aside>
         <section className="content-column">
           <div className="content-head">
             <div>
@@ -892,6 +1104,13 @@ function App() {
               <Spinner className="spinner" aria-label="loading" />
               Loading your library
             </div>
+          ) : assets.length === 0 ? (
+            <div className="empty-state">
+              <Icon as={Folder} className="icon empty-mark" aria-hidden="true" focusable={false} />
+              <h3>Your library is empty</h3>
+              <p>No Unity packages or archives have been indexed in this folder yet.</p>
+              <Button type="button" className="button quiet" onPress={() => void runAction("resync")} isDisabled={storageBusy || libraryActivity}>Scan library</Button>
+            </div>
           ) : filtered.length ? (
             <div className={view === "grid" ? "asset-grid" : "asset-list"}>
               {filtered.map((asset) => (
@@ -906,25 +1125,10 @@ function App() {
             </div>
           ) : (
             <div className="empty-state">
-              <Icon
-                as={CircleSlash}
-                className="icon empty-mark"
-                aria-hidden="true"
-                focusable={false}
-              />
+              <Icon as={CircleSlash} className="icon empty-mark" aria-hidden="true" focusable={false} />
               <h3>No assets match</h3>
               <p>Try clearing a filter or searching for a broader term.</p>
-              <Button
-                type="button"
-                className="button quiet"
-                onPress={() => {
-                  setQuery("");
-                  setCategory("All assets");
-                  setQuick("all");
-                }}
-              >
-                Clear filters
-              </Button>
+              <Button type="button" className="button quiet" onPress={() => { setQuery(""); setCategory("All assets"); setQuick("all"); }}>Clear filters</Button>
             </div>
           )}
         </section>

@@ -51,6 +51,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cleanup_versions as cv  # noqa: E402
 import index_assets as ia  # noqa: E402
 import organize_versions as ov  # noqa: E402
+import storage  # noqa: E402
+
 
 SafetyError = cv.SafetyError
 
@@ -113,10 +115,16 @@ class ViewerService:
     """Per-server-process state: paths, capability token, mutation gate, latest
     job, lock seams. Handlers never own locks or jobs."""
 
-    def __init__(self, repo=None, config=None):
-        self.repo = repo or ia.repo_dir()
-        cfg = config if config is not None else ia.load_config()
+    def __init__(self, repo=None, config=None, instance_id=None):
+        self.repo = os.path.realpath(os.path.abspath(repo or ia.repo_dir()))
+        cfg = config if config is not None else storage._load_config(self.repo)
+        if not isinstance(cfg, dict):
+            raise SafetyError("backend storage configuration is missing")
+        configured_repo = cfg.get("repo")
+        if configured_repo and os.path.realpath(os.path.abspath(configured_repo)) != self.repo:
+            raise SafetyError("backend repository identity does not match configuration")
         self.root = os.path.abspath(cfg["vault_root"])
+        self.instance_id = str(instance_id or secrets.token_hex(16))
         self.state = os.path.join(self.repo, "state")
         self.bin_dir = os.path.join(self.repo, "bin")
         self.resolve_py = os.path.join(self.bin_dir, "resolve_store.py")
@@ -127,12 +135,13 @@ class ViewerService:
         self._gate_owner = None
         self._job_lock = threading.Lock()
         self._action = None
-        self._action_thread = None
         self._shutting_down = False
+        self._admissions_closed = False
         self._job = None
         self._child = None
         self._instance_lock_fh = None
         self._job_thread = None
+        self._action_thread = None
         self._scan = ia.scan
         self._plan_cleanup = cv.plan_cleanup
         self._capture_cleanup_snapshot = cv.capture_snapshot
@@ -226,6 +235,13 @@ class ViewerService:
                 fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
             finally:
                 fh.close()
+    def _bound_plan_hash(self, kind, preview, scanned, extra=None):
+        """Bind confirmations to this backend session, not only filesystem state."""
+        bound = dict(extra or {})
+        bound["session_id"] = self.token
+        bound["instance_id"] = self.instance_id
+        return plan_hash(kind, preview, self.root, scanned, extra=bound)
+
     # -- plan shaping -------------------------------------------------------
 
     def cleanup_preview(self, scanned, progress=None):
@@ -264,7 +280,7 @@ class ViewerService:
                        "bytes": plan["candidate_bytes"],
                        "families": plan["candidate_families"]},
         }
-        digest = plan_hash("cleanup", preview, self.root, scanned)
+        digest = self._bound_plan_hash("cleanup", preview, scanned)
         return preview, digest
 
     def organize_preview(self, data, scanned, progress=None):
@@ -282,8 +298,9 @@ class ViewerService:
             (m["src"], m["dst"],
              not os.path.lexists(ov._contained_path(self.root, m["dst"])))
             for m in plan["moves"])
-        digest = plan_hash("organize", preview, self.root, scanned,
-                           extra={"destinations_free": destinations_free})
+        digest = self._bound_plan_hash(
+            "organize", preview, scanned,
+            extra={"destinations_free": destinations_free})
         return preview, digest, plan
 
     # -- operations ---------------------------------------------------------
@@ -298,8 +315,11 @@ class ViewerService:
             action = self._action_snapshot(self._action)
         return {
             "service": "unity-asset-index",
-            "api_version": 4,
+            "api_version": 5,
             "ready": True,
+            "vault_root": os.path.realpath(self.root),
+            "repo": self.repo,
+            "instance_id": self.instance_id,
             "pending_enrichment": self._pending_count(),
             "job": job,
             "action": action,
@@ -334,7 +354,7 @@ class ViewerService:
             progress({"stage": "compare", "completed": len(scanned), "total": len(scanned),
                       "current_item": None,
                       "counts": {"index_" + key: value for key, value in preview["totals"].items()}})
-        return preview, plan_hash("resync", preview, self.root, scanned, extra=previous)
+        return preview, self._bound_plan_hash("resync", preview, scanned, extra=previous)
 
     def op_resync(self, progress=None):
         """Preview index changes without changing the index or vault."""
@@ -407,7 +427,7 @@ class ViewerService:
                 ("organize", "plan"), ("organize", "apply")}:
             raise ValueError("unknown action")
         with self._job_lock:
-            if self._shutting_down:
+            if self._shutting_down or self._admissions_closed:
                 raise Busy("server is shutting down")
             active = self._action
             if active and active["status"] in ("queued", "running"):
@@ -525,7 +545,7 @@ class ViewerService:
 
     def op_enrich_start(self):
         with self._job_lock:
-            if self._shutting_down:
+            if self._shutting_down or self._admissions_closed:
                 raise Busy("server is shutting down")
             job = self._job
             if job and job["status"] in ("queued", "running"):
@@ -734,7 +754,19 @@ class ViewerService:
             if gate_held:
                 self._gate_owner = None
                 self._gate.release()
-    # -- lifecycle ----------------------------------------------------------
+
+    def prepare_restart(self):
+        """Atomically close new admissions once all owned work has drained."""
+        with self._job_lock:
+            active_job = self._job and self._job.get("status") in ("queued", "running")
+            active_action = self._action and self._action.get("status") in ("queued", "running")
+            if active_job or active_action:
+                active = self._job if active_job else self._action
+                raise Busy("backend has an active operation",
+                           job_id=active.get("id") if active else None)
+            self._admissions_closed = True
+            return {"prepared": True, "instance_id": self.instance_id}
+
 
     def shutdown(self):
         with self._job_lock:
@@ -887,6 +919,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "/api/organize/apply": ["plan_hash", "csrf"],
             "/api/enrich/start": ["csrf"],
             "/api/enrich/cancel": ["csrf"],
+            "/api/storage/prepare-restart": ["csrf"],
         }
         if path not in schema_by_path:
             self._send_json({"error": "unknown_route"}, 404)
@@ -911,6 +944,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json({"job_id": service.op_enrich_start()}, 202)
             elif path == "/api/enrich/cancel":
                 self._send_json(service.op_enrich_cancel())
+            elif path == "/api/storage/prepare-restart":
+                self._send_json(service.prepare_restart())
         except Busy as exc:
             payload = {"error": "busy"}
             if exc.job_id:
@@ -931,7 +966,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 class _Server(http.server.ThreadingHTTPServer):
     daemon_threads = True
-    allow_reuse_address = False
+    allow_reuse_address = True
 
     def __init__(self, address, handler, service):
         super().__init__(address, handler)
@@ -940,6 +975,14 @@ class _Server(http.server.ThreadingHTTPServer):
 def serve(service, port):
     """Blocking serve loop. The lifetime instance lock is held across it."""
     service.acquire_instance_lock()
+    try:
+        cfg = storage._load_config(service.repo)
+        if (not isinstance(cfg, dict)
+                or os.path.realpath(os.path.abspath(cfg["vault_root"])) != os.path.realpath(service.root)):
+            raise SafetyError("storage configuration changed during server startup")
+    except BaseException:
+        service.shutdown()
+        raise
     try:
         httpd = _Server(("127.0.0.1", port), Handler, service)
     except OSError as exc:
@@ -973,11 +1016,18 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT,
                         help=f"loopback port (default {DEFAULT_PORT})")
+    parser.add_argument("--repo", default=None, help="application workspace")
+    parser.add_argument("--instance-id", default=None, help="backend instance identity")
     args = parser.parse_args(argv)
-    service = ViewerService()
+    repo = os.path.realpath(os.path.abspath(args.repo or ia.repo_dir()))
     try:
+        storage.recover_startup(repo)
+        service = ViewerService(repo=repo, instance_id=args.instance_id)
         return serve(service, args.port)
     except SafetyError as exc:
+        print(f"server: {exc}")
+        return 2
+    except storage.StorageError as exc:
         print(f"server: {exc}")
         return 2
 

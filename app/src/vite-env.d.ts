@@ -21,14 +21,18 @@ declare global {
   };
   type AssetIndex = { assets: Asset[]; asset_count?: number; file_count?: number; generated?: string };
   type ProgressSnapshot = { stage?: string | null; completed?: number; total?: number | null; current_item?: string | null; counts?: Record<string, number>; started_at?: number; finished_at?: number | null };
+  type StorageState = { path: string | null; ready: boolean; needsSetup: boolean; error: string | null; canChange: boolean; busy: boolean; progress: ProgressSnapshot | null };
   type Job = ProgressSnapshot & { id: string; kind?: string; phase?: string; status: string; remaining?: number | null; error?: string | null; error_code?: string | null } | null;
   type ActionJob = ProgressSnapshot & { id: string; kind: "resync" | "cleanup" | "organize"; phase: "plan" | "apply"; status: string; result?: ActionResult | null; error?: string | null; error_code?: string | null };
-  type State = { service: string; api_version?: number; ready: boolean; csrf: string; pending_enrichment: number; job: Job; action: ActionJob | null };
+  type State = { service: string; api_version?: number; ready: boolean; csrf: string; pending_enrichment: number; job: Job; action: ActionJob | null; vault_root: string; repo: string; instance_id: string };
   type PlanRow = { path?: string; src?: string; dst?: string; size_bytes?: number; previous_size_bytes?: number };
   type CleanupFamily = { asset_key: string; reason: string; survivor: PlanRow | null; removals: PlanRow[] };
   type ActionPreview = { families?: CleanupFamily[]; additions?: PlanRow[]; removals?: PlanRow[]; resized?: PlanRow[]; moves?: PlanRow[]; totals?: Record<string, number> };
   type ActionResult = { preview?: ActionPreview; plan_hash?: string; [key: string]: unknown };
   type UaiBridge = {
+    getStorage: () => Promise<StorageState>;
+    chooseStorageFolder: (currentPath?: string) => Promise<string | null>;
+    saveStorage: (path: string) => Promise<StorageState>;
     getState: () => Promise<State>;
     getAssets: () => Promise<AssetIndex>;
     resync: () => Promise<{ job_id: string }>;

@@ -128,6 +128,50 @@ class CleanupPlanTests(unittest.TestCase):
             update.assert_called_once_with(["update"])
             self.assertFalse(os.path.exists(os.path.join(root, paths[0])))
 
+    def test_apply_progress_counts_only_committed_removals(self):
+        with tempfile.TemporaryDirectory() as root:
+            paths = ["Tools/Foo v1.0.unitypackage", "Tools/Foo v2.0.unitypackage"]
+            scanned = []
+            for name in paths:
+                path = os.path.join(root, name)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "wb") as fh:
+                    fh.write(b"x")
+                scanned.append(record(name, name.split("v")[1].split(".")[0] + ".0", size=1))
+            events = []
+            with mock.patch.object(cv.ia, "main", return_value=0):
+                self.assertEqual(cv.apply_cleanup(root, None, scanned, cv.plan_cleanup(scanned),
+                                                  progress=events.append), 0)
+            self.assertEqual(events[-1]["stage"], "complete")
+            self.assertEqual(events[-1]["counts"]["removed"], 1)
+    def test_state_lock_held_forwards_to_index_update(self):
+        with tempfile.TemporaryDirectory() as root:
+            paths = ["Tools/Foo v1.0.unitypackage", "Tools/Foo v2.0.unitypackage"]
+            scanned = []
+            for name in paths:
+                path = os.path.join(root, name)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                open(path, "wb").close()
+                scanned.append(record(name, name.split("v")[1].split(".")[0] + ".0", size=0))
+            with mock.patch.object(cv.ia, "main", return_value=0) as update:
+                self.assertEqual(cv.apply_cleanup(root, None, scanned, cv.plan_cleanup(scanned),
+                                                  state_lock_held=True), 0)
+            update.assert_called_once_with(["update"], state_lock_held=True)
+
+        with tempfile.TemporaryDirectory() as root:
+            paths = ["Tools/Foo v1.0.unitypackage", "Tools/Foo v2.0.unitypackage"]
+            scanned = []
+            for name in paths:
+                path = os.path.join(root, name)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "wb") as fh:
+                    fh.write(b"x")
+                scanned.append(record(name, name.split("v")[1].split(".")[0] + ".0", size=1))
+            with mock.patch.object(cv.ia, "main", return_value=1):
+                with self.assertRaises(cv.SafetyError) as ctx:
+                    cv.apply_cleanup(root, None, scanned, cv.plan_cleanup(scanned))
+            self.assertTrue(ctx.exception.result["applied"])
+            self.assertFalse(ctx.exception.result["state_refreshed"])
 
 if __name__ == "__main__":
     unittest.main()

@@ -16,7 +16,7 @@ function isViewerState(value) {
   return Boolean(
     value &&
       value.service === SERVICE &&
-      value.api_version === 3 &&
+      value.api_version === 4 &&
       value.ready === true &&
       typeof value.csrf === "string" &&
       value.csrf.length > 0,
@@ -39,7 +39,12 @@ async function requestJson(endpoint, options = {}) {
     throw new Error("The Python backend returned invalid JSON.");
   }
   if (!response.ok) {
-    throw new Error(value.error === "plan_changed" ? "The library changed. Run the action again to review a fresh plan before applying." : value.detail || value.error || `Backend request failed (${response.status}).`);
+    if (value.error === "plan_changed") {
+      const error = new Error("The library changed. Run the action again to review a fresh plan before applying.");
+      error.code = value.error; error.status = response.status; throw error;
+    }
+    const error = new Error(value.detail || value.error || `Backend request failed (${response.status}).`);
+    error.code = value.error; error.status = response.status; throw error;
   }
   return value;
 }
@@ -202,6 +207,7 @@ function registerIpc() {
   ipcMain.handle("backend:enrich-start", () => postJson("/api/enrich/start"));
   ipcMain.handle("backend:enrich-cancel", () => postJson("/api/enrich/cancel"));
   ipcMain.handle("backend:job", (_event, jobId) => requestJson(`/api/job/${encodeURIComponent(jobId)}`));
+  ipcMain.handle("backend:action", (_event, actionId) => requestJson(`/api/action/${encodeURIComponent(actionId)}`));
   ipcMain.handle("shell:open-external", (_event, url) => {
     const parsed = new URL(url);
     if (!["https:", "http:"].includes(parsed.protocol)) throw new Error("Only web links can be opened.");

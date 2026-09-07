@@ -33,6 +33,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 
+from progress import emit_progress, json_progress
 ARCHIVE_EXTS = (".unitypackage", ".zip")
 
 # Excluded by resolved path, never by name. The tool lives outside the vault now,
@@ -116,7 +117,7 @@ TAG_KEYWORDS = {
 # scan — os.walk + os.stat only. Never opens a file.
 # ---------------------------------------------------------------------------
 
-def scan(root, strict=False):
+def scan(root, strict=False, progress=None):
     """Return one record per archive. Reads metadata only; never opens a file."""
     root = os.path.abspath(root)
     excluded = set()
@@ -127,8 +128,6 @@ def scan(root, strict=False):
 
     records = []
     for dirpath, dirnames, filenames in os.walk(root, onerror=(lambda exc: (_ for _ in ()).throw(exc)) if strict else None):
-        # Prune by resolved path, not by name. On a case-insensitive volume a
-        # name-based skip of "tools" would also drop "Tools" and its 191 archives.
         dirnames[:] = [
             d for d in dirnames
             if os.path.realpath(os.path.join(dirpath, d)) not in excluded
@@ -137,15 +136,20 @@ def scan(root, strict=False):
             if not filename.endswith(ARCHIVE_EXTS):
                 continue
             full = os.path.join(dirpath, filename)
+            rel_path = os.path.relpath(full, root)
+            emit_progress(progress, "scan", len(records), None, rel_path,
+                          found=len(records), examined=len(records))
             st = os.stat(full)  # metadata only — no read, no hydration
             records.append({
-                "rel_path": os.path.relpath(full, root),
+                "rel_path": rel_path,
                 "size": st.st_size,
                 "mtime": st.st_mtime,
                 "st_blocks": st.st_blocks,
                 "format": "zip" if filename.endswith(".zip") else "unitypackage",
             })
     records.sort(key=lambda r: r["rel_path"])
+    emit_progress(progress, "scan", len(records), len(records), None,
+                  found=len(records), examined=len(records))
     return records
 
 
@@ -443,10 +447,12 @@ FOLDER_CATEGORY = {
 }
 
 
-def build(scanned):
+def build(scanned, progress=None):
     """Assemble one entry per asset with versions[] newest-first."""
     parsed_all = []
-    for rec in scanned:
+    for i, rec in enumerate(scanned):
+        emit_progress(progress, "build", i, len(scanned), rec["rel_path"],
+                      examined=i, built=0)
         p = parse(rec["rel_path"])
         p.update(size=rec["size"], mtime=rec["mtime"], st_blocks=rec["st_blocks"])
         parsed_all.append(p)
@@ -463,7 +469,9 @@ def build(scanned):
         by_key.setdefault(asset_key(p), []).append(p)
 
     assets = []
-    for key, members in sorted(by_key.items()):
+    for i, (key, members) in enumerate(sorted(by_key.items())):
+        emit_progress(progress, "build", i, len(by_key), members[0]["rel_path"],
+                      examined=len(scanned), built=i)
         top = members[0]
         segments = top["rel_path"].split(os.sep)
         cat_l1 = FOLDER_CATEGORY.get(segments[0]) if len(segments) > 1 else None
@@ -511,6 +519,8 @@ def build(scanned):
             "resolution": {"method": None, "id_verified": False},
         })
 
+    emit_progress(progress, "build", len(by_key), len(by_key), None,
+                  examined=len(scanned), built=len(assets))
     return {
         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "file_count": len(scanned),
@@ -912,7 +922,7 @@ def output_dir(root, cfg=None):
     return root
 
 
-def main(argv=None, state_lock_held=False, scanned=None):
+def main(argv=None, state_lock_held=False, scanned=None, progress=None):
     probe = argparse.ArgumentParser(add_help=False)
     probe.add_argument("--state", default=None)
     probe.add_argument("--state-lock-held", action="store_true")
@@ -920,10 +930,10 @@ def main(argv=None, state_lock_held=False, scanned=None):
     held = state_lock_held or probe_args.state_lock_held
     index_dir = os.path.abspath(probe_args.state) if probe_args.state else state_dir()
     if held:
-        return _main_unlocked(argv, scanned=scanned)
+        return _main_unlocked(argv, scanned=scanned, progress=progress)
     with state_write_lock(index_dir, "index_assets", blocking=True):
-        return _main_unlocked(argv, scanned=scanned)
-def _main_unlocked(argv=None, scanned=None):
+        return _main_unlocked(argv, scanned=scanned, progress=progress)
+def _main_unlocked(argv=None, scanned=None, progress=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("steps", nargs="+", choices=["scan", "emit", "update"])
     ap.add_argument("--root", default=None,
@@ -931,7 +941,11 @@ def _main_unlocked(argv=None, scanned=None):
     ap.add_argument("--state", default=None,
                     help="state dir override (default: repo state/)")
     ap.add_argument("--state-lock-held", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--progress-json", action="store_true",
+                    help="emit machine-readable progress events")
     args = ap.parse_args(argv)
+    if progress is None and args.progress_json:
+        progress = json_progress
 
     cfg = {} if args.root else load_config()
     root = os.path.abspath(args.root) if args.root else cfg["vault_root"]
@@ -954,10 +968,15 @@ def _main_unlocked(argv=None, scanned=None):
             print("update: no previous state — establishing baseline")
 
         if scanned is None:
-            scanned = scan(root)
-        data = build(scanned)
+            scanned = scan(root, progress=progress)
+        data = build(scanned, progress=progress)
+        emit_progress(progress, "compare", 0, 1, None, examined=0)
         diff = diff_manifest(prev, {r["rel_path"]: r["size"] for r in scanned},
                              had_previous=had_previous)
+        emit_progress(progress, "compare", 1, 1, None,
+                      index_added=len(diff["added"]),
+                      index_removed=len(diff["removed"]),
+                      index_resized=len(diff["resized"]))
 
         cache = {}
         cache_path = os.path.join(index_dir, "cache.json")
@@ -986,10 +1005,13 @@ def _main_unlocked(argv=None, scanned=None):
                 except ValueError:
                     print("update: overrides.json unreadable — ignored")
             data = resolve_store.merge(data, {"resolved": cache}, overrides)
+            emit_progress(progress, "merge", 1, 1, None, resolved=len(cache))
         except ImportError:
             print("update: resolve_store unavailable — index written without enrichment")
 
+        emit_progress(progress, "write", 0, 1, assets_json)
         write_atomic(assets_json, json.dumps(data, indent=1, sort_keys=True))
+        emit_progress(progress, "write", 1, 1, assets_json)
 
         entry = format_changelog_entry(
             diff, classified, datetime.now().strftime("%Y-%m-%d %H:%M"))
@@ -1010,8 +1032,8 @@ def _main_unlocked(argv=None, scanned=None):
         args.steps = [st for st in args.steps if st != "scan"] + ["emit"]
 
     if "scan" in args.steps:
-        scanned = scan(root)
-        data = build(scanned)
+        scanned = scan(root, progress=progress)
+        data = build(scanned, progress=progress)
         write_atomic(assets_json, json.dumps(data, indent=1, sort_keys=True))
         dups = [g for g in data["duplicate_groups"] if g["verdict"] == "duplicate"]
         print(f"scan: {data['file_count']} files -> {data['asset_count']} assets, "
@@ -1028,6 +1050,7 @@ def _main_unlocked(argv=None, scanned=None):
         rows = emit_csv(data, os.path.join(out_dir, "assets.csv"))
         emit_review_queue(data, os.path.join(index_dir, "review-queue.md"))
         print(f"emit: assets.csv ({rows} rows), review-queue -> {index_dir}")
+        emit_progress(progress, "emit", 1, 1, None, emitted_rows=rows)
     return 0
 
 

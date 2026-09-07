@@ -552,8 +552,16 @@ class TestSearchPool(unittest.TestCase):
         self.assertEqual(ids, [])
         self.assertEqual(via, "all-empty")
         self.assertTrue(all(st["blocks"] == 0 for st in pool.state.values()))
-        # Every transport tried, twice each (quoted then unquoted).
         self.assertTrue(all(st["empty"] >= 1 for st in pool.state.values()))
+
+    def test_all_transport_request_errors_raise_last_error(self):
+        class OfflineSession:
+            def get(self, url, **kwargs):
+                raise rs.requests.ConnectionError("offline")
+
+        pool = rs.SearchPool(session=OfflineSession())
+        with self.assertRaises(rs.requests.ConnectionError):
+            pool.search("offline")
 
     def test_one_transport_returning_empty_falls_through_to_the_next(self):
         """The failure that produced a 3.3% spike: bing's RSS view returned 200-with-no-
@@ -1007,6 +1015,8 @@ class _FakePool:
     def __init__(self, session=None):
         pass
 
+    def cooldown_remaining(self):
+        return 0.0
     def summary(self):
         return {}
 
@@ -1036,7 +1046,7 @@ class TestPendingResolveScope(unittest.TestCase):
     def _asset(self, key, non_store=False):
         return {"asset_key": key, "name": key.upper(), "non_store": non_store}
 
-    def _run(self, args, assets, cache=None, queue=None):
+    def _run(self, args, assets, cache=None, queue=None, resolve_fn=None):
         import fcntl
         from unittest import mock
         import index_assets as ia
@@ -1054,7 +1064,7 @@ class TestPendingResolveScope(unittest.TestCase):
         if not self.started:
             self.patchers = [
                 mock.patch.object(ia, "state_dir", return_value=self.state),
-                mock.patch.object(rs, "resolve_asset", side_effect=fake_resolve),
+                mock.patch.object(rs, "resolve_asset", side_effect=resolve_fn or fake_resolve),
                 mock.patch.object(rs, "fetch_detail", return_value={"author": "p"}),
                 mock.patch.object(rs, "Pacer", _FakePacer),
                 mock.patch.object(rs, "SearchPool", _FakePool),
@@ -1124,6 +1134,39 @@ class TestPendingResolveScope(unittest.TestCase):
             cache={"resolved": {}}, queue=queue)
         self.assertEqual(code, 0)
         self.assertEqual(attempted, [])
+
+    def test_all_blocked_abort_returns_failure_after_six_attempts(self):
+        def blocked(asset, pool, session=None):
+            raise rs.AllTransportsBlocked("offline")
+
+        assets = [self._asset(chr(ord("a") + i)) for i in range(6)]
+        code, attempted = self._run([], assets, cache={"resolved": {}},
+                                    resolve_fn=blocked)
+        self.assertEqual(code, 3)
+        self.assertEqual(attempted, [])
+
+class TestStructuredProgress(unittest.TestCase):
+    def test_progress_json_is_prefixed_machine_data_and_disabled_by_default(self):
+        import contextlib
+        import io
+
+        stream = io.StringIO()
+        with contextlib.redirect_stdout(stream):
+            rs._progress(True, "resolve", 1, 2, "asset-a",
+                         resolved=1, failed=0, blocked=0, skipped=0)
+        line = stream.getvalue().strip()
+        self.assertTrue(line.startswith("UAI_PROGRESS "))
+        event = json.loads(line[len("UAI_PROGRESS "):])
+        self.assertEqual(event, {
+            "stage": "resolve", "completed": 1, "total": 2,
+            "current_item": "asset-a",
+            "counts": {"resolved": 1, "failed": 0, "blocked": 0, "skipped": 0},
+        })
+        stream = io.StringIO()
+        with contextlib.redirect_stdout(stream):
+            rs._progress(False, "resolve", 2, 2)
+        self.assertEqual(stream.getvalue(), "")
+
 
 
 class TestCacheWriteLock(unittest.TestCase):

@@ -4,7 +4,9 @@
 import json
 import os
 import sys
+import subprocess
 import tempfile
+import textwrap
 import unittest
 from unittest import mock
 
@@ -60,10 +62,17 @@ class PlannerTests(unittest.TestCase):
     def test_full_breadcrumb_destination_with_flattening(self):
         with tempfile.TemporaryDirectory() as root:
             make_file(root, SRC)
-            plan = self.plan_for(root, simple_asset())
+            events = []
+            plan = ov.plan_organize(root, data_of(simple_asset()), progress=events.append)
             self.assertEqual([m["dst"] for m in plan["moves"]], [DST])
             self.assertEqual(plan["groups"][0]["category"], "3D/Props/Weapons")
+            self.assertEqual(plan["totals"]["assets_total"], 1)
+            self.assertEqual(plan["totals"]["planned_files"], 1)
+            self.assertEqual(plan["totals"]["unchanged_files"], 0)
             self.assertEqual(plan["totals"]["moves"], 1)
+            self.assertEqual(events[-1]["counts"]["planned_files"], 1)
+            self.assertEqual(events[-1]["counts"]["unchanged_files"], 0)
+            self.assertNotIn("skipped", events[-1]["counts"])
 
     def test_basename_and_extension_unchanged(self):
         with tempfile.TemporaryDirectory() as root:
@@ -111,6 +120,16 @@ class PlannerTests(unittest.TestCase):
             self.assertEqual(skip["occupants"], [DST])
             self.assertEqual(skip["candidates"], [SRC])
             self.assertEqual(len(plan["skips"]["already-correct"]), 1)
+
+    def test_dangling_symlink_destination_collision(self):
+        with tempfile.TemporaryDirectory() as root:
+            make_file(root, SRC)
+            os.makedirs(os.path.dirname(os.path.join(root, DST)), exist_ok=True)
+            os.symlink("missing.unitypackage", os.path.join(root, DST))
+            plan = self.plan_for(root, simple_asset(), scanned=[{"rel_path": SRC, "size": 0}])
+            self.assertEqual(plan["moves"], [])
+            self.assertEqual(plan["skips"]["collision"][0]["dst"], DST)
+            self.assertTrue(os.path.islink(os.path.join(root, DST)))
 
     def test_duplicate_planned_destination_aliases_collide(self):
         with tempfile.TemporaryDirectory() as root:
@@ -236,7 +255,6 @@ class ApplyTests(unittest.TestCase):
             update.assert_called_once_with(["update"])
             self.assertTrue(os.path.exists(os.path.join(root, DST)))
             self.assertFalse(os.path.exists(os.path.join(root, SRC)))
-            # Still-occupied parent survives; fully emptied parent chain removed.
             self.assertTrue(os.path.exists(os.path.join(root, "Adventures/Publisher")))
             self.assertFalse(os.path.exists(os.path.join(root, "Solo")))
             self.assertEqual(report["moves_applied"], 2)
@@ -288,14 +306,14 @@ class ApplyTests(unittest.TestCase):
             plan = ov.plan_organize(root, data_of(*assets))
             scanned = ia.scan(root, strict=True)
             snapshot = ov.capture_snapshot(root, plan, scanned)
-            real_link = os.link
+            real_move = ov._native_move
 
-            def flaky_link(src, dst, *a, **k):
+            def flaky_move(src, dst, *a, **k):
                 if dst.endswith("B v1.0.unitypackage"):
                     raise OSError("injected failure")
-                return real_link(src, dst, *a, **k)
+                return real_move(src, dst, *a, **k)
 
-            with mock.patch.object(ov.os, "link", flaky_link), \
+            with mock.patch.object(ov, "_native_move", flaky_move), \
                  mock.patch.object(ov.ia, "main", return_value=0):
                 with self.assertRaises(cv.SafetyError):
                     ov.apply_organize(root, None, plan, snapshot)
@@ -303,29 +321,54 @@ class ApplyTests(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(root, "3D/A v1.0.unitypackage")))
             self.assertTrue(os.path.exists(os.path.join(root, src_b)))
 
-    def test_unlink_failure_after_link_rolls_back_new_link(self):
+    def test_post_commit_move_failure_rolls_back(self):
         with tempfile.TemporaryDirectory() as root:
             make_file(root, SRC)
             plan = ov.plan_organize(root, data_of(simple_asset()))
             scanned = ia.scan(root, strict=True)
             snapshot = ov.capture_snapshot(root, plan, scanned)
-            real_unlink = os.unlink
+            real_move = ov._native_move
 
-            def flaky_unlink(path, *a, **k):
-                if path.endswith(SRC) and "3D/" not in path:
-                    raise OSError("injected unlink failure")
-                return real_unlink(path, *a, **k)
+            def flaky_move(src, dst, *a, **k):
+                result = real_move(src, dst, *a, **k)
+                if src.endswith(SRC):
+                    raise OSError("injected post-commit failure")
+                return result
 
-            with mock.patch.object(ov.os, "unlink", flaky_unlink), \
+            with mock.patch.object(ov, "_native_move", flaky_move), \
                  mock.patch.object(ov.ia, "main", return_value=0) as update:
-                with self.assertRaises(cv.SafetyError):
+                with self.assertRaises(cv.SafetyError) as ctx:
                     ov.apply_organize(root, None, plan, snapshot)
-            # The committed destination link was dropped; the original is intact.
+            self.assertFalse(ctx.exception.result["applied"])
+            self.assertTrue(ctx.exception.result["state_refreshed"])
+            self.assertEqual(ctx.exception.result["counts"]["rolled_back"], 1)
             self.assertTrue(os.path.exists(os.path.join(root, SRC)))
             self.assertFalse(os.path.exists(os.path.join(root, DST)))
             update.assert_called_once()
 
-    def test_rollback_incomplete_reports_residual_and_reconciles(self):
+    def test_failed_move_with_replaced_source_reports_incomplete_rollback(self):
+        with tempfile.TemporaryDirectory() as root:
+            make_file(root, SRC, size=3)
+            plan = ov.plan_organize(root, data_of(simple_asset(size=3)))
+            snapshot = ov.capture_snapshot(root, plan, ia.scan(root, strict=True))
+            replacement = make_file(root, "replacement.bin", size=3)
+            with open(replacement, "wb") as fh:
+                fh.write(b"new")
+
+            def replaced_source(src, dst):
+                os.replace(replacement, src)
+                raise OSError("source replaced before move")
+
+            with mock.patch.object(ov, "_native_move", replaced_source), \
+                 mock.patch.object(ov.ia, "main", return_value=0):
+                with self.assertRaisesRegex(cv.SafetyError, "rollback incomplete") as ctx:
+                    ov.apply_organize(root, None, plan, snapshot)
+            self.assertTrue(ctx.exception.result["applied"])
+            with open(os.path.join(root, SRC), "rb") as fh:
+                self.assertEqual(fh.read(), b"new")
+            self.assertFalse(os.path.lexists(os.path.join(root, DST)))
+
+    def test_rollback_safety_error_reports_residual_and_reconciles(self):
         with tempfile.TemporaryDirectory() as root:
             src_a = "Old/A v1.0.unitypackage"
             src_b = "Old/B v1.0.unitypackage"
@@ -336,27 +379,54 @@ class ApplyTests(unittest.TestCase):
             plan = ov.plan_organize(root, data_of(*assets))
             scanned = ia.scan(root, strict=True)
             snapshot = ov.capture_snapshot(root, plan, scanned)
-            real_link = os.link
-            real_unlink = os.unlink
+            real_move = ov._native_move
 
-            def flaky_link(src, dst, *a, **k):
+            def flaky_move(src, dst, *a, **k):
                 if dst.endswith("B v1.0.unitypackage"):
                     raise OSError("injected failure")
-                return real_link(src, dst, *a, **k)
+                if src.endswith("3D/A v1.0.unitypackage"):
+                    raise cv.SafetyError("rollback blocked")
+                return real_move(src, dst, *a, **k)
 
-            def flaky_unlink(path, *a, **k):
-                if path.endswith("3D/A v1.0.unitypackage"):
-                    raise OSError("rollback blocked")
-                return real_unlink(path, *a, **k)
-
-            with mock.patch.object(ov.os, "link", flaky_link), \
-                 mock.patch.object(ov.os, "unlink", flaky_unlink), \
+            with mock.patch.object(ov, "_native_move", flaky_move), \
                  mock.patch.object(ov.ia, "main", return_value=0) as update:
                 with self.assertRaises(cv.SafetyError) as ctx:
                     ov.apply_organize(root, None, plan, snapshot)
             self.assertIn("3D/A v1.0.unitypackage", str(ctx.exception))
-            update.assert_called_once()  # reconciliation against actual disk
+            update.assert_called_once()
             self.assertTrue(os.path.exists(os.path.join(root, "3D/A v1.0.unitypackage")))
+
+    def test_rollback_collision_preserves_both_files(self):
+        with tempfile.TemporaryDirectory() as root:
+            src_a = "Old/A v1.0.unitypackage"
+            src_b = "Old/B v1.0.unitypackage"
+            make_file(root, src_a, size=3)
+            make_file(root, src_b)
+            assets = (asset("k1", "A", ("3D",), [version(src_a, size=3)]),
+                      asset("k2", "B", ("3D",), [version(src_b)]))
+            plan = ov.plan_organize(root, data_of(*assets))
+            scanned = ia.scan(root, strict=True)
+            snapshot = ov.capture_snapshot(root, plan, scanned)
+            real_move = ov._native_move
+
+            def flaky_move(src, dst, *a, **k):
+                if dst.endswith("B v1.0.unitypackage"):
+                    make_file(root, src_a, size=9)
+                    raise OSError("injected failure")
+                return real_move(src, dst, *a, **k)
+
+            with mock.patch.object(ov, "_native_move", flaky_move), \
+                 mock.patch.object(ov.ia, "main", return_value=0) as update:
+                with self.assertRaises(cv.SafetyError) as ctx:
+                    ov.apply_organize(root, None, plan, snapshot)
+            self.assertIn("3D/A v1.0.unitypackage", str(ctx.exception))
+            update.assert_called_once()
+            self.assertTrue(os.path.exists(os.path.join(root, src_a)))
+            self.assertTrue(os.path.exists(os.path.join(root, "3D/A v1.0.unitypackage")))
+            with open(os.path.join(root, src_a), "rb") as fh:
+                self.assertEqual(fh.read(), b"0" * 9)
+            with open(os.path.join(root, "3D/A v1.0.unitypackage"), "rb") as fh:
+                self.assertEqual(fh.read(), b"0" * 3)
 
     def test_fileexists_race_skips_and_preserves_destination(self):
         with tempfile.TemporaryDirectory() as root:
@@ -369,14 +439,14 @@ class ApplyTests(unittest.TestCase):
             plan = ov.plan_organize(root, data_of(*assets))
             scanned = ia.scan(root, strict=True)
             snapshot = ov.capture_snapshot(root, plan, scanned)
-            real_link = os.link
+            real_move = ov._native_move
 
-            def racing_link(src, dst, *a, **k):
+            def racing_move(src, dst, *a, **k):
                 if dst.endswith("B v1.0.unitypackage"):
                     make_file(root, "3D/B v1.0.unitypackage", size=7)
-                return real_link(src, dst, *a, **k)
+                return real_move(src, dst, *a, **k)
 
-            with mock.patch.object(ov.os, "link", racing_link), \
+            with mock.patch.object(ov, "_native_move", racing_move), \
                  mock.patch.object(ov.ia, "main", return_value=0) as update:
                 report = ov.apply_organize(root, None, plan, snapshot)
             update.assert_called_once_with(["update"])
@@ -387,10 +457,34 @@ class ApplyTests(unittest.TestCase):
                 self.assertEqual(fh.read(), b"0000000")
             self.assertTrue(os.path.exists(os.path.join(root, src_b)))
 
+    def test_native_api_unavailable_aborts_before_side_effects(self):
+        with tempfile.TemporaryDirectory() as root:
+            make_file(root, SRC)
+            plan = ov.plan_organize(root, data_of(simple_asset()))
+            scanned = ia.scan(root, strict=True)
+            snapshot = ov.capture_snapshot(root, plan, scanned)
+            with mock.patch.object(ov, "_renamex_np", None), \
+                 mock.patch.object(ov.ia, "main") as update:
+                with self.assertRaises(cv.SafetyError):
+                    ov.apply_organize(root, None, plan, snapshot)
+            update.assert_not_called()
+            self.assertTrue(os.path.exists(os.path.join(root, SRC)))
+            self.assertFalse(os.path.exists(os.path.join(root, "3D")))
+
+    def test_native_move_rejects_symlink_destination(self):
+        with tempfile.TemporaryDirectory() as root:
+            src = make_file(root, "src.unitypackage", size=2)
+            dst = os.path.join(root, "dst.unitypackage")
+            os.symlink("missing.unitypackage", dst)
+            with self.assertRaises(OSError):
+                ov._native_move(src, dst)
+            self.assertTrue(os.path.exists(src))
+            self.assertTrue(os.path.islink(dst))
+
     def test_target_parent_device_mismatch_rejected(self):
         with tempfile.TemporaryDirectory() as root:
             make_file(root, SRC)
-            os.makedirs(os.path.join(root, "3D"))  # nearest existing dst ancestor
+            os.makedirs(os.path.join(root, "3D"))
             plan = ov.plan_organize(root, data_of(simple_asset()))
             scanned = ia.scan(root, strict=True)
             snapshot = ov.capture_snapshot(root, plan, scanned)
@@ -398,8 +492,6 @@ class ApplyTests(unittest.TestCase):
 
             def foreign_stat(path, *a, **k):
                 st = real_stat(path, *a, **k)
-                # _contained_path realpaths root (/var -> /private/var), so the
-                # walk's paths differ textually from the fixture root.
                 if os.path.realpath(path) == os.path.realpath(os.path.join(root, "3D")):
                     return mock.Mock(st_dev=st.st_dev + 1)
                 return st
@@ -422,7 +514,7 @@ class ApplyTests(unittest.TestCase):
             self.assertTrue(os.path.exists(os.path.join(root, DST)))
             self.assertFalse(os.path.exists(os.path.join(root, SRC)))
 
-    def test_no_hydration_guard(self):
+    def test_no_archive_content_reads(self):
         with tempfile.TemporaryDirectory() as root:
             make_file(root, SRC)
             plan = ov.plan_organize(root, data_of(simple_asset()))
@@ -439,7 +531,39 @@ class ApplyTests(unittest.TestCase):
                  mock.patch.object(ov.ia, "main", return_value=0):
                 report = ov.apply_organize(root, None, plan, snapshot)
             self.assertEqual(report["moves_applied"], 1)
+    def test_real_held_state_lock_refresh_completes(self):
+        script = textwrap.dedent("""
+            import os
+            import sys
+            import tempfile
+            sys.path.insert(0, os.path.join(os.getcwd(), "bin"))
+            import index_assets as ia
+            import organize_versions as ov
 
+            with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as state:
+                source = "Adventures/Publisher/Cool Pack v1.0.unitypackage"
+                source_path = os.path.join(root, source)
+                os.makedirs(os.path.dirname(source_path), exist_ok=True)
+                with open(source_path, "wb") as fh:
+                    fh.write(b"x")
+                scanned = ia.scan(root, strict=True)
+                data = ia.build(scanned)
+                data["assets"][0]["category"] = {
+                    "path": "3D/Props/Weapons",
+                    "levels": ["3D", "Props", "Weapons"],
+                    "source": "store",
+                }
+                plan = ov.plan_organize(root, data, scanned=scanned)
+                snapshot = ov.capture_snapshot(root, plan, scanned)
+                with ia.state_write_lock(state, "held-state-test", blocking=True):
+                    report = ov.apply_organize(root, state, plan, snapshot,
+                                                root_override=True, state_lock_held=True)
+                assert report["state_refreshed"] is True, report
+                assert os.path.exists(os.path.join(root, plan["moves"][0]["dst"]))
+        """)
+        completed = subprocess.run([sys.executable, "-c", script],
+                                   capture_output=True, text=True, timeout=10)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
 if __name__ == "__main__":
     unittest.main()

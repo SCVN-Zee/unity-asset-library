@@ -12,5 +12,6 @@ contextBridge.exposeInMainWorld("uai", {
   enrichStart: () => ipcRenderer.invoke("backend:enrich-start"),
   enrichCancel: () => ipcRenderer.invoke("backend:enrich-cancel"),
   getJob: (jobId) => ipcRenderer.invoke("backend:job", jobId),
+  getAction: (actionId) => ipcRenderer.invoke("backend:action", actionId),
   openExternal: (url) => ipcRenderer.invoke("shell:open-external", url),
 });

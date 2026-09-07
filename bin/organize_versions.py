@@ -12,7 +12,9 @@ CLI:
 """
 
 import argparse
+import ctypes
 from contextlib import nullcontext
+import errno
 import json
 import os
 import stat
@@ -22,6 +24,7 @@ import unicodedata
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cleanup_versions as cv  # noqa: E402
 import index_assets as ia  # noqa: E402
+from progress import emit_progress
 
 SafetyError = cv.SafetyError
 
@@ -31,6 +34,43 @@ class StaleIndex(SafetyError):
 
 _stat = os.stat
 _lstat = os.lstat
+
+
+_RENAME_EXCL = 0x04
+_RENAME_NOFOLLOW_ANY = 0x10
+_RENAME_FLAGS = _RENAME_EXCL | _RENAME_NOFOLLOW_ANY
+
+
+def _load_renamex_np():
+    if sys.platform != "darwin":
+        return None
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        renamex_np = libc.renamex_np
+        renamex_np.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint)
+        renamex_np.restype = ctypes.c_int
+        return renamex_np
+    except (AttributeError, OSError):
+        return None
+
+
+_renamex_np = _load_renamex_np()
+
+
+def _require_native_move():
+    if _renamex_np is None:
+        raise SafetyError("native exclusive rename is unavailable on this platform")
+
+
+def _native_move(src, dst):
+    """Atomically rename without replacing an existing or symlink destination."""
+    _require_native_move()
+    result = _renamex_np(os.fsencode(src), os.fsencode(dst), _RENAME_FLAGS)
+    if result != 0:
+        error = ctypes.get_errno()
+        if not error:
+            error = errno.EIO
+        raise OSError(error, os.strerror(error), dst)
 
 # Forbidden destination/source components, compared after NFC normalization and
 # casefolding: the target APFS volume is case-insensitive and
@@ -136,13 +176,12 @@ def _blocked_ancestor(root, levels):
 # ---------------------------------------------------------------------------
 # plan
 # ---------------------------------------------------------------------------
-
-def plan_organize(root, data, scanned=None):
+def plan_organize(root, data, scanned=None, progress=None):
     """Deterministic plan from server/CLI-owned assets.json plus a strict live
     scan. Validates the live manifest against the index (stale state aborts with
     "run Resync"), then transforms without touching disk or generated state."""
     if scanned is None:
-        scanned = ia.scan(root, strict=True)
+        scanned = ia.scan(root, strict=True, progress=progress)
     live = sorted((row["rel_path"], row["size"]) for row in scanned)
     indexed = sorted((path, size) for path, size in ia.manifest_of(data).items())
     if live != indexed:
@@ -153,10 +192,11 @@ def plan_organize(root, data, scanned=None):
     moves, warnings = [], []
     skips = {"non-store": [], "no-category": [], "already-correct": [],
              "blocked-ancestor": [], "collision": []}
-    assets_total = 0
+    assets_total = len(data.get("assets", []))
     candidates = []
-
-    for asset in sorted(data.get("assets", []), key=lambda a: a["asset_key"]):
+    for i, asset in enumerate(sorted(data.get("assets", []), key=lambda a: a["asset_key"])):
+        emit_progress(progress, "prepare", i, len(data.get("assets", [])), asset.get("asset_key"),
+                      examined=i, moved=0, skipped=0)
         versions = asset.get("versions", [])
         files = sorted(v["file"] for v in versions)
         if asset.get("non_store"):
@@ -236,6 +276,9 @@ def plan_organize(root, data, scanned=None):
         entry["dsts"].append(move["dst"])
         entry["bytes"] += move["size_bytes"] or 0
     warnings.sort(key=lambda w: w["src"])
+    emit_progress(progress, "prepare", assets_total, assets_total, None,
+                  examined=assets_total, planned_files=len(moves),
+                  unchanged_files=max(0, len(scanned) - len(moves)))
     return {
         "moves": moves,
         "groups": [groups[key] for key in sorted(groups)],
@@ -244,6 +287,8 @@ def plan_organize(root, data, scanned=None):
         "totals": {
             "assets_total": assets_total,
             "moves": len(moves),
+            "planned_files": len(moves),
+            "unchanged_files": max(0, len(scanned) - len(moves)),
             "move_bytes": sum(m["size_bytes"] or 0 for m in moves),
             "skips": {key: len(skips[key]) for key in sorted(skips)},
         },
@@ -254,28 +299,32 @@ def plan_organize(root, data, scanned=None):
 # snapshot and apply
 # ---------------------------------------------------------------------------
 
-def capture_snapshot(root, plan, scanned):
-    """Bind root identity, live manifest, and (device, inode, size) source
-    identities. mtime_ns is deliberately excluded — OneDrive rewrites it."""
+def capture_snapshot(root, plan, scanned, progress=None):
+    """Bind root identity, live manifest, and source identities."""
     snapshot = {
         "root": cv._root_identity(root),
         "manifest": cv._manifest(scanned),
         "sources": {},
     }
-    for move in plan["moves"]:
+    for i, move in enumerate(plan["moves"]):
+        emit_progress(progress, "validate", i, len(plan["moves"]), move["src"], examined=i)
         snapshot["sources"][move["src"]] = _source_identity(
             _source_path(root, move["src"]))
+    emit_progress(progress, "validate", len(plan["moves"]), len(plan["moves"]), None,
+                  examined=len(plan["moves"]))
     return snapshot
 
 
-def _preflight(root, plan, snapshot):
+def _preflight(root, plan, snapshot, progress=None):
     """Abort before the first move on any drift. mtime-only source changes are
     non-drift by identity design."""
     if cv._root_identity(root) != snapshot["root"]:
         raise SafetyError("vault root changed before organize")
-    if cv._manifest(ia.scan(root, strict=True)) != snapshot["manifest"]:
+    if cv._manifest(ia.scan(root, strict=True, progress=progress)) != snapshot["manifest"]:
         raise SafetyError("vault archive manifest changed before organize")
-    for move in plan["moves"]:
+    for i, move in enumerate(plan["moves"]):
+        emit_progress(progress, "validate", i, len(plan["moves"]), move["src"],
+                      examined=i, moved=0, skipped=0)
         src_abs = _source_path(root, move["src"])
         if _source_identity(src_abs) != snapshot["sources"][move["src"]]:
             raise SafetyError(f"source changed before organize: {move['src']}")
@@ -297,32 +346,59 @@ def _preflight(root, plan, snapshot):
                 parent = os.path.dirname(parent)
         if st.st_dev != snapshot["root"][0]:
             raise SafetyError(f"destination parent is on another volume: {move['dst']}")
-
-
-def _reverse_completed(root, ledger):
-    """Reverse the ledger, newest first, identity-checked and no-clobber.
-    Entries whose source deletion never committed only drop the new
-    destination link — the untouched original stays authoritative. Returns
-    the residual destination paths that could not be reversed."""
+    emit_progress(progress, "validate", len(plan["moves"]), len(plan["moves"]), None,
+                  examined=len(plan["moves"]), moved=0, skipped=0)
+def _reverse_completed(root, ledger, progress=None, stats=None):
+    """Reverse attempted moves, newest first, without clobbering occupants."""
     residuals = []
-    for src_rel, dst_rel, ident, unlinked in reversed(ledger):
+    restored = 0
+    for i, (src_rel, dst_rel, ident) in enumerate(reversed(ledger)):
+        emit_progress(progress, "rollback", i, len(ledger), dst_rel,
+                      rolled_back=restored, rollback_failed=len(residuals))
         try:
             dst_abs = _contained_path(root, dst_rel)
             src_abs = _source_path(root, src_rel)
-            st = _lstat(dst_abs)
-            if (st.st_dev, st.st_ino, st.st_size) != ident:
+            try:
+                dst_st = _lstat(dst_abs)
+            except FileNotFoundError:
+                dst_st = None
+            try:
+                src_st = _lstat(src_abs)
+            except FileNotFoundError:
+                src_st = None
+
+            if dst_st is None:
+                if (src_st is None or
+                        (src_st.st_dev, src_st.st_ino, src_st.st_size) != ident):
+                    residuals.append(dst_rel)
+                continue
+            dst_ident = (dst_st.st_dev, dst_st.st_ino, dst_st.st_size)
+            if dst_ident != ident or src_st is not None:
                 residuals.append(dst_rel)
                 continue
-            if not unlinked:
-                os.unlink(dst_abs)
-                continue
-            if os.path.lexists(src_abs):
-                residuals.append(dst_rel)
-                continue
-            os.link(dst_abs, src_abs)
-            os.unlink(dst_abs)
-        except OSError:
+
+            try:
+                _native_move(dst_abs, src_abs)
+                restored += 1
+            except (OSError, SafetyError):
+                try:
+                    src_after = _lstat(src_abs)
+                except FileNotFoundError:
+                    src_after = None
+                try:
+                    dst_after = _lstat(dst_abs)
+                except FileNotFoundError:
+                    dst_after = None
+                if (src_after is None or
+                        (src_after.st_dev, src_after.st_ino, src_after.st_size) != ident or
+                        dst_after is not None):
+                    residuals.append(dst_rel)
+        except (OSError, SafetyError):
             residuals.append(dst_rel)
+    if stats is not None:
+        stats["rolled_back"] = restored
+    emit_progress(progress, "rollback", len(ledger), len(ledger), None,
+                  rolled_back=restored, rollback_failed=len(residuals))
     return residuals
 
 
@@ -352,10 +428,9 @@ def _remove_empty_parents(root, moves, category_prefixes):
 
 
 def apply_organize(root, state, plan, snapshot, root_override=False,
-                   lock_already_held=False):
-    """Fail-closed batch apply. Acquires cleanup's per-vault lock; no-clobber
-    os.link + os.unlink moves; reversed ledger on mid-batch failure; one index
-    update at the end."""
+                   lock_already_held=False, progress=None, state_lock_held=False):
+    """Fail-closed batch apply with exclusive native renames and rollback."""
+    _require_native_move()
     category_prefixes = set()
     for move in plan["moves"]:
         for i in range(1, len(move["levels"]) + 1):
@@ -363,7 +438,7 @@ def apply_organize(root, state, plan, snapshot, root_override=False,
 
     lock = nullcontext() if lock_already_held else cv._cleanup_lock(root)
     with lock:
-        _preflight(root, plan, snapshot)
+        _preflight(root, plan, snapshot, progress=progress)
 
         for prefix in sorted(category_prefixes):
             path = _contained_path(root, prefix)
@@ -383,61 +458,103 @@ def apply_organize(root, state, plan, snapshot, root_override=False,
         ledger = []
         skipped_collisions = []
         failure = None
-        destructive_started = False
+        counts = {"moved": 0, "skipped": 0, "rolled_back": 0, "rollback_failed": 0}
         try:
-            for move in plan["moves"]:
+            for i, move in enumerate(plan["moves"]):
+                emit_progress(progress, "move", i, len(plan["moves"]), move["src"], **counts)
                 src_abs = _source_path(root, move["src"])
                 dst_abs = _contained_path(root, move["dst"])
                 ident = _source_identity(src_abs)
                 if ident != snapshot["sources"][move["src"]]:
                     raise SafetyError(f"source changed during organize: {move['src']}")
+                # Register before the syscall: an exception can arrive after
+                # renamex_np committed the move.
+                ledger.append([move["src"], move["dst"], ident])
                 try:
-                    os.link(src_abs, dst_abs)
+                    _native_move(src_abs, dst_abs)
                 except FileExistsError:
+                    ledger.pop()
                     skipped_collisions.append({"src": move["src"], "dst": move["dst"]})
+                    counts["skipped"] += 1
+                    emit_progress(progress, "move", i + 1, len(plan["moves"]), move["src"], **counts)
                     continue
-                # Register before anything commits: the destination link now
-                # exists even though the source deletion has not run yet.
-                ledger.append([move["src"], move["dst"], ident, False])
-                st = _lstat(dst_abs)
+                try:
+                    st = _lstat(dst_abs)
+                except OSError as exc:
+                    raise SafetyError(f"moved file unavailable: {move['dst']}") from exc
                 if (st.st_dev, st.st_ino, st.st_size) != ident:
                     raise SafetyError(f"moved bytes do not match source identity: {move['dst']}")
-                destructive_started = True
-                os.unlink(src_abs)
-                ledger[-1][3] = True
+                counts["moved"] += 1
+                emit_progress(progress, "move", i + 1, len(plan["moves"]), move["src"], **counts)
         except BaseException as exc:
             failure = exc
-
         if failure is not None:
-            residuals = _reverse_completed(root, ledger)
+            rollback_stats = {}
+            residuals = _reverse_completed(root, ledger, progress=progress, stats=rollback_stats)
+            counts["rolled_back"] = rollback_stats.get("rolled_back", 0)
+            counts["rollback_failed"] = len(residuals)
+            state_refreshed = False
             try:
-                cv._reconcile(root, state, root_override, snapshot["root"])
+                reconcile_result = cv._reconcile(root, state, root_override, snapshot["root"],
+                                                 progress=progress, state_lock_held=state_lock_held)
+                state_refreshed = reconcile_result == 0
             except BaseException as reconcile_exc:
                 failure = SafetyError(f"{failure}; reconciliation failed: {reconcile_exc}")
             if residuals:
-                raise SafetyError(
+                failure = SafetyError(
                     f"{failure}; organize rollback incomplete, residual destinations: "
                     f"{', '.join(sorted(residuals))}")
+            result = {"applied": bool(residuals), "state_refreshed": state_refreshed,
+                      "counts": dict(counts), "rollback_incomplete": bool(residuals),
+                      "residuals": list(residuals)}
             if isinstance(failure, SafetyError):
+                failure.result = result
                 raise failure
-            raise SafetyError(f"organize failed: {failure}") from failure
+            raise SafetyError(f"organize failed: {failure}", result=result) from failure
 
         removed_dirs = _remove_empty_parents(root, plan["moves"], category_prefixes)
         try:
             if cv._root_identity(root) != snapshot["root"]:
                 raise SafetyError("vault root changed after organize")
-            update_result = ia.main(cv._update_args(state, root, root_override))
+            emit_progress(progress, "refresh", 0, 1, None)
+            update_args = cv._update_args(state, root, root_override)
+            kwargs = {}
+            if progress is not None:
+                kwargs["progress"] = progress
+            if state_lock_held:
+                kwargs["state_lock_held"] = True
+            update_result = ia.main(update_args, **kwargs) if kwargs else ia.main(update_args)
+            emit_progress(progress, "refresh", 1, 1, None)
+            if update_result != 0:
+                raise SafetyError("index update returned nonzero status",
+                                  {"applied": bool(ledger), "state_refreshed": False,
+                                   "counts": dict(counts), "rollback_incomplete": False,
+                                   "residuals": []})
+        except SafetyError as update_exc:
+            if update_exc.result is None:
+                update_exc.result = {"applied": bool(ledger), "state_refreshed": False,
+                                     "counts": dict(counts), "rollback_incomplete": False,
+                                     "residuals": []}
+            raise
         except BaseException as update_exc:
             raise SafetyError(
                 f"organize applied {len(ledger)} moves but index update failed: "
-                f"{update_exc}; Resync is the reconciliation path") from update_exc
+                f"{update_exc}; Resync is the reconciliation path",
+                {"applied": bool(ledger), "state_refreshed": False,
+                 "counts": dict(counts), "rollback_incomplete": False,
+                 "residuals": []}) from update_exc
 
-    return {
+    result = {
         "moves_applied": len(ledger),
         "skipped_collisions": skipped_collisions,
         "removed_dirs": removed_dirs,
         "update_result": update_result,
+        "applied": bool(ledger),
+        "state_refreshed": update_result == 0,
+        "counts": dict(counts),
     }
+    emit_progress(progress, "complete", 1, 1, None, **counts)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -468,7 +585,7 @@ def render_plan(plan, apply=False):
     return "\n".join(lines)
 
 
-def main(argv=None):
+def main(argv=None, progress=None, state_lock_held=False):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", help="vault root override")
     parser.add_argument("--state", help="state directory override")
@@ -481,15 +598,16 @@ def main(argv=None):
     state = os.path.abspath(args.state) if args.state else ia.state_dir()
     try:
         cv._root_identity(root)
-        scanned = ia.scan(root, strict=True)
+        scanned = ia.scan(root, strict=True, progress=progress)
         with open(os.path.join(state, "assets.json"), encoding="utf-8") as fh:
             data = json.load(fh)
-        plan = plan_organize(root, data, scanned)
+        plan = plan_organize(root, data, scanned, progress=progress)
         if not args.apply:
             print(render_plan(plan))
             return 0
-        snapshot = capture_snapshot(root, plan, scanned)
-        report = apply_organize(root, state, plan, snapshot, bool(args.root))
+        snapshot = capture_snapshot(root, plan, scanned, progress=progress)
+        report = apply_organize(root, state, plan, snapshot, bool(args.root), progress=progress,
+                                state_lock_held=state_lock_held)
         print(render_plan(plan, apply=True))
         print(f"applied: {report['moves_applied']} move(s), "
               f"{len(report['skipped_collisions'])} collision skip(s), "

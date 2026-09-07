@@ -58,6 +58,17 @@ class TestScannerNeverOpens(unittest.TestCase):
 
         self.assertEqual(len(result), 2)
 
+    def test_scan_progress_is_unknown_until_final_and_observer_is_nonfatal(self):
+        events = []
+        result = ia.scan(self.tmp, progress=events.append)
+        self.assertEqual(len(result), 2)
+        self.assertIsNone(events[0]["total"])
+        self.assertEqual((events[-1]["completed"], events[-1]["total"]), (2, 2))
+
+        def explode(_event):
+            raise RuntimeError("observer disconnected")
+        self.assertEqual(len(ia.scan(self.tmp, progress=explode)), 2)
+
     def test_scan_records_metadata_only(self):
         rec = ia.scan(self.tmp)[0]
         for key in ("rel_path", "size", "mtime", "st_blocks", "format"):
@@ -601,6 +612,20 @@ class TestUpdateVerb(unittest.TestCase):
         q = json.loads(Path(os.path.join(self.root, ".index",
                                          "pending-enrichment.json")).read_text())
         self.assertTrue(any("brand" in e["asset_key"] for e in q["pending"]))
+
+    def test_update_progress_separates_index_diff_from_emission_rows(self):
+        self._run()
+        os.remove(os.path.join(self.root, "Tools/Thing v1.0.unitypackage"))
+        events = []
+        self.assertEqual(ia.main(["update", "--root", self.root,
+                                  "--state", os.path.join(self.root, ".index")],
+                                 progress=events.append), 0)
+        compare = [e for e in events if e["stage"] == "compare" and e["completed"] == 1][-1]
+        self.assertEqual(compare["counts"]["index_removed"], 1)
+        self.assertNotIn("removed", compare["counts"])
+        emitted = [e for e in events if e["stage"] == "emit"][-1]
+        self.assertEqual(emitted["counts"]["emitted_rows"], 0)
+        self.assertNotIn("emitted", emitted["counts"])
 
     def test_removed_file_is_logged(self):
         self._run()

@@ -3,7 +3,8 @@
 
 Serves the React/Electron app's fixed JSON API:
 
-    GET  /api/state          pending count, capability token, latest job summary
+    GET  /api/state          pending count, capability token, latest action and job
+    GET  /api/action/<id>    action stage, progress, result and terminal error
     POST /api/resync/plan    read-only index change preview
     POST /api/resync/apply   confirm index changes only
     POST /api/cleanup/plan   preview old-version disk cleanup
@@ -13,6 +14,10 @@ Serves the React/Electron app's fixed JSON API:
     POST /api/enrich/start   pending-only resolve -> enrich -> emit background job
     POST /api/enrich/cancel  terminate the job's child process
     GET  /api/job/<id>       job status, stage, progress, bounded log tail
+
+The six plan/apply routes return HTTP 202 {job_id}; poll /api/action/<id>.
+API version 4 requires the matching desktop bridge. Execution-time lock
+contention is a failed action (error_code=busy); admission contention is HTTP 409.
 
 Safety shape: loopback bind only; per-process capability token on every mutating
 POST; non-blocking mutation gate (busy 409, never queue destructive work);
@@ -40,6 +45,7 @@ import sys
 import tempfile
 import threading
 import uuid
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cleanup_versions as cv  # noqa: E402
@@ -52,8 +58,7 @@ MAX_BODY = 16 * 1024
 LOG_LINES = 200
 DEFAULT_PORT = 8765
 
-_TOTAL_RE = re.compile(r"resolve: (\d+) assets to attempt")
-_STEP_RE = re.compile(r"\[(\d+)/(\d+)\]")
+PROGRESS_PREFIX = "UAI_PROGRESS "
 
 
 class Busy(Exception):
@@ -121,11 +126,13 @@ class ViewerService:
         self._gate = threading.Lock()
         self._gate_owner = None
         self._job_lock = threading.Lock()
+        self._action = None
+        self._action_thread = None
+        self._shutting_down = False
         self._job = None
         self._child = None
         self._instance_lock_fh = None
         self._job_thread = None
-        # seams (tests substitute these)
         self._scan = ia.scan
         self._plan_cleanup = cv.plan_cleanup
         self._capture_cleanup_snapshot = cv.capture_snapshot
@@ -143,10 +150,9 @@ class ViewerService:
         with open(os.path.join(self.state, "assets.json"), encoding="utf-8") as fh:
             return json.load(fh)
 
-    def _index_update_impl(self, scanned):
+    def _index_update_impl(self, scanned, progress=None):
         return ia.main(["update", "--root", self.root, "--state", self.state],
-                       state_lock_held=True, scanned=scanned)
-
+                       state_lock_held=True, scanned=scanned, progress=progress)
     def _pending_count(self):
         path = os.path.join(self.state, "pending-enrichment.json")
         if not os.path.exists(path):
@@ -222,8 +228,14 @@ class ViewerService:
                 fh.close()
     # -- plan shaping -------------------------------------------------------
 
-    def cleanup_preview(self, scanned):
+    def cleanup_preview(self, scanned, progress=None):
+        if progress:
+            progress({"stage": "prepare", "completed": 0, "total": 1,
+                      "current_item": None, "counts": {}})
         plan = self._plan_cleanup(scanned)
+        if progress:
+            progress({"stage": "prepare", "completed": 1, "total": 1,
+                      "current_item": None, "counts": {"families": len(plan["families"])}})
         def version_view(version):
             if not version:
                 return None
@@ -255,8 +267,8 @@ class ViewerService:
         digest = plan_hash("cleanup", preview, self.root, scanned)
         return preview, digest
 
-    def organize_preview(self, data, scanned):
-        plan = self._plan_organize(self.root, data, scanned)
+    def organize_preview(self, data, scanned, progress=None):
+        plan = self._plan_organize(self.root, data, scanned, progress=progress)
         preview = {
             "kind": "organize",
             "groups": plan["groups"],
@@ -276,27 +288,31 @@ class ViewerService:
 
     # -- operations ---------------------------------------------------------
 
-    def _strict_scan(self):
-        """Strict vault scan; walk errors surface as clean failures before any
-        write happens."""
-        return self._scan(self.root, strict=True)
+    def _strict_scan(self, progress=None):
+        """Strict vault scan; walk errors surface before any write."""
+        return self._scan(self.root, strict=True, progress=progress)
 
     def op_state(self):
         with self._job_lock:
             job = self._job_snapshot(self._job)
+            action = self._action_snapshot(self._action)
         return {
             "service": "unity-asset-index",
-            "api_version": 3,  # Independent resync and cleanup; bump on breaking API changes.
+            "api_version": 4,
             "ready": True,
             "pending_enrichment": self._pending_count(),
             "job": job,
+            "action": action,
             "csrf": self.token,
         }
 
     def op_assets(self):
         return self._load_assets()
 
-    def resync_preview(self, scanned):
+    def resync_preview(self, scanned, progress=None):
+        if progress:
+            progress({"stage": "compare", "completed": 0, "total": len(scanned),
+                      "current_item": None, "counts": {}})
         try:
             previous = ia.manifest_of(self._load_assets())
         except FileNotFoundError:
@@ -304,7 +320,6 @@ class ViewerService:
         except ValueError as exc:
             raise SafetyError("The index is unreadable; resync cannot safely preview changes.") from exc
         current = {row["rel_path"]: row["size"] for row in scanned}
-        # First sync previews all files, unlike the historical changelog baseline.
         diff = ia.diff_manifest(previous, current, had_previous=True)
         preview = {
             "kind": "resync",
@@ -315,91 +330,213 @@ class ViewerService:
             "totals": {"added": len(diff["added"]), "removed": len(diff["removed"]),
                        "resized": len(diff["resized"])},
         }
+        if progress:
+            progress({"stage": "compare", "completed": len(scanned), "total": len(scanned),
+                      "current_item": None,
+                      "counts": {"index_" + key: value for key, value in preview["totals"].items()}})
         return preview, plan_hash("resync", preview, self.root, scanned, extra=previous)
 
-    def op_resync(self):
+    def op_resync(self, progress=None):
         """Preview index changes without changing the index or vault."""
-        with self.mutation_gate("resync"), self.state_write_lock(), \
-                self.engine_lock_attempt():
-            preview, digest = self.resync_preview(self._strict_scan())
+        with self.mutation_gate("resync"), self.state_write_lock(), self.engine_lock_attempt():
+            preview, digest = self.resync_preview(self._strict_scan(progress=progress), progress=progress)
         return {"preview": preview, "plan_hash": digest}
 
-    def op_resync_apply(self, plan_hash_value):
-        with self.mutation_gate("resync-apply"), self.state_write_lock(), \
-                self.engine_lock_attempt():
-            scanned = self._strict_scan()
-            preview, digest = self.resync_preview(scanned)
+    def op_resync_apply(self, plan_hash_value, progress=None):
+        with self.mutation_gate("resync-apply"), self.state_write_lock(), self.engine_lock_attempt():
+            scanned = self._strict_scan(progress=progress)
+            preview, digest = self.resync_preview(scanned, progress=progress)
             if not hmac.compare_digest(digest, plan_hash_value):
                 raise Drift(preview, digest)
-            # Apply the validated scan, never a second unreviewed scan.
-            update_result = self._index_update(scanned)
+            update_result = self._index_update(scanned, progress=progress)
             if update_result != 0:
                 raise SafetyError(f"index update exited {update_result}")
         return {"state_refreshed": True}
 
-    def op_cleanup_plan(self):
-        with self.mutation_gate("cleanup-plan"), self.state_write_lock(), \
-                self.engine_lock_attempt():
-            preview, digest = self.cleanup_preview(self._strict_scan())
+    def op_cleanup_plan(self, progress=None):
+        with self.mutation_gate("cleanup-plan"), self.state_write_lock(), self.engine_lock_attempt():
+            preview, digest = self.cleanup_preview(self._strict_scan(progress=progress), progress=progress)
         return {"preview": preview, "plan_hash": digest}
 
-    def op_cleanup_apply(self, plan_hash_value):
+    def op_cleanup_apply(self, plan_hash_value, progress=None):
         with self.mutation_gate("cleanup-apply"), self.state_write_lock():
             with self.engine_lock_attempt():
-                scanned = self._strict_scan()
+                scanned = self._strict_scan(progress=progress)
                 try:
-                    preview, digest = self.cleanup_preview(scanned)
+                    preview, digest = self.cleanup_preview(scanned, progress=progress)
                 except SafetyError as exc:
-                    # An archive vanished or turned unreadable: the confirmed plan
-                    # can no longer be verified — that is drift, not a server error.
                     raise Drift({"kind": "cleanup", "unavailable": str(exc)}, "") from exc
                 if not hmac.compare_digest(digest, plan_hash_value):
                     raise Drift(preview, digest)
                 snapshot = self._capture_cleanup_snapshot(self.root, scanned)
                 plan = self._plan_cleanup(scanned)
                 self._apply_cleanup(self.root, self.state, scanned, plan, False, snapshot,
-                                    lock_already_held=True)
+                                    lock_already_held=True, progress=progress,
+                                    state_lock_held=True)
         return {"applied": True, "state_refreshed": True}
 
-    def op_organize_plan(self):
-        # Read-only planning is gate-free: it can never conflict with the
-        # hours-long resolve stage or a running viewer request.
-        scanned = self._strict_scan()
+    def op_organize_plan(self, progress=None):
+        scanned = self._strict_scan(progress=progress)
         data = self._load_assets()
-        preview, digest, _ = self.organize_preview(data, scanned)
+        preview, digest, _ = self.organize_preview(data, scanned, progress=progress)
         return {"preview": preview, "plan_hash": digest}
 
-    def op_organize_apply(self, plan_hash_value):
+    def op_organize_apply(self, plan_hash_value, progress=None):
         with self.mutation_gate("organize-apply"), self.state_write_lock():
             with self.engine_lock_attempt():
-                scanned = self._strict_scan()
+                scanned = self._strict_scan(progress=progress)
                 data = self._load_assets()
                 try:
-                    preview, digest, plan = self.organize_preview(data, scanned)
+                    preview, digest, plan = self.organize_preview(data, scanned, progress=progress)
                 except SafetyError as exc:
                     raise Drift({"kind": "organize", "unavailable": str(exc)}, "") from exc
                 if not hmac.compare_digest(digest, plan_hash_value):
                     raise Drift(preview, digest)
                 snapshot = self._capture_organize_snapshot(self.root, plan, scanned)
                 report = self._apply_organize(self.root, self.state, plan, snapshot, False,
-                                              lock_already_held=True)
+                                              lock_already_held=True, progress=progress,
+                                              state_lock_held=True)
         return {"applied": True, "report": report}
+
+    # -- action jobs --------------------------------------------------------
+
+    def start_action(self, kind, phase, plan_hash_value=None):
+        if (kind, phase) not in {
+                ("resync", "plan"), ("resync", "apply"),
+                ("cleanup", "plan"), ("cleanup", "apply"),
+                ("organize", "plan"), ("organize", "apply")}:
+            raise ValueError("unknown action")
+        with self._job_lock:
+            if self._shutting_down:
+                raise Busy("server is shutting down")
+            active = self._action
+            if active and active["status"] in ("queued", "running"):
+                raise Busy("an action is already active", job_id=active["id"])
+            action = {
+                "id": uuid.uuid4().hex, "kind": kind, "phase": phase,
+                "status": "queued", "stage": "queued", "completed": 0,
+                "total": None, "current_item": None, "counts": {},
+                "started_at": time.time(), "finished_at": None,
+                "result": None, "error": None, "error_code": None,
+            }
+            self._action = action
+            thread = threading.Thread(
+                target=self._action_body,
+                args=(action, plan_hash_value), daemon=True,
+                name=f"action-{action['id']}")
+            self._action_thread = thread
+            thread.start()
+            return action["id"]
+
+    def _publish_action_progress(self, action, event):
+        if not isinstance(event, dict):
+            return
+        stage = event.get("stage")
+        completed = event.get("completed", 0)
+        total = event.get("total")
+        current = event.get("current_item")
+        counts = event.get("counts", {})
+        if not isinstance(stage, str) or not stage:
+            return
+        if not isinstance(completed, int) or completed < 0:
+            return
+        if total is not None and (not isinstance(total, int) or total < 0 or completed > total):
+            return
+        if current is not None and not isinstance(current, str):
+            return
+        if not isinstance(counts, dict):
+            return
+        with self._job_lock:
+            if action["status"] not in ("queued", "running"):
+                return
+            action["stage"] = stage
+            action["completed"] = completed
+            action["total"] = total
+            action["current_item"] = current
+            action["counts"].update({k: v for k, v in counts.items()
+                                      if isinstance(k, str) and isinstance(v, (int, float))})
+
+    def _finish_action(self, action, status, result=None, error=None, error_code=None):
+        with self._job_lock:
+            if action["status"] in ("completed", "failed"):
+                return
+            action["status"] = status
+            action["result"] = result
+            action["error"] = error
+            action["error_code"] = error_code
+            action["finished_at"] = time.time()
+            action["current_item"] = None
+
+    def _action_body(self, action, plan_hash_value):
+        with self._job_lock:
+            if action["status"] != "queued":
+                return
+            action["status"] = "running"
+            action["stage"] = "starting"
+        progress = lambda event: self._publish_action_progress(action, event)
+        try:
+            if action["kind"] == "resync":
+                result = (self.op_resync(progress=progress) if action["phase"] == "plan"
+                          else self.op_resync_apply(plan_hash_value, progress=progress))
+            elif action["kind"] == "cleanup":
+                result = (self.op_cleanup_plan(progress=progress) if action["phase"] == "plan"
+                          else self.op_cleanup_apply(plan_hash_value, progress=progress))
+            else:
+                result = (self.op_organize_plan(progress=progress) if action["phase"] == "plan"
+                          else self.op_organize_apply(plan_hash_value, progress=progress))
+        except Busy as exc:
+            self._finish_action(action, "failed", error=str(exc), error_code="busy")
+        except Drift as exc:
+            self._finish_action(action, "failed",
+                                result={"preview": exc.plan, "plan_hash": exc.plan_hash},
+                                error="plan changed", error_code="plan_changed")
+        except ov.StaleIndex as exc:
+            self._finish_action(action, "failed", error=str(exc), error_code="stale_index")
+        except SafetyError as exc:
+            self._finish_action(action, "failed", result=getattr(exc, "result", None),
+                                error=str(exc), error_code="safety_error")
+        except OSError as exc:
+            self._finish_action(action, "failed", error=str(exc), error_code="os_error")
+        except BaseException as exc:
+            self._finish_action(action, "failed", error=str(exc), error_code="worker_error")
+        else:
+            self._finish_action(action, "completed", result=result)
+
+    @staticmethod
+    def _action_snapshot(action):
+        if not action:
+            return None
+        return {"id": action["id"], "kind": action["kind"], "phase": action["phase"],
+                "status": action["status"], "stage": action["stage"],
+                "completed": action["completed"], "total": action["total"],
+                "current_item": action["current_item"], "counts": dict(action["counts"]),
+                "started_at": action["started_at"], "finished_at": action["finished_at"],
+                "result": action["result"], "error": action["error"],
+                "error_code": action["error_code"]}
+
+    def op_action(self, action_id):
+        with self._job_lock:
+            if not self._action or self._action["id"] != action_id:
+                return None
+            return self._action_snapshot(self._action)
+
 
     # -- enrich job ---------------------------------------------------------
 
     def op_enrich_start(self):
         with self._job_lock:
+            if self._shutting_down:
+                raise Busy("server is shutting down")
             job = self._job
             if job and job["status"] in ("queued", "running"):
                 raise Busy("an enrich job is already active", job_id=job["id"])
             job = {
-                "id": uuid.uuid4().hex,
-                "status": "queued",
-                "stage": None,
-                "counts": {},
-                "remaining": None,
-                "error": None,
-                "log": collections.deque(maxlen=LOG_LINES),
+                "id": uuid.uuid4().hex, "kind": "enrich", "phase": "run",
+                "status": "queued", "stage": "queued", "completed": 0,
+                "total": None, "current_item": None, "counts": {},
+                "started_at": time.time(), "finished_at": None,
+                "remaining": None, "result": None, "error": None,
+                "error_code": None, "log": collections.deque(maxlen=LOG_LINES),
             }
             self._job = job
             thread = threading.Thread(target=self._job_body, args=(job,), daemon=True)
@@ -436,13 +573,14 @@ class ViewerService:
         if not job:
             return None
         return {
-            "id": job["id"],
-            "status": job["status"],
-            "stage": job["stage"],
-            "counts": dict(job["counts"]),
-            "remaining": job["remaining"],
-            "error": job["error"],
-            "log_tail": list(job["log"])[-20:],
+            "id": job["id"], "kind": job.get("kind", "enrich"),
+            "phase": job.get("phase", "run"), "status": job["status"],
+            "stage": job["stage"], "completed": job.get("completed", 0),
+            "total": job.get("total"), "current_item": job.get("current_item"),
+            "counts": dict(job["counts"]), "started_at": job.get("started_at"),
+            "finished_at": job.get("finished_at"), "remaining": job["remaining"],
+            "result": job.get("result"), "error": job["error"],
+            "error_code": job.get("error_code"), "log_tail": list(job["log"])[-20:],
         }
 
     def _run_stage_process(self, argv):
@@ -458,23 +596,44 @@ class ViewerService:
         self._child = proc
         return proc
 
+    def _publish_job_progress(self, job, event):
+        if not isinstance(event, dict):
+            return
+        stage = event.get("stage")
+        completed = event.get("completed", 0)
+        total = event.get("total")
+        current = event.get("current_item")
+        counts = event.get("counts", {})
+        if (not isinstance(stage, str) or not stage or not isinstance(completed, int)
+                or completed < 0 or (total is not None and
+                (not isinstance(total, int) or total < 0 or completed > total))
+                or (current is not None and not isinstance(current, str))
+                or not isinstance(counts, dict)):
+            return
+        with self._job_lock:
+            if job["status"] not in ("queued", "running"):
+                return
+            job["stage"] = stage
+            job["completed"] = completed
+            job["total"] = total
+            job["current_item"] = current
+            job["counts"].update({k: v for k, v in counts.items()
+                                   if isinstance(k, str) and isinstance(v, (int, float))})
+
     def _job_body(self, job):
-        """resolve (gate-free) -> enrich (gate + state lock) -> emit (gate + state
-        lock). Any nonzero stage fails the job and skips later stages. The
-        watchdog finally guarantees a terminal status and lock release on every
-        exit path, including a worker crash between stages."""
         stages = (
-            ("resolve", [sys.executable, "-u", self.resolve_py,
-                         "resolve", "--resume", "--pending"], False),
-            ("enrich", [sys.executable, "-u", self.resolve_py, "enrich",
-                         "--state-lock-held"], True),
-            ("emit", [sys.executable, "-u", self.index_py, "emit",
-                       "--state-lock-held"], True),
+            ("resolve", [sys.executable, "-u", self.resolve_py, "resolve", "--resume",
+                         "--pending", "--progress-json"], False),
+            ("enrich", [sys.executable, "-u", self.resolve_py, "enrich", "--state-lock-held",
+                         "--progress-json"], True),
+            ("emit", [sys.executable, "-u", self.index_py, "emit", "--state-lock-held",
+                       "--progress-json"], True),
         )
         with self._job_lock:
             if job["status"] == "cancelled":
                 return
             job["status"] = "running"
+            job["started_at"] = job.get("started_at") or time.time()
         gate_held = False
         state_fh = None
         try:
@@ -483,32 +642,51 @@ class ViewerService:
                     if job["status"] == "cancelled":
                         return
                     job["stage"] = stage
+                    job["completed"] = 0
+                    job["total"] = None
+                    job["current_item"] = None
                 if gated:
-                    # Blocking is safe in the worker: a concurrent Resync merely
-                    # delays enrich/emit briefly; the reverse never happens.
-                    self._gate.acquire()
+                    with self._job_lock:
+                        if job["status"] == "cancelled":
+                            return
+                        job["stage"] = "waiting-for-lock"
+                    while not self._gate.acquire(timeout=0.1):
+                        with self._job_lock:
+                            if job["status"] == "cancelled":
+                                return
                     self._gate_owner = f"job:{job['id']}:{stage}"
                     gate_held = True
                     state_fh = open(os.path.join(self.state, "state-write.lock"), "a")
-                    fcntl.flock(state_fh.fileno(), fcntl.LOCK_EX)
+                    while True:
+                        with self._job_lock:
+                            if job["status"] == "cancelled":
+                                return
+                        try:
+                            fcntl.flock(state_fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            break
+                        except BlockingIOError:
+                            time.sleep(0.1)
+                    with self._job_lock:
+                        if job["status"] == "cancelled":
+                            return
+                        job["stage"] = stage
                 proc = None
                 try:
-                    # Keep the cancellation guard and the default Popen call under
-                    # one job lock. A cancel request therefore either observes a
-                    # queued stage, or observes its registered child.
                     with self._job_lock:
                         if job["status"] == "cancelled":
                             return
                         proc = self._runner(argv)
                     for line in proc.stdout:
                         line = line.rstrip("\n")
-                        job["log"].append(line)
-                        m = _TOTAL_RE.search(line)
-                        if m:
-                            job["counts"] = {"total": int(m.group(1)), "done": 0}
-                        m = _STEP_RE.search(line)
-                        if m and job["counts"]:
-                            job["counts"]["done"] = int(m.group(1))
+                        if line.startswith(PROGRESS_PREFIX):
+                            try:
+                                event = json.loads(line[len(PROGRESS_PREFIX):])
+                            except (ValueError, TypeError):
+                                continue
+                            self._publish_job_progress(job, event)
+                        else:
+                            with self._job_lock:
+                                job["log"].append(line)
                     rc = proc.wait()
                 finally:
                     with self._job_lock:
@@ -530,22 +708,23 @@ class ViewerService:
                     if rc != 0:
                         job["status"] = "failed"
                         job["error"] = f"stage {stage} exited {rc}"
+                        job["error_code"] = "stage_failed"
+                        job["finished_at"] = time.time()
                         return
             with self._job_lock:
                 if job["status"] == "cancelled":
                     return
                 job["remaining"] = self._pending_count()
                 job["status"] = "completed"
+                job["finished_at"] = time.time()
         except BaseException as exc:
             with self._job_lock:
                 if job["status"] not in ("cancelled", "failed", "completed"):
                     job["status"] = "failed"
                     job["error"] = f"worker crashed: {exc}"
+                    job["error_code"] = "worker_error"
+                    job["finished_at"] = time.time()
         finally:
-            with self._job_lock:
-                if job["status"] in ("queued", "running"):
-                    job["status"] = "failed"
-                    job["error"] = job["error"] or "worker exited without a terminal transition"
             if state_fh is not None:
                 try:
                     fcntl.flock(state_fh.fileno(), fcntl.LOCK_UN)
@@ -559,9 +738,11 @@ class ViewerService:
 
     def shutdown(self):
         with self._job_lock:
+            self._shutting_down = True
             child = self._child
             job = self._job
             worker = self._job_thread
+            action_worker = self._action_thread
             if job and job["status"] in ("queued", "running"):
                 job["status"] = "cancelled"
         if child is not None and child.poll() is None:
@@ -570,10 +751,12 @@ class ViewerService:
                 child.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 child.kill()
-                child.wait()
-        join = getattr(worker, "join", None)
-        if worker is not None and worker is not threading.current_thread() and callable(join):
-            join(timeout=15)
+        # The action owns the mutation gate; release the instance lock only
+        # after it has drained, so a new server cannot overlap its writes.
+        for thread in (worker, action_worker):
+            join = getattr(thread, "join", None)
+            if thread is not None and thread is not threading.current_thread() and callable(join):
+                join(timeout=None if thread is action_worker else 15)
         if self._instance_lock_fh is not None:
             try:
                 fcntl.flock(self._instance_lock_fh.fileno(), fcntl.LOCK_UN)
@@ -673,6 +856,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(service.op_state())
             elif path == "/api/assets":
                 self._send_json(service.op_assets())
+            elif path.startswith("/api/action/"):
+                snapshot = service.op_action(path[len("/api/action/"):])
+                if snapshot is None:
+                    self._send_json({"error": "unknown_action"}, 404)
+                else:
+                    self._send_json({"action": snapshot})
             elif path.startswith("/api/job/"):
                 snapshot = service.op_job(path[len("/api/job/"):])
                 if snapshot is None:
@@ -706,18 +895,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if body is None:
             return
         try:
-            if path == "/api/resync/plan":
-                self._send_json(service.op_resync())
-            elif path == "/api/resync/apply":
-                self._send_json(service.op_resync_apply(body["plan_hash"]))
-            elif path == "/api/cleanup/plan":
-                self._send_json(service.op_cleanup_plan())
-            elif path == "/api/cleanup/apply":
-                self._send_json(service.op_cleanup_apply(body["plan_hash"]))
-            elif path == "/api/organize/plan":
-                self._send_json(service.op_organize_plan())
-            elif path == "/api/organize/apply":
-                self._send_json(service.op_organize_apply(body["plan_hash"]))
+            action_paths = {
+                "/api/resync/plan": ("resync", "plan"),
+                "/api/resync/apply": ("resync", "apply"),
+                "/api/cleanup/plan": ("cleanup", "plan"),
+                "/api/cleanup/apply": ("cleanup", "apply"),
+                "/api/organize/plan": ("organize", "plan"),
+                "/api/organize/apply": ("organize", "apply"),
+            }
+            if path in action_paths:
+                kind, phase = action_paths[path]
+                plan_hash_value = body.get("plan_hash")
+                self._send_json({"job_id": service.start_action(kind, phase, plan_hash_value)}, 202)
             elif path == "/api/enrich/start":
                 self._send_json({"job_id": service.op_enrich_start()}, 202)
             elif path == "/api/enrich/cancel":
@@ -725,7 +914,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Busy as exc:
             payload = {"error": "busy"}
             if exc.job_id:
-                payload["job"] = exc.job_id
+                payload["job_id"] = exc.job_id
             self._send_json(payload, 409)
         except Drift as exc:
             self._send_json({"error": "plan_changed",
@@ -733,9 +922,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except ov.StaleIndex as exc:
             self._send_json({"error": "stale_index", "detail": str(exc)}, 409)
         except SafetyError as exc:
-            self._send_json({"error": "operation_failed", "detail": str(exc)}, 500)
+            self._send_json({"error": "operation_failed", "detail": str(exc),
+                             "result": getattr(exc, "result", None)}, 500)
         except OSError as exc:
             self._send_json({"error": "operation_failed", "detail": str(exc)}, 503)
+
 
 
 class _Server(http.server.ThreadingHTTPServer):

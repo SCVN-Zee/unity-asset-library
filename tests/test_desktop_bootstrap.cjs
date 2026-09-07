@@ -36,6 +36,8 @@ try {
   state.api_version = 2;
   await assert.rejects(vm.runInContext("ensureBackend()", context), /incompatible.*restart/i);
   state.api_version = 3;
+  await assert.rejects(vm.runInContext("ensureBackend()", context), /incompatible.*restart/i);
+  state.api_version = 4;
   await vm.runInContext("ensureBackend()", context);
   const prepare = () => vm.runInContext("preparePackagedBackend()", context);
   const root = path.join(temp, "user", "backend");

@@ -16,12 +16,16 @@ from collections import defaultdict
 from contextlib import contextmanager, nullcontext
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from progress import emit_progress
 import index_assets as ia  # noqa: E402
 
 
 class SafetyError(RuntimeError):
     """Raised when the vault or a planned candidate changed unexpectedly."""
 
+    def __init__(self, message, result=None):
+        super().__init__(message)
+        self.result = result
 
 def _parsed_records(scanned):
     records = []
@@ -136,22 +140,26 @@ def validate_candidate(root, rel_path, expected):
     return current
 
 
-def capture_snapshot(root, scanned):
+def capture_snapshot(root, scanned, progress=None):
     """Capture root, manifest, and original archive identities before planning."""
     snapshot = {"root": _root_identity(root), "manifest": _manifest(scanned), "identities": {}}
-    for row in scanned:
+    for i, row in enumerate(scanned):
+        emit_progress(progress, "validate", i, len(scanned), row["rel_path"], examined=i)
         snapshot["identities"][row["rel_path"]] = validate_candidate(root, row["rel_path"], {})
+    emit_progress(progress, "validate", len(scanned), len(scanned), None, examined=len(scanned))
     return snapshot
 
 
-def preflight(root, scanned, snapshot):
+def preflight(root, scanned, snapshot, progress=None):
     """Require unchanged root/manifest and validate every original archive identity."""
     if _root_identity(root) != snapshot["root"]:
         raise SafetyError("vault root changed before cleanup")
-    if _manifest(ia.scan(root, strict=True)) != snapshot["manifest"]:
+    if _manifest(ia.scan(root, strict=True, progress=progress)) != snapshot["manifest"]:
         raise SafetyError("vault archive manifest changed before cleanup")
-    for row in scanned:
+    for i, row in enumerate(scanned):
+        emit_progress(progress, "validate", i, len(scanned), row["rel_path"], examined=i)
         validate_candidate(root, row["rel_path"], snapshot["identities"][row["rel_path"]])
+    emit_progress(progress, "validate", len(scanned), len(scanned), None, examined=len(scanned))
 
 
 def _update_args(state, root, root_override):
@@ -176,9 +184,12 @@ def _cleanup_lock(root):
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
-def _rollback_staged(root, staged):
+def _rollback_staged(root, staged, progress=None, stats=None):
     errors = []
-    for rel_path, staged_path in reversed(staged):
+    restored = 0
+    for i, (rel_path, staged_path) in enumerate(reversed(staged)):
+        emit_progress(progress, "rollback", i, len(staged), rel_path,
+                      rolled_back=restored, rollback_failed=len(errors))
         if not os.path.lexists(staged_path):
             continue
         source = _candidate_path(root, rel_path)
@@ -188,15 +199,29 @@ def _rollback_staged(root, staged):
         try:
             os.makedirs(os.path.dirname(source), exist_ok=True)
             os.replace(staged_path, source)
+            restored += 1
         except OSError as exc:
             errors.append(f"cannot restore {rel_path}: {exc}")
+    if stats is not None:
+        stats["rolled_back"] = restored
+    emit_progress(progress, "rollback", len(staged), len(staged), None,
+                  rolled_back=restored, rollback_failed=len(errors))
     return errors
 
 
-def _reconcile(root, state, root_override, expected_root):
+def _reconcile(root, state, root_override, expected_root, progress=None, state_lock_held=False):
     if _root_identity(root) != expected_root:
         raise SafetyError("vault root changed during reconciliation")
-    return ia.main(_update_args(state, root, root_override))
+    args = _update_args(state, root, root_override)
+    emit_progress(progress, "refresh", 0, 1, None)
+    kwargs = {}
+    if progress is not None:
+        kwargs["progress"] = progress
+    if state_lock_held:
+        kwargs["state_lock_held"] = True
+    result = ia.main(args, **kwargs) if kwargs else ia.main(args)
+    emit_progress(progress, "refresh", 1, 1, None)
+    return result
 
 
 def _remove_empty_tree(path):
@@ -209,13 +234,13 @@ def _remove_empty_tree(path):
 
 
 def apply_cleanup(root, state, scanned, plan, root_override=False, snapshot=None,
-                  lock_already_held=False):
-    snapshot = snapshot or capture_snapshot(root, scanned)
+                  lock_already_held=False, progress=None, state_lock_held=False):
+    snapshot = snapshot or capture_snapshot(root, scanned, progress=progress)
     candidate_paths = {row["rel_path"] for row in plan["removals"]}
     lock = nullcontext() if lock_already_held else _cleanup_lock(root)
     with lock:
         print(render_plan(plan, apply=True))
-        preflight(root, scanned, snapshot)
+        preflight(root, scanned, snapshot, progress=progress)
         quarantine = os.path.join(root, "_Quarantine")
         if os.path.lexists(quarantine):
             st = os.lstat(quarantine)
@@ -227,25 +252,28 @@ def apply_cleanup(root, state, scanned, plan, root_override=False, snapshot=None
         staged = []
         moved = False
         removed = 0
+        state_refreshed = False
         destructive_started = False
         failure = None
         update_result = 0
+        counts = {"staged": 0, "removed": 0, "rolled_back": 0, "rollback_failed": 0}
         try:
-            for candidate in plan["removals"]:
+            for i, candidate in enumerate(plan["removals"]):
                 rel_path = candidate["rel_path"]
+                emit_progress(progress, "stage", i, len(plan["removals"]), rel_path, **counts)
                 validate_candidate(root, rel_path, snapshot["identities"][rel_path])
                 staged_path = os.path.join(stage_root, rel_path)
                 os.makedirs(os.path.dirname(staged_path), exist_ok=True)
-                # Register before rename: a committed rename may still raise.
                 staged.append((rel_path, staged_path))
                 moved = True
                 os.replace(_candidate_path(root, rel_path), staged_path)
                 validate_candidate(stage_root, rel_path, snapshot["identities"][rel_path])
+                counts["staged"] += 1
+                emit_progress(progress, "stage", counts["staged"], len(plan["removals"]), rel_path, **counts)
 
-            expected_manifest = tuple(sorted(
-                (row["rel_path"], row["size"])
-                for row in scanned if row["rel_path"] not in candidate_paths))
-            if _manifest(ia.scan(root, strict=True)) != expected_manifest:
+            expected_manifest = tuple(sorted((row["rel_path"], row["size"])
+                                             for row in scanned if row["rel_path"] not in candidate_paths))
+            if _manifest(ia.scan(root, strict=True, progress=progress)) != expected_manifest:
                 raise SafetyError("vault manifest changed while staging cleanup")
             for rel_path, staged_path in staged:
                 validate_candidate(stage_root, rel_path, snapshot["identities"][rel_path])
@@ -254,11 +282,13 @@ def apply_cleanup(root, state, scanned, plan, root_override=False, snapshot=None
                     validate_candidate(root, row["rel_path"], snapshot["identities"][row["rel_path"]])
 
             try:
-                for rel_path, staged_path in staged:
-                    # Set before unlink: a committed unlink may still raise.
+                for i, (rel_path, staged_path) in enumerate(staged):
+                    emit_progress(progress, "remove", i, len(staged), rel_path, **counts)
                     destructive_started = True
                     os.unlink(staged_path)
                     removed += 1
+                    counts["removed"] = removed
+                    emit_progress(progress, "remove", removed, len(staged), rel_path, **counts)
                     print(f"removed: {rel_path}")
             except BaseException as exc:
                 failure = exc
@@ -267,36 +297,59 @@ def apply_cleanup(root, state, scanned, plan, root_override=False, snapshot=None
         finally:
             rollback_errors = []
             if failure is not None and moved:
-                rollback_errors = _rollback_staged(root, staged)
+                rollback_stats = {}
+                rollback_errors = _rollback_staged(root, staged, progress=progress, stats=rollback_stats)
+                counts["rolled_back"] = rollback_stats.get("rolled_back", 0)
+                counts["rollback_failed"] = len(rollback_errors)
                 if rollback_errors:
                     failure = SafetyError(f"{failure}; rollback failed: {'; '.join(rollback_errors)}")
                 else:
                     moved = False
             if failure is not None and (destructive_started or rollback_errors):
                 try:
-                    update_result = _reconcile(root, state, root_override, snapshot["root"])
+                    update_result = _reconcile(root, state, root_override, snapshot["root"],
+                                               progress=progress, state_lock_held=state_lock_held)
+                    if update_result != 0:
+                        raise SafetyError("index reconciliation returned nonzero status")
+                    state_refreshed = True
                 except BaseException as update_exc:
                     failure = SafetyError(f"{failure}; reconciliation failed: {update_exc}")
             elif failure is None:
                 try:
                     if _root_identity(root) != snapshot["root"]:
                         raise SafetyError("vault root changed after cleanup")
-                    update_result = ia.main(_update_args(state, root, root_override))
+                    emit_progress(progress, "refresh", 0, 1, None)
+                    update_args = _update_args(state, root, root_override)
+                    kwargs = {}
+                    if progress is not None:
+                        kwargs["progress"] = progress
+                    if state_lock_held:
+                        kwargs["state_lock_held"] = True
+                    update_result = ia.main(update_args, **kwargs) if kwargs else ia.main(update_args)
+                    emit_progress(progress, "refresh", 1, 1, None)
+                    if update_result != 0:
+                        raise SafetyError("index update returned nonzero status")
+                    state_refreshed = True
                 except BaseException as update_exc:
-                    failure = SafetyError(f"index update failed: {update_exc}")
+                    failure = update_exc if isinstance(update_exc, SafetyError) else SafetyError(f"index update failed: {update_exc}")
             if failure is None:
                 try:
                     _remove_empty_tree(stage_root)
                 except OSError as exc:
                     failure = SafetyError(f"cleanup staging residue: {exc}")
         if failure is not None:
+            result = {"applied": removed > 0 or bool(rollback_errors),
+                      "state_refreshed": state_refreshed,
+                      "counts": dict(counts),
+                      "rollback_incomplete": bool(rollback_errors),
+                      "residuals": list(rollback_errors)}
             if isinstance(failure, SafetyError):
+                failure.result = result
                 raise failure
-            raise SafetyError(f"cleanup failed: {failure}") from failure
+            raise SafetyError(f"cleanup failed: {failure}", result=result) from failure
+        emit_progress(progress, "complete", 1, 1, None, **counts)
         return update_result
-
-
-def main(argv=None):
+def main(argv=None, progress=None, state_lock_held=False):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", help="vault root override")
     parser.add_argument("--state", help="state directory override")
@@ -308,13 +361,14 @@ def main(argv=None):
     state = os.path.abspath(args.state) if args.state else ia.state_dir()
     try:
         _root_identity(root)
-        scanned = ia.scan(root, strict=True)
+        scanned = ia.scan(root, strict=True, progress=progress)
         if not args.apply:
             print(render_plan(plan_cleanup(scanned)))
             return 0
-        snapshot = capture_snapshot(root, scanned)
+        snapshot = capture_snapshot(root, scanned, progress=progress)
         plan = plan_cleanup(scanned)
-        return apply_cleanup(root, state, scanned, plan, bool(args.root), snapshot)
+        return apply_cleanup(root, state, scanned, plan, bool(args.root), snapshot,
+                             progress=progress, state_lock_held=state_lock_held)
     except (KeyError, OSError, SafetyError) as exc:
         print(f"cleanup aborted: {exc}", file=sys.stderr)
         return 2

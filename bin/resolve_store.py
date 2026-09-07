@@ -47,6 +47,11 @@ from urllib.parse import urlsplit, urlunsplit
 
 import requests
 
+try:
+    from progress import json_progress
+except ImportError:  # pragma: no cover - direct legacy imports during bootstrap
+    json_progress = None
+
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
       "(KHTML, like Gecko) Version/17.0 Safari/605.1.15")
 STORE_HOST = "assetstore.unity.com"
@@ -102,15 +107,14 @@ class SearchPool:
         """Return (ids, transport_name). Raises AllTransportsBlocked.
 
         An empty result from ONE transport is weak evidence, not proof: engines differ
-        wildly in recall for quoted site: queries (bing's RSS view returned nothing for
-        28 of 30 real titles while DuckDuckGo had answers for them). So an empty result
-        falls through to the next transport, and only a unanimous empty across every
-        available transport — first quoted, then unquoted — counts as NoResult.
+        wildly in recall for quoted site: queries. Empty results fall through to the
+        next transport; only a unanimous empty across available transports is NoResult.
         """
         quoted = f'site:{STORE_HOST} "{title}"'
         plain = f"site:{STORE_HOST} {title}"
-
         last_block = None
+        last_request_error = None
+        saw_success = False
         for query in (quoted, plain):
             now = time.time()
             available = self._available(now)
@@ -118,12 +122,9 @@ class SearchPool:
                 raise AllTransportsBlocked(
                     f"all {len(self.transports)} transports cooling; "
                     f"next free in {self.cooldown_remaining(now):.0f}s")
-
-            # Start from the rotating cursor so load spreads evenly.
             offset = self._cursor % len(available)
             ordered = available[offset:] + available[:offset]
             self._cursor += 1
-
             for name, url, extra in ordered:
                 st = self.state[name]
                 try:
@@ -131,17 +132,15 @@ class SearchPool:
                                      session=self.session, query=query)
                 except Blocked as exc:
                     st["blocks"] += 1
-                    # Escalate from the block COUNT, not by doubling the current value:
-                    # a cooling transport is never retried, so a "double what it is now"
-                    # rule can only ever fire once and never actually escalates.
                     st["cooldown"] = min(self.COOLDOWN_MAX,
                                          self.COOLDOWN_START * (2 ** (st["blocks"] - 1)))
                     st["cooldown_until"] = time.time() + st["cooldown"]
                     last_block = f"{name}: {exc}"
                     continue
                 except requests.RequestException as exc:
-                    last_block = f"{name}: {exc}"
+                    last_request_error = exc
                     continue
+                saw_success = True
                 if ids:
                     st["hits"] += 1
                     st["cooldown"] = max(0.0, st["cooldown"] * 0.5)
@@ -151,8 +150,9 @@ class SearchPool:
         if last_block and all(self.state[n]["cooldown_until"] > time.time()
                               for n, _, _ in self.transports):
             raise AllTransportsBlocked(last_block)
+        if last_request_error is not None and not saw_success:
+            raise last_request_error
         return [], "all-empty"
-
     def summary(self):
         return {n: {k: v for k, v in st.items() if k in ("hits", "blocks", "empty")}
                 for n, st in self.state.items()}
@@ -525,6 +525,15 @@ def write_atomic_json(path, obj):
     write_atomic(path, json.dumps(obj, indent=1, sort_keys=True))
 
 
+def _progress(enabled, stage, completed=0, total=None, current_item=None, **counts):
+    """Emit one machine-readable progress event without changing human output."""
+    if enabled and json_progress is not None:
+        if len(counts) == 1 and "counts" in counts:
+            counts = counts["counts"]
+        json_progress({"stage": stage, "completed": completed, "total": total,
+                       "current_item": current_item, "counts": counts})
+
+
 def verify_candidates(asset, ids, session=None, sleep=None):
     """Run the conjunctive identity gate over candidate ids. Transport-agnostic:
     used by both the search path and externally-supplied ids."""
@@ -867,8 +876,6 @@ def main(argv=None, state_lock_held=False):
     return _main_unlocked(argv)
 def _main_unlocked(argv=None):
     # This run takes hours and is normally watched through a pipe or a log file.
-    # Without line buffering Python blocks progress output until exit, which makes a
-    # long resumable job look hung.
     try:
         sys.stdout.reconfigure(line_buffering=True)
     except AttributeError:
@@ -876,8 +883,7 @@ def _main_unlocked(argv=None):
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from index_assets import state_dir
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("command",
-                    choices=["spike", "resolve", "enrich", "export-titles", "import-ids"])
+    ap.add_argument("command", choices=["spike", "resolve", "enrich", "export-titles", "import-ids"])
     ap.add_argument("--ids-file", default=None,
                     help="import-ids: JSON {asset_key: [candidate_id, ...]}")
     ap.add_argument("--out", default=None, help="export-titles: output path")
@@ -885,6 +891,8 @@ def _main_unlocked(argv=None):
                     help="export-titles: only assets queued in pending-enrichment.json")
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--state-lock-held", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--progress-json", action="store_true",
+                    help="emit structured UAI_PROGRESS events to stdout")
     ap.add_argument("--limit", type=int, default=30)
     ap.add_argument("--base-delay", type=float, default=4.0)
     args = ap.parse_args(argv)
@@ -893,13 +901,10 @@ def _main_unlocked(argv=None):
     assets_json = os.path.join(index_dir, "assets.json")
     cache_path = os.path.join(index_dir, "cache.json")
     overrides_path = os.path.join(index_dir, "overrides.json")
-
     with open(assets_json, encoding="utf-8") as fh:
         data = json.load(fh)
 
     if args.command == "export-titles":
-        # Work list for an external searcher. Non-store assets are excluded so no
-        # lookup effort is spent on archives that have no store page at all.
         pending_keys = load_pending_keys(index_dir, "export-titles") if args.pending else None
         rows = filter_worklist(data["assets"], pending_keys)
         out = args.out or os.path.join(index_dir, "search-worklist.json")
@@ -908,15 +913,14 @@ def _main_unlocked(argv=None):
         print(f"export-titles: {len(rows)} {scope} titles -> {out}")
         if args.pending and not rows:
             print("  (queue is empty — nothing awaiting enrichment)")
+        _progress(args.progress_json, "export-titles", 1, 1,
+                  counts={"resolved": 0, "failed": 0, "skipped": len(data["assets"]) - len(rows)})
         return 0
 
     if args.command == "import-ids":
-        # Candidate ids sourced externally (the search transports are unusable at this
-        # volume unauthenticated). Verification is unchanged: every id still has to pass
-        # the legacy-API conjunctive gate and the offers.url id check before anything is
-        # written, so an imported id is trusted no more than a searched one.
         if not args.ids_file:
-            print("import-ids requires --ids-file"); return 2
+            print("import-ids requires --ids-file")
+            return 2
         with open(args.ids_file, encoding="utf-8") as fh:
             supplied = json.load(fh)
         with _cache_write_lock(index_dir, args.command):
@@ -924,9 +928,11 @@ def _main_unlocked(argv=None):
             cache = load_cache(cache_path)
             session = requests.Session()
             stats = {"resolved": 0, "unverified": 0, "no-result": 0, "unknown-key": 0}
-
             print(f"import-ids: {len(supplied)} entries from {args.ids_file}")
             for n, (key, ids) in enumerate(sorted(supplied.items()), 1):
+                _progress(args.progress_json, "import-ids", n - 1, len(supplied), key,
+                          resolved=stats["resolved"], failed=stats["unverified"],
+                          skipped=stats["unknown-key"])
                 asset = by_key.get(key)
                 if asset is None:
                     stats["unknown-key"] += 1
@@ -944,8 +950,6 @@ def _main_unlocked(argv=None):
                 cache["resolved"][key] = rec
                 stats[rec["status"]] = stats.get(rec["status"], 0) + 1
                 mark = {"resolved": "ok", "unverified": "??", "no-result": "--"}[rec["status"]]
-                # Publisher can come from either verification source, so never index
-                # blindly: the detail-page fallback leaves rec["legacy"] empty.
                 pub = ((rec.get("legacy") or {}).get("publisher")
                        or (rec.get("detail") or {}).get("author") or "?")
                 print(f"  [{n}/{len(supplied)}] {mark} {asset['name'][:52]}"
@@ -955,7 +959,10 @@ def _main_unlocked(argv=None):
             print(f"\nimport-ids done: {stats}")
             elig = sum(1 for a in data["assets"] if not a.get("non_store"))
             print(f"verified: {stats['resolved']}/{elig} store-eligible "
-                  f"({100*stats['resolved']/elig:.1f}%)")
+                  f"({100*stats['resolved']/elig:.1f}%)" if elig else "verified: 0/0 store-eligible (0.0%)")
+            _progress(args.progress_json, "import-ids", len(supplied), len(supplied),
+                      counts={"resolved": stats["resolved"], "failed": stats["unverified"],
+                              "skipped": stats["unknown-key"]})
             return 0
 
     if args.command == "enrich":
@@ -964,12 +971,22 @@ def _main_unlocked(argv=None):
         if os.path.exists(overrides_path):
             with open(overrides_path, encoding="utf-8") as fh:
                 overrides = json.load(fh)
+        eligible_count = sum(1 for asset in data["assets"] if not asset.get("non_store"))
+        _progress(args.progress_json, "enrich", 0, eligible_count,
+                  counts={"inventory_resolved": 0,
+                          "inventory_unresolved": eligible_count,
+                          "skipped": len(data["assets"]) - eligible_count})
         data = merge(data, cache, overrides)
         from index_assets import write_atomic
         write_atomic(assets_json, json.dumps(data, indent=1, sort_keys=True))
         remaining = prune_pending_queue(
-            os.path.join(index_dir, "pending-enrichment.json"), {"resolved": cache.get("resolved", {})})
+            os.path.join(index_dir, "pending-enrichment.json"),
+            {"resolved": cache.get("resolved", {})})
         e = data["enrichment"]
+        _progress(args.progress_json, "enrich", e["resolved"], e["store_eligible"],
+                  counts={"inventory_resolved": e["resolved"],
+                          "inventory_unresolved": e["store_eligible"] - e["resolved"],
+                          "skipped": e["non_store_skipped"], "remaining": len(remaining)})
         pct = 100 * e["resolved"] / e["store_eligible"] if e["store_eligible"] else 0
         print(f"enrich: {e['resolved']}/{e['store_eligible']} store-eligible id-verified "
               f"({pct:.1f}%), {e['non_store_skipped']} non-store skipped")
@@ -989,9 +1006,6 @@ def _main_unlocked(argv=None):
                 print("  (pending queue is empty — attempting nothing)")
 
         def already_done(asset):
-            # Only a resolved record is terminal. 'unverified' and 'no-result' are retried,
-            # otherwise one throttled or degraded run would permanently exclude an asset
-            # from every future --resume.
             rec = cache["resolved"].get(asset["asset_key"])
             return bool(rec) and rec.get("status") == "resolved"
 
@@ -1003,74 +1017,98 @@ def _main_unlocked(argv=None):
         pacer = Pacer(base=args.base_delay)
         session = requests.Session()
         pool = SearchPool(session=session)
-        stats = {"resolved": 0, "unverified": 0, "no-result": 0}
+        stats = {"resolved": 0, "unverified": 0, "no-result": 0,
+                 "failed": 0, "blocked": 0,
+                 "skipped": sum(1 for a in data["assets"] if a.get("non_store"))}
         all_blocked_streak = 0
-
+        total = len(todo)
+        _progress(args.progress_json, args.command, 0, total,
+                  counts={"resolved": 0, "failed": 0, "blocked": 0,
+                          "skipped": stats["skipped"]})
         print(f"{args.command}: {len(todo)} assets to attempt "
               f"({len(eligible)} store-eligible, "
-              f"{len(data['assets']) - len(eligible)} non-store skipped)")
+              f"{sum(1 for a in data['assets'] if a.get('non_store'))} non-store skipped)")
         if args.pending:
             print("  scope: pending queue only")
         print(f"transport pool: {', '.join(n for n, _, _ in pool.transports)}")
 
+        aborted = False
+        processed = 0
         for i, asset in enumerate(todo, 1):
+            key = asset["asset_key"]
+            _progress(args.progress_json, args.command, processed, total, key,
+                      resolved=stats["resolved"], failed=stats["failed"],
+                      blocked=stats["blocked"], skipped=stats["skipped"])
             try:
                 rec = resolve_asset(asset, pool, session=session)
                 all_blocked_streak = 0
                 pacer.ok()
             except AllTransportsBlocked as exc:
-                # A single frontend blocking costs that frontend a cooldown, not the asset —
-                # the pool retries the same query elsewhere. Reaching here means every
-                # transport is cooling at once, so waiting is the only option.
                 all_blocked_streak += 1
+                stats["blocked"] += 1
+                processed += 1
                 wait = max(30.0, pool.cooldown_remaining() + 5)
                 print(f"  [{i}/{len(todo)}] all transports cooling ({exc}) — "
                       f"waiting {wait:.0f}s. Nothing cached; --resume will retry.")
+                _progress(args.progress_json, args.command, processed, total, key,
+                          resolved=stats["resolved"], failed=stats["failed"],
+                          blocked=stats["blocked"], skipped=stats["skipped"])
                 if all_blocked_streak >= 6:
                     print("  aborting: pool exhausted 6 times in a row. Cache is intact; "
                           "re-run with --resume later.")
+                    aborted = True
                     break
                 time.sleep(wait)
                 continue
             except Blocked as exc:
-                # Legacy API blocked. Distinct from the search pool and much rarer.
+                stats["blocked"] += 1
+                processed += 1
                 delay = pacer.blocked()
                 print(f"  [{i}/{len(todo)}] legacy API blocked ({exc}) — backing off "
                       f"{delay:.0f}s. Nothing cached; --resume will retry.")
+                _progress(args.progress_json, args.command, processed, total, key,
+                          resolved=stats["resolved"], failed=stats["failed"],
+                          blocked=stats["blocked"], skipped=stats["skipped"])
                 time.sleep(delay)
                 continue
             except requests.RequestException as exc:
+                stats["failed"] += 1
+                processed += 1
                 print(f"  [{i}/{len(todo)}] network error: {exc}")
+                _progress(args.progress_json, args.command, processed, total, key,
+                          resolved=stats["resolved"], failed=stats["failed"],
+                          blocked=stats["blocked"], skipped=stats["skipped"])
                 continue
 
             if rec["status"] == "resolved":
-                # Guarded separately from the search step: this hits a different host and
-                # can independently block or time out. Leaving it unguarded meant one
-                # transient store-side 429 four hundred assets in would kill the whole
-                # unattended run with a traceback.
                 try:
-                    detail = fetch_detail(
-                        rec["id"], session=session,
-                        url_hint=f"https://{STORE_HOST}/packages/slug/{rec['id']}")
+                    detail = fetch_detail(rec["id"], session=session,
+                                          url_hint=f"https://{STORE_HOST}/packages/slug/{rec['id']}")
                 except Blocked as exc:
-                    delay = pacer.blocked()
-                    print(f"  [{i}/{len(todo)}] store blocked on detail fetch ({exc}) — "
-                          f"backing off {delay:.0f}s. Not cached; --resume will retry.")
-                    time.sleep(delay)
+                    stats["blocked"] += 1
+                    processed += 1
+                    print(f"  [{i}/{len(todo)}] detail fetch blocked ({exc}) — not cached; --resume will retry.")
+                    _progress(args.progress_json, args.command, processed, total, key,
+                              resolved=stats["resolved"], failed=stats["failed"],
+                              blocked=stats["blocked"], skipped=stats["skipped"])
                     continue
                 except requests.RequestException as exc:
-                    print(f"  [{i}/{len(todo)}] detail fetch failed ({exc}) — "
-                          "not cached; --resume will retry.")
+                    stats["failed"] += 1
+                    processed += 1
+                    print(f"  [{i}/{len(todo)}] detail fetch failed ({exc}) — not cached; --resume will retry.")
+                    _progress(args.progress_json, args.command, processed, total, key,
+                              resolved=stats["resolved"], failed=stats["failed"],
+                              blocked=stats["blocked"], skipped=stats["skipped"])
                     continue
-
                 if detail and not detail.get("_rejected"):
                     rec["detail"] = detail
                 elif detail and detail.get("_rejected"):
                     rec["status"] = "unverified"
                     rec["detail_rejected"] = detail["_rejected"]
 
-            cache["resolved"][asset["asset_key"]] = rec
+            cache["resolved"][key] = rec
             stats[rec["status"]] = stats.get(rec["status"], 0) + 1
+            processed += 1
             mark = {"resolved": "ok", "unverified": "??", "no-result": "--"}[rec["status"]]
             via = rec.get("transport", "?")
             pub = ((rec.get("legacy") or {}).get("publisher")
@@ -1078,9 +1116,11 @@ def _main_unlocked(argv=None):
             print(f"  [{i}/{len(todo)}] {mark} [{via}] {asset['name'][:52]}"
                   + (f"  -> {rec['id']} ({pub})" if rec["status"] == "resolved" else ""))
             save_cache(cache_path, cache)
+            _progress(args.progress_json, args.command, processed, total, key,
+                      resolved=stats["resolved"], failed=stats["failed"],
+                      blocked=stats["blocked"], skipped=stats["skipped"])
             pacer.wait()
-
-        attempted = sum(stats.values())
+        attempted = processed
         print(f"\n{args.command} done: {stats} of {attempted} attempted")
         print("transport health:")
         for name, st in pool.summary().items():
@@ -1089,10 +1129,9 @@ def _main_unlocked(argv=None):
             rate = 100 * stats["resolved"] / attempted
             print(f"verified rate: {rate:.1f}%")
             if args.command == "spike":
-                gate = "PROCEED" if rate >= 85 else ("PROCEED WITH CAUTION" if rate >= 70
-                                                     else "STOP — re-open the transport question")
+                gate = "PROCEED" if rate >= 85 else ("PROCEED WITH CAUTION" if rate >= 70 else "STOP — re-open the transport question")
                 print(f"gate (>=85 proceed / 70-85 caution / <70 stop): {gate}")
-        return 0
+        return 3 if aborted else 0
 
 
 if __name__ == "__main__":

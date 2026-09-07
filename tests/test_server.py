@@ -89,7 +89,6 @@ class Harness:
         self.apply_organize_calls = []
         self.update_calls = []
         self._install_default_seams()
-
         self.httpd = srv._Server(("127.0.0.1", 0), srv.Handler, self.service)
         self.port = self.httpd.server_address[1]
         self._thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
@@ -110,7 +109,7 @@ class Harness:
 
     def _install_default_seams(self):
         service = self.service
-        service._scan = lambda root, strict=True: self._scan_rows()
+        service._scan = lambda root, strict=True, progress=None: self._scan_rows()
         service._plan_cleanup = lambda scanned: {
             "families": [
                 {"asset_key": "k1", "members": [], "survivor": None,
@@ -121,7 +120,7 @@ class Harness:
         service._capture_cleanup_snapshot = lambda root, scanned: {"root": "x"}
         service._apply_cleanup = lambda *a, **k: self.apply_cleanup_calls.append((a, k)) or 0
         service._load_assets = lambda: {"assets": [{"asset_key": "k1", "name": "A", "versions": [{"file": "A.unitypackage", "size_bytes": 4096}]}]}
-        service._plan_organize = lambda root, data, scanned=None: {
+        service._plan_organize = lambda root, data, scanned=None, progress=None: {
             "moves": [{"asset_key": "k1", "name": "A", "category": "3D",
                        "levels": ["3D"], "src": "a.unitypackage",
                        "dst": "3D/a.unitypackage", "size_bytes": 3,
@@ -135,10 +134,8 @@ class Harness:
                        "skips": {"no-category": 1}},
         }
         service._capture_organize_snapshot = lambda root, plan, scanned: {"snap": True}
-        service._apply_organize = lambda *a, **k: \
-            self.apply_organize_calls.append((a, k)) or {"moves_applied": 1}
-        service._index_update = lambda scanned: self.update_calls.append(1) or 0
-
+        service._apply_organize = lambda *a, **k: self.apply_organize_calls.append((a, k)) or {"moves_applied": 1}
+        service._index_update = lambda scanned, progress=None: self.update_calls.append(1) or 0
     # -- transport ----------------------------------------------------------
 
     def request(self, method, path, body=None, headers=None, host=None):
@@ -166,8 +163,30 @@ class Harness:
         body["csrf"] = token
         final = {"Content-Type": "application/json"}
         final.update(headers or {})
-        # http.client sets Content-Length for bytes bodies itself.
-        return self.request("POST", path, body=body, headers=final, **kw)
+        status, response_headers, raw = self.request("POST", path, body=body, headers=final, **kw)
+        result = json.loads(raw) if raw else None
+        if status == 202 and path in {"/api/resync/plan", "/api/resync/apply",
+                                      "/api/cleanup/plan", "/api/cleanup/apply",
+                                      "/api/organize/plan", "/api/organize/apply"}:
+            job_id = result["job_id"]
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                _, _, action_raw = self.request("GET", f"/api/action/{job_id}")
+                action = json.loads(action_raw)["action"]
+                if action["status"] in ("completed", "failed"):
+                    if action["status"] == "completed":
+                        return 200, response_headers, json.dumps(action["result"]).encode("utf-8")
+                    error = action.get("error_code") or "operation_failed"
+                    body = {"error": "plan_changed" if error == "plan_changed" else error}
+                    if action.get("result") and error == "plan_changed":
+                        body.update(action["result"])
+                        if "preview" in body:
+                            body["plan"] = body.pop("preview")
+                    return (409 if error in ("plan_changed", "busy", "stale_index") else 503,
+                            response_headers, json.dumps(body).encode("utf-8"))
+                time.sleep(0.005)
+            raise AssertionError("action did not reach terminal status")
+        return status, response_headers, raw
 
     def stop(self):
         self.httpd.shutdown()
@@ -360,6 +379,39 @@ class TestApiAndBoundary(ServerHarnessTestCase):
 
 # ---------------------------------------------------------------------------
 # resync and cleanup apply
+    def test_action_start_returns_202_and_get_is_responsive_while_running(self):
+        started = threading.Event()
+        release = threading.Event()
+
+        def blocked(progress=None):
+            started.set()
+            self.assertTrue(release.wait(5))
+            if progress:
+                progress({"stage": "done", "completed": 1, "total": 1,
+                          "current_item": "a.unitypackage", "counts": {"done": 1}})
+            return {"preview": {"kind": "resync"}, "plan_hash": "hash"}
+
+        self.h.service.op_resync = blocked
+        status, _, raw = self.h.request(
+            "POST", "/api/resync/plan", body={"csrf": self.h.token},
+            headers={"Content-Type": "application/json"})
+        self.assertEqual(status, 202)
+        job_id = json.loads(raw)["job_id"]
+        self.assertTrue(started.wait(5))
+        status, _, raw = self.h.request("GET", f"/api/action/{job_id}")
+        self.assertEqual(status, 200)
+        running = json.loads(raw)["action"]
+        self.assertEqual(running["status"], "running")
+        self.assertEqual(running["kind"], "resync")
+        status, _, raw = self.h.request("GET", "/api/state")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(raw)["action"]["id"], job_id)
+        release.set()
+        self.assertTrue(_await(lambda: (self.h.service.op_action(job_id) or {}).get("status")
+                               == "completed"))
+        done = self.h.service.op_action(job_id)
+        self.assertEqual(done["result"]["plan_hash"], "hash")
+        self.assertEqual(done["counts"]["done"], 1)
 # ---------------------------------------------------------------------------
 
 class TestResyncAndCleanup(ServerHarnessTestCase):
@@ -443,6 +495,7 @@ class TestResyncAndCleanup(ServerHarnessTestCase):
                                     {"plan_hash": resync["plan_hash"]})
         self.assertEqual(status, 200, body)
         self.assertTrue(self.h.apply_cleanup_calls[0][1]["lock_already_held"])
+        self.assertTrue(self.h.apply_cleanup_calls[0][1]["state_lock_held"])
         self.assertEqual(len(self.h.apply_cleanup_calls), 1)
 
     def test_cleanup_apply_wrong_hash_is_409_with_replacement_plan(self):
@@ -576,6 +629,7 @@ class TestOrganize(ServerHarnessTestCase):
         args, kwargs = self.h.apply_organize_calls[0]
         root, state, plan_arg, snapshot, override = args
         self.assertTrue(kwargs["lock_already_held"])
+        self.assertTrue(kwargs["state_lock_held"])
         self.assertEqual(root, self.h.vault)
         self.assertTrue(snapshot)
 
@@ -599,10 +653,21 @@ class TestEnrichJob(ServerHarnessTestCase):
         calls.append(list(argv))
         joined = " ".join(argv)
         if len(argv) > 3 and argv[3] == "resolve":
-            return _FakeProc(["resolve: 2 assets to attempt",
-                              "[1/2] ok a", "[2/2] ok b"], rc=0, release=release)
+            return _FakeProc([
+                "UAI_PROGRESS " + json.dumps({"stage": "resolve", "completed": 0,
+                                               "total": 2, "current_item": "a", "counts": {}}),
+                "resolve: 2 assets to attempt",
+                "[1/2] ok a",
+                "UAI_PROGRESS " + json.dumps({"stage": "resolve", "completed": 2,
+                                               "total": 2, "current_item": "b",
+                                               "counts": {"total": 2, "done": 2}}),
+                "[2/2] ok b"], rc=0, release=release)
         if len(argv) > 3 and argv[3] == "enrich":
-            return _FakeProc(["enrich: 2/2 store-eligible id-verified (100.0%)"], rc=0)
+            return _FakeProc([
+                "UAI_PROGRESS " + json.dumps({"stage": "enrich", "completed": 2,
+                                               "total": 2, "current_item": None,
+                                               "counts": {"store_eligible": 2}}),
+                "enrich: 2/2 store-eligible id-verified (100.0%)"], rc=0)
         if len(argv) > 3 and argv[3] == "emit":
             return _FakeProc(["emit: assets.csv (2 rows), review-queue -> state/review-queue.md"], rc=0)
         raise AssertionError(f"unexpected stage argv: {joined}")
@@ -620,11 +685,9 @@ class TestEnrichJob(ServerHarnessTestCase):
         snapshot = self.h.service.op_job(job_id)
         self.assertEqual(len(calls), 3)
         self.assertIn("--pending", " ".join(calls[0]))
-        self.assertTrue(calls[0][0].endswith(sys.executable.split("/")[-1]) or True)
-        self.assertEqual(snapshot["counts"], {"total": 2, "done": 2})
+        self.assertEqual(snapshot["counts"], {"total": 2, "done": 2, "store_eligible": 2})
         self.assertEqual(snapshot["remaining"], 1)
         self.assertIsNone(snapshot["error"])
-
     def test_resolve_stage_is_gate_free_and_second_start_is_busy(self):
         release = threading.Event()
         calls = []
@@ -638,7 +701,7 @@ class TestEnrichJob(ServerHarnessTestCase):
         status, _, body2 = self.post("/api/enrich/start")
         self.assertEqual(status, 409)
         self.assertEqual(body2["error"], "busy")
-        self.assertEqual(body2.get("job"), job_id)
+        self.assertEqual(body2.get("job_id"), job_id)
         release.set()
         self.assertTrue(_await(lambda: (self.h.service.op_job(job_id) or {}).get("status")
                                == "completed"))
@@ -659,6 +722,37 @@ class TestEnrichJob(ServerHarnessTestCase):
         self.assertIn("stage resolve exited 1", snapshot["error"])
         self.assertEqual(len(calls), 1)
 
+    def test_cancel_exits_while_gate_or_state_lock_remains_held(self):
+        service = self.h.service
+        for held in ("gate", "state"):
+            with self.subTest(held=held):
+                calls = []
+                service._runner = lambda argv: self._stage_proc(argv, calls)
+                state_fh = None
+                worker = None
+                if held == "gate":
+                    service._gate.acquire()
+                else:
+                    state_fh = open(os.path.join(self.h.state, "state-write.lock"), "a")
+                    srv.fcntl.flock(state_fh.fileno(), srv.fcntl.LOCK_EX)
+                try:
+                    job_id = service.op_enrich_start()
+                    worker = service._job_thread
+                    self.assertTrue(_await(lambda: service.op_job(job_id)["stage"] == "waiting-for-lock"))
+                    service.op_enrich_cancel()
+                    worker.join(timeout=2)
+                    self.assertFalse(worker.is_alive(), "cancel must not wait for the external lock")
+                    self.assertEqual(service.op_job(job_id)["status"], "cancelled")
+                    self.assertEqual(len(calls), 1, "no merge/emit child may start after cancel")
+                finally:
+                    if held == "gate":
+                        service._gate.release()
+                    else:
+                        srv.fcntl.flock(state_fh.fileno(), srv.fcntl.LOCK_UN)
+                        state_fh.close()
+                    if worker is not None:
+                        worker.join(timeout=2)
+
     def test_cancel_before_worker_starts_never_marks_running_or_spawns(self):
         captured = {}
 
@@ -678,7 +772,7 @@ class TestEnrichJob(ServerHarnessTestCase):
         self.assertEqual(status["cancelled"], job_id)
         snapshot = self.h.service.op_job(job_id)
         self.assertEqual(snapshot["status"], "cancelled")
-        self.assertIsNone(snapshot["stage"])
+        self.assertEqual(snapshot["stage"], "queued")
 
     def test_cancel_between_stages_prevents_next_child(self):
         calls = []

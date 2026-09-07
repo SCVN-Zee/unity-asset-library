@@ -20,8 +20,10 @@ declare global {
     versions?: AssetVersion[];
   };
   type AssetIndex = { assets: Asset[]; asset_count?: number; file_count?: number; generated?: string };
-  type Job = { id: string; status: string; stage?: string | null; counts?: Record<string, number>; remaining?: number | null; error?: string | null } | null;
-  type State = { service: string; ready: boolean; csrf: string; pending_enrichment: number; job: Job };
+  type ProgressSnapshot = { stage?: string | null; completed?: number; total?: number | null; current_item?: string | null; counts?: Record<string, number>; started_at?: number; finished_at?: number | null };
+  type Job = ProgressSnapshot & { id: string; kind?: string; phase?: string; status: string; remaining?: number | null; error?: string | null; error_code?: string | null } | null;
+  type ActionJob = ProgressSnapshot & { id: string; kind: "resync" | "cleanup" | "organize"; phase: "plan" | "apply"; status: string; result?: ActionResult | null; error?: string | null; error_code?: string | null };
+  type State = { service: string; api_version?: number; ready: boolean; csrf: string; pending_enrichment: number; job: Job; action: ActionJob | null };
   type PlanRow = { path?: string; src?: string; dst?: string; size_bytes?: number; previous_size_bytes?: number };
   type CleanupFamily = { asset_key: string; reason: string; survivor: PlanRow | null; removals: PlanRow[] };
   type ActionPreview = { families?: CleanupFamily[]; additions?: PlanRow[]; removals?: PlanRow[]; resized?: PlanRow[]; moves?: PlanRow[]; totals?: Record<string, number> };
@@ -29,15 +31,16 @@ declare global {
   type UaiBridge = {
     getState: () => Promise<State>;
     getAssets: () => Promise<AssetIndex>;
-    resync: () => Promise<ActionResult>;
-    resyncApply: (planHash: string) => Promise<ActionResult>;
-    cleanupPlan: () => Promise<ActionResult>;
-    cleanupApply: (planHash: string) => Promise<ActionResult>;
-    organizePlan: () => Promise<ActionResult>;
-    organizeApply: (planHash: string) => Promise<ActionResult>;
+    resync: () => Promise<{ job_id: string }>;
+    resyncApply: (planHash: string) => Promise<{ job_id: string }>;
+    cleanupPlan: () => Promise<{ job_id: string }>;
+    cleanupApply: (planHash: string) => Promise<{ job_id: string }>;
+    organizePlan: () => Promise<{ job_id: string }>;
+    organizeApply: (planHash: string) => Promise<{ job_id: string }>;
     enrichStart: () => Promise<{ job_id: string }>;
     enrichCancel: () => Promise<ActionResult>;
     getJob: (jobId: string) => Promise<{ job: Job }>;
+    getAction: (actionId: string) => Promise<{ action: ActionJob }>;
     openExternal: (url: string) => Promise<void>;
   };
   interface Window { uai: UaiBridge }

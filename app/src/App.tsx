@@ -166,84 +166,168 @@ function CategoryBranch({
     </li>
   );
 }
+type ProgressProps = {
+  job: ProgressSnapshot & { id: string; status: string; kind?: string; phase?: string; error?: string | null; error_code?: string | null; result?: ActionResult | null };
+  onDismiss?: (id: string) => void;
+  announce?: boolean;
+};
 
+const PROGRESS_STAGE_LABELS: Record<string, string> = {
+  queued: "Waiting to start", waiting: "Waiting to start", starting: "Starting",
+  "waiting-for-lock": "Waiting for another operation",
+  scan: "Scanning files", build: "Building index", compare: "Comparing changes",
+  prepare: "Preparing changes", validate: "Validating files",
+  stage: "Staging files for cleanup", move: "Moving files", remove: "Removing files",
+  rollback: "Rolling back changes", refresh: "Refreshing index",
+  resolve: "Looking up store details", enrich: "Merging store details", merge: "Merging store details",
+  write: "Saving index", emit: "Writing library outputs", complete: "Finished",
+  "refreshing index": "Refreshing index", "index refreshed": "Index refreshed",
+  "index refresh failed": "Index refresh failed",
+  unknown: "Outcome unknown", "outcome unknown": "Outcome unknown",
+};
+
+const PROGRESS_COUNT_LABELS: Record<string, string> = { moved: "files moved", skipped: "files skipped", staged: "files staged", removed: "files deleted", rolled_back: "files rolled back", rollback_failed: "rollback failures", resolved: "resolved", failed: "failed", blocked: "blocked", index_added: "index entries added", index_removed: "index entries removed", index_resized: "index entries resized", inventory_examined: "inventory examined", inventory_found: "inventory found" };
+
+function ActionProgress({ job, onDismiss, announce = true }: ProgressProps) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!["queued", "running"].includes(job.status) || !job.started_at) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [job.status, job.started_at]);
+  const elapsed = Math.max(0, (job.finished_at ?? now / 1000) - (job.started_at ?? now / 1000));
+  const total = typeof job.total === "number" && job.total >= 0 ? job.total : null;
+  const completed = Math.max(0, job.completed ?? 0);
+  const percent = total === null ? undefined : total === 0 ? 0 : Math.min(100, Math.round((completed / total) * 100));
+  const terminal = ["completed", "failed", "cancelled"].includes(job.status);
+  const counts = job.counts || {};
+  const actionLabel = job.kind === "resync" ? "Resync" : job.kind === "cleanup" ? "Cleanup" : job.kind === "organize" ? "Organize" : "Enrich";
+  const phaseLabel = job.kind === "enrich" ? "" : " · " + (job.phase === "apply" ? "Apply" : "Preview");
+  const title = actionLabel + phaseLabel;
+  const rawStage = (job.stage || (job.status === "queued" ? "waiting" : "working")).toLowerCase();
+  const outcome = job.status === "completed" ? "Completed" : job.status === "cancelled" ? "Cancelled" : job.status === "failed" ? "Failed" : job.status === "queued" ? "Queued" : "In progress";
+  const stage = PROGRESS_STAGE_LABELS[rawStage] ?? job.stage ?? "Working";
+  const unknownProgress = rawStage.includes("scan") ? completed + " files found" : completed + " processed · total unknown";
+  const result = job.result as ActionResult | null | undefined;
+  const refreshFailed = result?.applied === true && result?.state_refreshed === false;
+  const rollbackIncomplete = result?.rollback_incomplete === true;
+  const displayCounts = Object.entries(counts).filter(([key]) => Boolean(PROGRESS_COUNT_LABELS[key]) || key.startsWith("index_") || key.startsWith("inventory_"));
+  const guidance = rollbackIncomplete ? "Residual files may need manual attention." : refreshFailed ? "Verify the library before trying again." : "";
+  return (
+    <section className={["progress-panel", terminal ? "terminal" : "", job.status === "failed" ? "failed" : ""].join(" ")} data-progress-id={job.id} aria-label={title + " progress"}>
+      <div className="progress-heading">
+        <div><strong>{title}</strong><span className="progress-status">{outcome}</span></div>
+        {terminal && onDismiss && <Button type="button" className="icon-button" onPress={() => onDismiss(job.id)} aria-label={"Dismiss " + title + " result"}><Icon as={X} className="icon" aria-hidden="true" focusable={false} /></Button>}
+      </div>
+      <div className="progress-stage"><span aria-live={announce ? "polite" : undefined}>{stage}</span><time>{Math.floor(elapsed / 60)}:{String(Math.floor(elapsed % 60)).padStart(2, "0")}</time></div>
+      {!(terminal && total === null) && <div className="progress-track"><progress value={percent} max="100" aria-label={title + " stage progress"} />{percent === undefined && !terminal && <span className="progress-indeterminate" aria-hidden="true" />}</div>}
+      {(total !== null || !terminal || job.current_item) && <div className="progress-meta">{total !== null && <span>{total === 0 ? "No items in this stage" : completed + " of " + total + " in this stage"}{total !== 0 && percent !== undefined ? " · " + percent + "%" : ""}</span>}{total === null && !terminal && <span>{unknownProgress}</span>}{job.current_item && <span className="progress-current" title={job.current_item}>Current: {job.current_item}</span>}</div>}
+      <div className="progress-counts">{displayCounts.filter(([, value]) => typeof value === "number").map(([key, value]) => <span key={key}><strong>{value}</strong> {key === "skipped" && job.kind === "enrich" ? "assets skipped" : PROGRESS_COUNT_LABELS[key] || key.replaceAll("_", " ")}</span>)}</div>
+      {(job.error || job.error_code || guidance) && <p className="progress-error">{rollbackIncomplete && <strong>Rollback incomplete. </strong>}{refreshFailed && <strong>Changes applied, but index refresh failed. </strong>}{job.error && <span>{job.error} </span>}{guidance && <span>{guidance}</span>}{!job.error && !guidance && job.error_code}</p>}
+    </section>
+  );
+}
 function App() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [state, setState] = useState<State | null>(null);
+  const [actionStatus, setActionStatus] = useState<ActionJob | null>(null);
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => new Set());
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All assets");
   const [quick, setQuick] = useState<QuickFilter>("all");
-  const [sort, setSort] = useState<SortMode>(
-    () => (localStorage.getItem("uai:sort") as SortMode) || "name",
-  );
-  const [view, setView] = useState<ViewMode>(
-    () => (localStorage.getItem("uai:view") as ViewMode) || "grid",
-  );
+  const [sort, setSort] = useState<SortMode>(() => (localStorage.getItem("uai:sort") as SortMode) || "name");
+  const [view, setView] = useState<ViewMode>(() => (localStorage.getItem("uai:view") as ViewMode) || "grid");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
+  const [enrichCancelling, setEnrichCancelling] = useState(false);
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState<DialogState>(null);
   const [actionsOpen, setActionsOpen] = useState(false);
   const actionTriggerRef = useRef<HTMLButtonElement>(null);
+  const actionRequestRef = useRef(false);
+  const uiRefreshRef = useRef(false);
+  const actionGenerationRef = useRef(0);
+  const dismissedRef = useRef(dismissedIds);
+  dismissedRef.current = dismissedIds;
   async function load() {
+    let loaded = false;
     try {
       setError("");
-      const [nextState, nextIndex] = await Promise.all([
-        api.getState(),
-        api.getAssets(),
-      ]);
+      const [nextState, nextIndex] = await Promise.all([api.getState(), api.getAssets()]);
       setState(nextState);
+      const saved = sessionStorage.getItem("uai:action");
+      let savedIdentity: { id: string; kind: "resync" | "cleanup" | "organize"; phase: "plan" | "apply" } | null = null;
+      try { if (saved) savedIdentity = JSON.parse(saved); } catch { sessionStorage.removeItem("uai:action"); }
+      if (!uiRefreshRef.current && nextState.action && !dismissedRef.current.has(nextState.action.id)) setActionStatus(nextState.action);
+      else if (!uiRefreshRef.current && savedIdentity && (!nextState.action || nextState.action.id !== savedIdentity.id)) setActionStatus({ id: savedIdentity.id, kind: savedIdentity.kind, phase: savedIdentity.phase, status: "running", stage: "Recovering operation", completed: 0, total: null, current_item: null, counts: {} });
       setAssets(nextIndex.assets || []);
-      setSelectedKey((current) =>
-        current && nextIndex.assets.some((asset) => asset.asset_key === current)
-          ? current
-          : nextIndex.assets[0]?.asset_key || null,
-      );
+      setSelectedKey((current) => current && nextIndex.assets.some((asset) => asset.asset_key === current) ? current : nextIndex.assets[0]?.asset_key || null);
+      loaded = true;
     } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "The backend could not be reached.",
-      );
+      setError(cause instanceof Error ? cause.message : "The backend could not be reached.");
     } finally {
       setLoading(false);
     }
+    return loaded;
   }
 
+  useEffect(() => { void load(); }, []);
+  useEffect(() => { localStorage.setItem("uai:sort", sort); }, [sort]);
+  useEffect(() => { localStorage.setItem("uai:view", view); }, [view]);
   useEffect(() => {
-    void load();
-  }, []);
-  useEffect(() => {
-    localStorage.setItem("uai:sort", sort);
-  }, [sort]);
-  useEffect(() => {
-    localStorage.setItem("uai:view", view);
-  }, [view]);
+    const job = actionStatus;
+    if (!job || dismissedRef.current.has(job.id)) return;
+    const generation = ++actionGenerationRef.current;
+    let stopped = false;
+    const poll = async () => {
+      if (stopped || actionRequestRef.current) return;
+      actionRequestRef.current = true;
+      try {
+        const next = (await api.getAction(job.id)).action;
+        if (stopped || generation !== actionGenerationRef.current || dismissedRef.current.has(job.id)) return;
+        setActionStatus(next);
+        setState((current) => current ? { ...current, action: next } : current);
+        if (["completed", "failed", "cancelled"].includes(next.status)) { stopped = true; window.clearInterval(timer); }
+      } catch (cause) {
+        const details = cause as { status?: number; code?: string };
+        const missing = details.status === 404 || details.code === "unknown_action" || (cause instanceof Error && /unknown[_ ]action/i.test(cause.message));
+        if (missing) {
+          stopped = true;
+          window.clearInterval(timer);
+          setActionStatus((current) => current && current.id === job.id ? { ...current, status: "failed", stage: "Outcome unknown", error: "This operation is no longer known to the backend. Its outcome is unknown; no automatic retry was attempted.", error_code: "unknown_action" } : current);
+        } else if (!stopped && generation === actionGenerationRef.current) {
+          setActionStatus((current) => current && current.id === job.id ? { ...current, error: "Connection interrupted while checking this operation; retrying…", error_code: "connection_lost" } : current);
+          setError(cause instanceof Error ? cause.message : "Connection interrupted while checking action progress; retrying.");
+        }
+      } finally {
+        actionRequestRef.current = false;
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 900);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [actionStatus?.id]);
 
   useEffect(() => {
     const job = state?.job;
     if (!job || !["queued", "running"].includes(job.status)) return;
-    const timer = window.setInterval(async () => {
+    let stopped = false;
+    let inFlight = false;
+    const poll = async () => {
+      if (stopped || inFlight) return;
+      inFlight = true;
       try {
         const next = await api.getState();
-        setState(next);
-        if (
-          next.job &&
-          ["completed", "failed", "cancelled"].includes(next.job.status)
-        ) {
-          window.clearInterval(timer);
-          if (next.job.status === "completed") await load();
-        }
+        if (!stopped) setState(next);
+        if (!stopped && next.job && !["queued", "running"].includes(next.job.status)) setEnrichCancelling(false);
+        if (!stopped && next.job?.status === "completed") await load();
       } catch (cause) {
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "Could not read job progress.",
-        );
-      }
-    }, 900);
-    return () => window.clearInterval(timer);
+        if (!stopped) setError(cause instanceof Error ? cause.message : "Could not read enrichment progress.");
+      } finally { inFlight = false; }
+    };
+    const timer = window.setInterval(() => void poll(), 900);
+    return () => { stopped = true; window.clearInterval(timer); };
   }, [state?.job?.id, state?.job?.status]);
 
   const categoryTree = useMemo(() => {
@@ -320,25 +404,11 @@ function App() {
     try {
       setBusy(name);
       setError("");
-      const result =
-        name === "resync"
-          ? await api.resync()
-          : name === "cleanup"
-            ? await api.cleanupPlan()
-            : await api.organizePlan();
-      setDialog({
-        mode: name,
-        title:
-          name === "resync"
-            ? "Review resync"
-            : name === "cleanup"
-              ? "Clean up old versions"
-              : "Review organization",
-        result,
-      });
+      const response = name === "resync" ? await api.resync() : name === "cleanup" ? await api.cleanupPlan() : await api.organizePlan();
+      sessionStorage.setItem("uai:action", JSON.stringify({ id: response.job_id, kind: name, phase: "plan" }));
+      setActionStatus({ id: response.job_id, kind: name, phase: "plan", status: "queued", stage: "Starting", completed: 0, total: null, current_item: null, counts: {} });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The action failed.");
-    } finally {
+      setError(cause instanceof Error ? cause.message : "The action could not start.");
       setBusy(null);
     }
   }
@@ -348,26 +418,23 @@ function App() {
       setBusy("enrich");
       setError("");
       await api.enrichStart();
-      setState(await api.getState());
+      const next = await api.getState();
+      setState(next);
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : "Enrichment could not start.",
-      );
-    } finally {
-      setBusy(null);
-    }
+      setError(cause instanceof Error ? cause.message : "Enrichment could not start.");
+    } finally { setBusy(null); }
   }
 
   async function cancelEnrich() {
+    setEnrichCancelling(true);
     try {
       await api.enrichCancel();
-      setState(await api.getState());
+      const next = await api.getState();
+      setState(next);
+      if (!next.job || !["queued", "running"].includes(next.job.status)) setEnrichCancelling(false);
     } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "Enrichment could not be cancelled.",
-      );
+      setEnrichCancelling(false);
+      setError(cause instanceof Error ? cause.message : "Enrichment could not be cancelled.");
     }
   }
 
@@ -376,23 +443,64 @@ function App() {
     try {
       setBusy(dialog.mode);
       setError("");
-      if (dialog.mode === "resync")
-        await api.resyncApply(dialog.result.plan_hash);
-      else if (dialog.mode === "cleanup")
-        await api.cleanupApply(dialog.result.plan_hash);
-      else await api.organizeApply(dialog.result.plan_hash);
-      setDialog(null);
-      await load();
+      const response = dialog.mode === "resync" ? await api.resyncApply(dialog.result.plan_hash) : dialog.mode === "cleanup" ? await api.cleanupApply(dialog.result.plan_hash) : await api.organizeApply(dialog.result.plan_hash);
+      sessionStorage.setItem("uai:action", JSON.stringify({ id: response.job_id, kind: dialog.mode, phase: "apply" }));
+      setActionStatus({ id: response.job_id, kind: dialog.mode, phase: "apply", status: "queued", stage: "Starting", completed: 0, total: null, current_item: null, counts: {} });
     } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "The plan changed before it could be applied.",
-      );
-      setDialog(null);
-    } finally {
       setBusy(null);
+      setError(cause instanceof Error ? cause.message : "The plan changed before it could be applied.");
     }
+  }
+
+  const actionTerminalRef = useRef("");
+  useEffect(() => {
+    const job = actionStatus;
+    if (!job || !["completed", "failed", "cancelled"].includes(job.status)) return;
+    const marker = job.id + ":" + job.status;
+    if (actionTerminalRef.current === marker) return;
+    actionTerminalRef.current = marker;
+    sessionStorage.removeItem("uai:action");
+    if (job.phase === "plan") {
+      setBusy(null);
+      if (job.status === "completed" && job.result) {
+        setDialog({ mode: job.kind as "resync" | "cleanup" | "organize", title: job.kind === "resync" ? "Review resync" : job.kind === "cleanup" ? "Clean up old versions" : "Review organization", result: job.result });
+      } else if (job.status === "failed") {
+        setError(job.error || job.error_code || "The preview failed.");
+      } else if (job.status === "cancelled") {
+        setError("The preview was cancelled.");
+      }
+      return;
+    }
+    if (job.phase !== "apply") return;
+    if (job.status === "completed") {
+      uiRefreshRef.current = true;
+      setActionStatus((current) => current && current.id === job.id ? { ...current, status: "running", stage: "Refreshing index", completed: 0, total: null, current_item: null } : current);
+      void (async () => {
+        const refreshed = await load();
+        uiRefreshRef.current = false;
+        setActionStatus((current) => current && current.id === job.id ? { ...current, status: refreshed ? "completed" : "failed", stage: refreshed ? "Index refreshed" : "Index refresh failed", error: refreshed ? current.error : "Changes completed, but refreshing the index failed. Verify the library before continuing." } : current);
+        if (refreshed) setDialog(null);
+        setBusy(null);
+      })();
+    } else {
+      setBusy(null);
+      if (job.error_code === "plan_changed" && job.result?.preview && job.result.plan_hash) {
+        setDialog((current) => current ? { ...current, result: job.result as ActionResult, title: "Review updated plan" } : current);
+        setError("The library changed. Review the fresh plan and confirm again.");
+      } else if (job.status === "failed") {
+        setError(job.error || job.error_code || "The action failed. No changes were applied unless the result says otherwise.");
+        setDialog((current) => current ? { ...current, result: { ...current.result, plan_hash: undefined } } : current);
+      }
+    }
+  }, [actionStatus?.id, actionStatus?.status, actionStatus?.phase]);
+
+  function dismissAction(id: string) {
+    setDismissedIds((current) => new Set(current).add(id));
+    setActionStatus((current) => current?.id === id ? null : current);
+  }
+  function dismissEnrich(id: string) {
+    setDismissedIds((current) => new Set(current).add(id));
+    setState((current) => current ? { ...current, job: null } : current);
   }
 
   const jobFailure =
@@ -583,8 +691,9 @@ function App() {
                     setActionsOpen(false);
                     void cancelEnrich();
                   }}
+                  isDisabled={enrichCancelling}
                 >
-                  Cancel enrich
+                  {enrichCancelling ? "Cancelling…" : "Cancel enrich"}
                 </Button>
               )}
               <p className="actions-hint">
@@ -776,25 +885,8 @@ function App() {
               </Select>
             </div>
           </div>
-          {state?.job &&
-            state.job.status !== "completed" &&
-            state.job.status !== "cancelled" && (
-              <div
-                className={`job-line ${state.job.status === "failed" ? "failed" : ""}`}
-              >
-                {state.job.status === "failed" ? (
-                  <span className="status-mark failed" />
-                ) : (
-                  <Spinner className="spinner" aria-label="loading" />
-                )}
-                {state.job.status === "failed"
-                  ? "Enrichment failed"
-                  : state?.job?.stage
-                    ? `Enrichment · ${state.job.stage}`
-                    : "Starting enrichment"}
-                <span className="job-error">{state?.job?.error || ""}</span>
-              </div>
-            )}
+          {actionStatus && !dismissedIds.has(actionStatus.id) && <ActionProgress job={actionStatus} onDismiss={dismissAction} announce={!(dialog && actionStatus.phase === "apply")} />}
+          {state?.job && !dismissedIds.has(state.job.id) && <ActionProgress job={state.job} onDismiss={dismissEnrich} />}
           {loading ? (
             <div className="loading-state">
               <Spinner className="spinner" aria-label="loading" />
@@ -861,6 +953,7 @@ function App() {
         <ActionDialog
           dialog={dialog}
           busy={Boolean(busy)}
+          progress={actionStatus?.phase === "apply" ? actionStatus : null}
           finalFocusRef={actionTriggerRef}
           onClose={() => setDialog(null)}
           onConfirm={() => void confirmDialog()}
@@ -1012,12 +1105,14 @@ function Inspector({
 function ActionDialog({
   dialog,
   busy,
+  progress,
   finalFocusRef,
   onClose,
   onConfirm,
 }: {
   dialog: NonNullable<DialogState>;
   busy: boolean;
+  progress: ActionJob | null;
   finalFocusRef: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
   onConfirm: () => void;
@@ -1061,6 +1156,10 @@ function ActionDialog({
       hint: "Existing paths whose file size changed.",
     },
   ];
+  const applyComplete = progress?.status === "completed";
+  const applyDrift = progress?.status === "failed" && progress.error_code === "plan_changed";
+  const applyApplied = applyComplete || progress?.result?.applied === true;
+  const applying = Boolean(progress && ["queued", "running"].includes(progress.status));
   return (
     <AlertDialog
       isOpen
@@ -1101,12 +1200,15 @@ function ActionDialog({
           </Button>
         </AlertDialogHeader>
         <AlertDialogBody>
+          {progress && <ActionProgress job={progress} announce />}
           <p id="action-description" className="dialog-lead">
-            {resync
-              ? "Review the vault-relative paths below before updating the index. No files will be deleted from disk."
-              : dialog.mode === "cleanup"
-                ? "Compare the archives to delete with the versions kept on disk. Only files marked Delete will be removed, and only after you confirm."
-                : "Review these moves before anything changes on disk."}
+            {applying
+              ? "Applying the approved changes now. This dialog will stay open until the operation and index refresh finish."
+              : resync
+                ? "Review the vault-relative paths below before updating the index. No files will be deleted from disk."
+                : dialog.mode === "cleanup"
+                  ? "Compare the archives to delete with the versions kept on disk. Only files marked Delete will be removed, and only after you confirm."
+                  : "Review these moves before anything changes on disk."}
           </p>
           {resync ? (
             <>
@@ -1265,17 +1367,19 @@ function ActionDialog({
             type="button"
             className="button primary"
             onPress={onConfirm}
-            isDisabled={
-              busy || !dialog.result.plan_hash || (!resync && !rows.length)
-            }
+            isDisabled={busy || applyApplied || (!dialog.result.plan_hash && !applyDrift) || (!resync && !rows.length)}
           >
             {busy
               ? "Applying…"
-              : resync
-                ? "Apply resync"
-                : dialog.mode === "cleanup"
-                  ? "Delete files from disk"
-                  : "Confirm changes"}
+              : applyApplied
+                ? "Applied"
+                : applyDrift
+                  ? "Confirm updated plan"
+                  : resync
+                    ? "Apply resync"
+                    : dialog.mode === "cleanup"
+                      ? "Delete files from disk"
+                      : "Confirm changes"}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

@@ -360,7 +360,7 @@ class TestMerge(unittest.TestCase):
                                                   "tags": ["custom"]}})
         a = out["assets"][0]
         self.assertEqual(a["author"], "Hand Typed")
-        self.assertEqual(a["tag_source"], "manual")
+        self.assertEqual(a["tags"], ["shader"], "enrichment overrides must not replace user tags")
         self.assertTrue(a["resolution"]["override"])
 
     def test_override_beats_resolved_value(self):

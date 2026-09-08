@@ -761,13 +761,13 @@ class TestReviewFindingFixesPhase1(unittest.TestCase):
         self.assertTrue(os.path.exists(p + ".corrupt"), "bad queue was not preserved")
         self.assertIn("new-one", Path(p).read_text(encoding="utf-8"))
 
-    def test_malformed_assets_json_degrades_instead_of_crashing(self):
-        """MEDIUM. Two of three sibling reads degraded gracefully; this one raised."""
+    def test_corrupt_index_is_preserved_when_tags_cannot_be_migrated(self):
         root = self._tree()
-        ia.write_atomic(os.path.join(root, ".index", "assets.json"), "{ truncated")
+        index = os.path.join(root, ".index", "assets.json")
+        ia.write_atomic(index, "{ truncated")
         self.assertEqual(ia.main(["update", "--root", root,
-                                  "--state", os.path.join(root, ".index")]), 0)
-        self.assertTrue(self._verified(root))
+                                  "--state", os.path.join(root, ".index")]), 1)
+        self.assertEqual(Path(index).read_text(), "{ truncated")
 
     def test_baseline_distinguishes_missing_from_legitimately_empty(self):
         """LOW. An existing-but-empty previous state is not a baseline."""

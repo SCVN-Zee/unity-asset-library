@@ -788,9 +788,8 @@ def merge(data, cache, overrides):
             warnings.append(f"override for unknown asset_key {key!r} — ignored")
             continue
         for field, value in patch.items():
-            target[field] = value
-        if "tags" in patch:
-            target["tag_source"] = "manual"
+            if field not in ("tags", "tag_source"):
+                target[field] = value
         target.setdefault("resolution", {})["override"] = True
 
     # Two archives can legitimately resolve to one store id (Synty's naming eras).
@@ -966,6 +965,8 @@ def _main_unlocked(argv=None):
             return 0
 
     if args.command == "enrich":
+        import user_tags
+        user_tags.migrate(index_dir, lock_already_held=True)
         cache = load_cache(cache_path)
         overrides = {}
         if os.path.exists(overrides_path):
@@ -978,6 +979,7 @@ def _main_unlocked(argv=None):
                           "skipped": len(data["assets"]) - eligible_count})
         data = merge(data, cache, overrides)
         from index_assets import write_atomic
+        data = user_tags.overlay(data, index_dir)
         write_atomic(assets_json, json.dumps(data, indent=1, sort_keys=True))
         remaining = prune_pending_queue(
             os.path.join(index_dir, "pending-enrichment.json"),

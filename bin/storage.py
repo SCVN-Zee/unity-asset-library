@@ -23,7 +23,7 @@ import index_assets as ia  # noqa: E402
 import resolve_store  # noqa: E402
 from progress import json_progress  # noqa: E402
 
-API_VERSION = 5
+API_VERSION = 6
 JOURNAL_NAME = "storage-journal.json"
 JOURNAL_VERSION = 1
 _INSTANCE_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
@@ -406,6 +406,11 @@ def configure(repo=None, root=None, instance_id=None, progress=False):
                 except (OSError, ValueError) as exc:
                     raise StorageError("metadata overrides are unreadable") from exc
             data = resolve_store.merge(data, cache, overrides)
+            try:
+                ia.user_tags.migrate(state, lock_already_held=True)
+                data = ia.user_tags.overlay(data, state)
+            except ia.user_tags.TagStoreError as exc:
+                raise StorageError(str(exc)) from exc
             pending = _pending_for(data, cache)
             metadata = {"api_version": API_VERSION, "vault_root": selected,
                         "repo": repo, "root_identity": before}

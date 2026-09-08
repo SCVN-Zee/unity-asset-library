@@ -32,27 +32,18 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), "ual-bootstrap-"));
     const context = vm.createContext({
       require: (name) => name === "electron"
         ? { app, dialog, ipcMain, BrowserWindow: class {}, shell: { openExternal() {}, showItemInFolder: (p) => (revealed.push(p), p) } }
-        : require(name),
+        : name === "./port-recovery.cjs" ? require("../electron/port-recovery.cjs") : require(name),
       process: { ...process, resourcesPath: resources },
       __dirname: path.join(temp, "dev", "electron"),
-      console,
+      console, AbortSignal,
       setTimeout,
       clearTimeout,
     });
     vm.runInContext(fs.readFileSync(path.join(__dirname, "../electron/main.cjs"), "utf8"), context);
 
-    // A legacy/incompatible listener remains recoverable in Settings and cannot be reconfigured.
-    const legacyState = { service: "unity-asset-index", api_version: 4, ready: true, csrf: "legacy" };
-    context.fetch = async () => ({ ok: true, text: async () => JSON.stringify(legacyState) });
-    await vm.runInContext("bootstrapStorage()", context);
-    assert.equal(vm.runInContext("getStorage().ready", context), false);
-    assert.equal(vm.runInContext("getStorage().canChange", context), false);
-    assert.match(vm.runInContext("getStorage().error", context), /incompatible backend/i);
-    assert.equal(quitCalls, 0);
-
     // A compatible external backend is surfaced but never made mutable by this desktop shell.
     const externalState = {
-      service: "unity-asset-library", api_version: 5, ready: true, csrf: "external-token",
+      service: "unity-asset-library", api_version: 6, ready: true, csrf: "external-token",
       vault_root: selected, repo: temp, instance_id: "other-process",
     };
     context.fetch = async () => ({ ok: true, text: async () => JSON.stringify(externalState) });
@@ -62,6 +53,23 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), "ual-bootstrap-"));
     assert.equal(externalStorage.ready, true);
     assert.equal(externalStorage.canChange, false);
     vm.runInContext("registerIpc()", context);
+    // Stale replies and skipping confirmation must not release the active prompt.
+    const choicePromise = vm.runInContext("askPortChoice({ port: 8765, suggestion: 8766, owner: { pid: 123, identity: \"test\" }, detail: \"\", confirm: false })", context);
+    const requestId = vm.runInContext("getStorage().portRecovery.id", context);
+    const answer = (id, choice) => handlers["storage:port-choice"]({}, id, choice);
+    assert.throws(() => answer("stale", { action: "cancel" }), /expired/);
+    assert.throws(() => answer(requestId, { action: "confirm-stop" }), /Invalid/);
+    assert.throws(() => answer(requestId, { action: "use", port: 65536 }), /Invalid/);
+    answer(requestId, { action: "cancel" });
+    assert.equal((await choicePromise).action, "cancel");
+    assert.throws(() => answer(requestId, { action: "cancel" }), /expired/);
+    vm.runInContext("storageState.portRecovery = null", context);
+    // Invalid tag payloads must fail before contacting the backend.
+    for (const change of [null, {}, { action: "constructor", tag: "ui" },
+      { action: "rename", tag: "ui" }, { action: "assign", tag: "ui", asset_key: " " },
+      { action: "delete", tag: "ui", extra: true }]) {
+      assert.throws(() => handlers["backend:mutate-tags"]({}, change), /Invalid tag change/);
+    }
     // Reveal containment: valid library file reveals, symlink escape and missing file are rejected.
     const reveal = (p) => handlers["shell:reveal-item"]({}, p);
     const insideFile = path.join(selected, "file.txt");
@@ -83,7 +91,7 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), "ual-bootstrap-"));
     assert.equal(fs.existsSync(path.join(temp, "config.json")), false);
     assert.equal(fs.existsSync(path.join(temp, "Unity Asset Index", "backend", "config.json")), false);
 
-    console.log("PASS: shell-first incompatible recovery, external backend immutability, picker cancellation and no config writes");
+    console.log("PASS: external backend immutability, picker cancellation and no config writes");
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }

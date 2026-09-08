@@ -1,8 +1,14 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
+window.addEventListener("DOMContentLoaded", () => {
+  if (process.platform === "darwin") document.documentElement.classList.add("native-titlebar");
+}, { once: true });
+
 contextBridge.exposeInMainWorld("ual", {
   getState: () => ipcRenderer.invoke("backend:state"),
   getAssets: () => ipcRenderer.invoke("backend:assets"),
+  getTags: () => ipcRenderer.invoke("backend:tags"),
+  mutateTags: (change) => ipcRenderer.invoke("backend:mutate-tags", change),
   favorites: () => ipcRenderer.invoke("backend:favorites"),
   setFavorite: (assetKey, favorite) => ipcRenderer.invoke("backend:set-favorite", assetKey, favorite),
   resync: () => ipcRenderer.invoke("backend:resync"),
@@ -16,6 +22,8 @@ contextBridge.exposeInMainWorld("ual", {
   getJob: (jobId) => ipcRenderer.invoke("backend:job", jobId),
   getAction: (actionId) => ipcRenderer.invoke("backend:action", actionId),
   getStorage: () => ipcRenderer.invoke("storage:get"),
+  answerPortChoice: (id, choice) => ipcRenderer.invoke("storage:port-choice", id, choice),
+  retryBackend: () => ipcRenderer.invoke("storage:retry"),
   chooseStorageFolder: (currentPath) => ipcRenderer.invoke("storage:choose-folder", currentPath),
   saveStorage: (selectedPath) => ipcRenderer.invoke("storage:save", selectedPath),
   openExternal: (url) => ipcRenderer.invoke("shell:open-external", url),

@@ -323,7 +323,10 @@ class TestApiAndBoundary(ServerHarnessTestCase):
         status, headers, body = self.h.request("GET", "/api/assets")
         self.assertEqual(status, 200)
         self.assertTrue(headers["content-type"].startswith("application/json"))
-        self.assertEqual(json.loads(body), {"assets": [{"asset_key": "k1", "name": "A", "versions": [{"file": "A.unitypackage", "size_bytes": 4096}]}]})
+        # User tags are authoritative and always present after the overlay.
+        expected = {"assets": [{"asset_key": "k1", "name": "A", "tags": [], "tag_source": "user",
+                                "versions": [{"file": "A.unitypackage", "size_bytes": 4096}]}]}
+        self.assertEqual(json.loads(body), expected)
 
     def test_no_cors_header_anywhere(self):
         _, headers_get, _ = self.h.request("GET", "/api/state")

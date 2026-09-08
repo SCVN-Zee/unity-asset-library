@@ -3,6 +3,8 @@ __pycache__/
 .DS_Store
 node_modules/
 /dist/
+/.build/
+/release/
 /.agents/
 /config.json
 /assets.csv
@@ -16,3 +18,6 @@ node_modules/
 
 /docs/
 /plans/
+
+# Local knowledge graph and incremental extraction cache
+/graphify-out/

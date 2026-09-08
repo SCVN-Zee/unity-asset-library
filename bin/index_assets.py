@@ -28,6 +28,7 @@ import argparse
 import csv
 import json
 import os
+import user_tags
 import re
 import sys
 import tempfile
@@ -85,32 +86,6 @@ NON_STORE_PATTERNS = (
 )
 NON_STORE_DIR_PARTS = ("WM_Animset",)
 
-TAG_KEYWORDS = {
-    "shader": ("shader", "shading", "toony", "beautify"),
-    "terrain": ("terrain", "microsplat", "digger", "landscape"),
-    "character": ("character", "hero", "npc", "creature", "monster", "zombie", "humanoid"),
-    "animation": ("animation", "animset", "anims", "mocap", "motion", "animancer"),
-    "vfx": ("vfx", "particle", "effect", "explosion", "magic circle"),
-    "sfx": ("sfx", "sound", "audio", "foley", "swish"),
-    "music": ("music", "bgm", "orchestral", "soundtrack", "stinger"),
-    "ui": ("gui", "ui ", "interface", "hud", "icon"),
-    "ai-pathfinding": ("pathfinding", "behavior", "behaviour", "navmesh", " ai "),
-    "networking": ("multiplayer", "network", "netcode", "dissonance", "voice chat"),
-    "editor-tool": ("editor", "inspector", "toolkit", "tool", "utility", "optimiz"),
-    "template": ("template", "kit", "starter", "engine", "system", "framework"),
-    "low-poly": ("low poly", "lowpoly", "polygon", "cube"),
-    "stylized": ("stylized", "stylised", "cute", "toon", "cartoon"),
-    "environment": ("environment", "city", "village", "forest", "nature", "dungeon", "interior"),
-    "prop": ("prop", "weapon", "furniture", "chest", "armor"),
-    "vehicle": ("vehicle", "car", "drift", "tank", "aircraft"),
-    "skybox": ("skybox", "sky", "allsky", "cloud"),
-    "lighting": ("light", "lighting", "lightmap", "bakery", "global illumination"),
-    "horror": ("horror", "creepy", "psychiatric", "animatronic"),
-    "medieval": ("medieval", "fantasy", "knight", "castle", "rpg"),
-    "sci-fi": ("sci-fi", "scifi", "cyberpunk", "solarpunk", "space", "mecha"),
-    "urp": ("urp",),
-    "hdrp": ("hdrp",),
-}
 
 
 # ---------------------------------------------------------------------------
@@ -433,12 +408,7 @@ def integrity_tier(size):
     return None
 
 
-def derive_tags(parsed, category):
-    hay = (parsed["title"] + " " + (category or "")).casefold()
-    tags = {tag for tag, words in TAG_KEYWORDS.items() if any(w in hay for w in words)}
-    if parsed["pipeline"]:
-        tags.add(parsed["pipeline"].lower())
-    return sorted(tags)
+
 
 
 FOLDER_CATEGORY = {
@@ -507,8 +477,8 @@ def build(scanned, progress=None):
             "local_name": top["title"],
             "author": None,
             "category": category,
-            "tags": derive_tags(top, cat_l1),
-            "tag_source": "keyword",
+            "tags": [],
+            "tag_source": None,
             "thumbnail": None,
             "store": None,
             "store_id": None,
@@ -929,10 +899,14 @@ def main(argv=None, state_lock_held=False, scanned=None, progress=None):
     probe_args, _ = probe.parse_known_args(argv)
     held = state_lock_held or probe_args.state_lock_held
     index_dir = os.path.abspath(probe_args.state) if probe_args.state else state_dir()
-    if held:
-        return _main_unlocked(argv, scanned=scanned, progress=progress)
-    with state_write_lock(index_dir, "index_assets", blocking=True):
-        return _main_unlocked(argv, scanned=scanned, progress=progress)
+    try:
+        if held:
+            return _main_unlocked(argv, scanned=scanned, progress=progress)
+        with state_write_lock(index_dir, "index_assets", blocking=True):
+            return _main_unlocked(argv, scanned=scanned, progress=progress)
+    except user_tags.TagStoreError as exc:
+        print(f"index_assets: {exc}")
+        return 1
 def _main_unlocked(argv=None, scanned=None, progress=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("steps", nargs="+", choices=["scan", "emit", "update"])
@@ -1009,6 +983,11 @@ def _main_unlocked(argv=None, scanned=None, progress=None):
         except ImportError:
             print("update: resolve_store unavailable — index written without enrichment")
 
+        # Tags are user-owned: migrate any pre-user_tags.json tags out of the
+        # OLD assets.json before it is overwritten (CLI-only rescans included),
+        # then overlay the authoritative store over whatever merge produced.
+        user_tags.migrate(index_dir, lock_already_held=True)
+        data = user_tags.overlay(data, index_dir)
         emit_progress(progress, "write", 0, 1, assets_json)
         write_atomic(assets_json, json.dumps(data, indent=1, sort_keys=True))
         emit_progress(progress, "write", 1, 1, assets_json)
@@ -1034,6 +1013,8 @@ def _main_unlocked(argv=None, scanned=None, progress=None):
     if "scan" in args.steps:
         scanned = scan(root, progress=progress)
         data = build(scanned, progress=progress)
+        user_tags.migrate(index_dir, lock_already_held=True)
+        data = user_tags.overlay(data, index_dir)
         write_atomic(assets_json, json.dumps(data, indent=1, sort_keys=True))
         dups = [g for g in data["duplicate_groups"] if g["verdict"] == "duplicate"]
         print(f"scan: {data['file_count']} files -> {data['asset_count']} assets, "
@@ -1044,6 +1025,8 @@ def _main_unlocked(argv=None, scanned=None, progress=None):
         if data is None:
             with open(assets_json, encoding="utf-8") as fh:
                 data = json.load(fh)
+        user_tags.migrate(index_dir, lock_already_held=True)
+        data = user_tags.overlay(data, index_dir)
         data = annotate_pending(
             data, os.path.join(index_dir, "pending-enrichment.json"))
         out_dir = output_dir(root, cfg)

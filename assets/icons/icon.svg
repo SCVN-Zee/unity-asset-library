@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title">
+  <title id="title">Unity Asset Library — coral asset cube</title>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0.8" y2="1"><stop stop-color="#303338"/><stop offset="1" stop-color="#141517"/></linearGradient>
+    <linearGradient id="top" x1="0" y1="0" x2="0.6" y2="1"><stop stop-color="#ffd0ae"/><stop offset="1" stop-color="#f89572"/></linearGradient>
+    <linearGradient id="left" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f98a68"/><stop offset="1" stop-color="#e75e43"/></linearGradient>
+    <linearGradient id="right" x1="0" y1="0" x2="0.6" y2="1"><stop stop-color="#ed7656"/><stop offset="1" stop-color="#b73e2d"/></linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#ffffff" stop-opacity=".23"/><stop offset="1" stop-color="#ffffff" stop-opacity=".025"/></linearGradient>
+    <filter id="shadow" x="-30%" y="-25%" width="160%" height="175%"><feDropShadow dx="0" dy="26" stdDeviation="23" flood-color="#000000" flood-opacity=".42"/></filter>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="204" fill="url(#tile)"/>
+  <rect x="66" y="66" width="892" height="892" rx="202" fill="none" stroke="url(#edge)" stroke-width="3"/>
+  <g filter="url(#shadow)">
+    <path d="M278 641 512 772 746 641 746 690 Q746 704 733 712L531 828Q512 839 493 828L291 712Q278 704 278 690Z" fill="#9b493a"/>
+    <path d="M278 641 512 772 746 641" fill="none" stroke="#f99d7d" stroke-width="8" stroke-linejoin="round"/>
+    <path d="M278 572 512 703 746 572 746 621 Q746 635 733 643L531 759Q512 770 493 759L291 643Q278 635 278 621Z" fill="#c65e46"/>
+    <path d="M278 572 512 703 746 572" fill="none" stroke="#ffb18d" stroke-width="8" stroke-linejoin="round"/>
+    <path d="M493 214Q512 203 531 214L738 333Q752 341 752 356L752 552Q752 567 739 575L531 695Q512 706 493 695L285 575Q272 567 272 552L272 356Q272 341 286 333Z" fill="url(#left)"/>
+    <path d="M512 472 752 341 752 552Q752 567 739 575L531 695Q521 701 512 701Z" fill="url(#right)"/>
+    <path d="M493 214Q512 203 531 214L738 333Q752 341 738 349L531 470Q512 481 493 470L286 349Q272 341 286 333Z" fill="url(#top)"/>
+    <path d="M290 345 493 462Q512 473 531 462L734 345" fill="none" stroke="#ffddbf" stroke-opacity=".65" stroke-width="5" stroke-linecap="round"/>
+    <path d="M512 484V681" stroke="#ffa585" stroke-opacity=".6" stroke-width="5" stroke-linecap="round"/>
+    <path d="M424 257 653 391 653 468 602 498 602 420 372 287Z" fill="#fff0d8"/>
+    <path d="M602 420 653 391 653 468 602 498Z" fill="#ffc8a1"/>
+  </g>
+</svg>

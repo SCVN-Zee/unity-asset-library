@@ -8,11 +8,10 @@ const path = require("node:path");
 // Library: keep each environment on its historical userData directory.
 app.setPath("userData", path.join(app.getPath("appData"), app.isPackaged ? "Unity Asset Index" : "unity-asset-index"));
 
-const PORT = 8765;
+let backendPort = 8765;
 const SERVICE = "unity-asset-library";
-const API_VERSION = 5;
-const BASE_URL = `http://127.0.0.1:${PORT}`;
-const INCOMPATIBLE_BACKEND = `An incompatible backend is listening on port ${PORT}. Stop that Python server and restart the desktop app.`;
+const API_VERSION = 6;
+const { resolvePort } = require("./port-recovery.cjs");
 let backendProcess = null;
 let ownsBackend = false;
 let backendSession = null;
@@ -23,6 +22,7 @@ let startupPromise = Promise.resolve();
 let saveQueue = Promise.resolve();
 let transitionPromise = null;
 const backendOutput = [];
+let pendingPortChoice = null;
 const storageState = {
   path: null,
   ready: false,
@@ -31,11 +31,41 @@ const storageState = {
   canChange: true,
   busy: false,
   progress: null,
+  portRecovery: null,
 };
 storageState.busy = true;
 
 function cloneStorageState() {
   return { ...storageState, progress: storageState.progress ? { ...storageState.progress } : null };
+}
+
+function askPortChoice(request) {
+  if (quitting) return Promise.resolve({ action: "cancel" });
+  return new Promise((resolve) => {
+    const id = crypto.randomUUID();
+    storageState.portRecovery = { ...request, id, awaiting: true };
+    pendingPortChoice = { id, resolve };
+  });
+}
+
+function answerPortChoice(id, choice) {
+  const request = storageState.portRecovery;
+  if (!pendingPortChoice || pendingPortChoice.id !== id || !request) throw new Error("This port recovery request has expired.");
+  const allowed = request.confirm ? ["cancel", "confirm-stop"] : ["cancel", "use", "stop"];
+  if (!choice || !allowed.includes(choice.action) ||
+      (choice.action === "use" && (!Number.isInteger(choice.port) || choice.port < 1 || choice.port > 65535)) ||
+      (choice.action === "stop" && !request.owner)) throw new Error("Invalid port recovery choice.");
+  const pending = pendingPortChoice;
+  pendingPortChoice = null;
+  storageState.portRecovery = { ...request, awaiting: false };
+  pending.resolve(choice);
+}
+
+async function ensureBackendPort() {
+  try { backendPort = await resolvePort(backendPort, askPortChoice); } finally {
+    pendingPortChoice = null;
+    storageState.portRecovery = null;
+  }
 }
 
 function canonicalPath(value) {
@@ -68,7 +98,7 @@ function isViewerState(value, expected = {}) {
 }
 
 async function requestJson(endpoint, options = {}) {
-  const response = await fetch(`${BASE_URL}${endpoint}`, {
+  const response = await fetch(`http://127.0.0.1:${backendPort}${endpoint}`, {
     ...options,
     headers: {
       Accept: "application/json",
@@ -94,7 +124,7 @@ async function requestJson(endpoint, options = {}) {
 }
 
 async function readState() {
-  return requestJson("/api/state");
+  return requestJson("/api/state", { signal: AbortSignal.timeout(1500) });
 }
 
 function delay(ms) {
@@ -167,7 +197,9 @@ function preparePackagedBackend() {
 }
 
 function pythonCommand() {
-  return process.env.UAL_PYTHON || (process.platform === "win32" ? "python" : "python3");
+  return process.env.UAL_PYTHON || (app.isPackaged
+    ? path.join(process.resourcesPath, "python", "bin", "python3")
+    : (process.platform === "win32" ? "python" : "python3"));
 }
 
 function newInstanceId() {
@@ -193,7 +225,7 @@ function runStorageCli(args, onProgress) {
     try {
       child = spawn(pythonCommand(), args, {
         cwd: args[args.indexOf("--repo") + 1],
-        env: { ...process.env, PYTHONUNBUFFERED: "1" },
+        env: { ...process.env, PYTHONUNBUFFERED: "1", PYTHONDONTWRITEBYTECODE: "1" },
         stdio: ["ignore", "pipe", "pipe"],
       });
     } catch (error) {
@@ -264,11 +296,21 @@ function assertOwnState(state, expected) {
 }
 
 async function startOwnedBackend(root, vaultRoot) {
+  while (true) {
+    await ensureBackendPort();
+    try { return await launchOwnedBackend(root, vaultRoot); } catch (error) {
+      // A listener can win the race between probing and Python binding.
+      if (!String(error.message).includes(`server: cannot bind 127.0.0.1:${backendPort}`)) throw error;
+    }
+  }
+}
+
+async function launchOwnedBackend(root, vaultRoot) {
   const instanceId = newInstanceId();
   const script = path.join(root, "bin", "server.py");
   backendOutput.length = 0;
-  const child = spawn(pythonCommand(), [script, "--repo", root, "--port", String(PORT), "--instance-id", instanceId], {
-    env: { ...process.env, PYTHONUNBUFFERED: "1" },
+  const child = spawn(pythonCommand(), [script, "--repo", root, "--port", String(backendPort), "--instance-id", instanceId], {
+    env: { ...process.env, PYTHONUNBUFFERED: "1", PYTHONDONTWRITEBYTECODE: "1" },
     stdio: ["ignore", "pipe", "pipe"],
     detached: process.platform !== "win32",
   });
@@ -304,7 +346,7 @@ async function startOwnedBackend(root, vaultRoot) {
 }
 
 async function reuseExternalBackend(state) {
-  if (!isViewerState(state)) throw new Error(INCOMPATIBLE_BACKEND);
+  if (!isViewerState(state)) throw new Error("The external backend is incompatible.");
   backendSession = { root: state.repo, vaultRoot: state.vault_root, instanceId: state.instance_id, generation: ++backendGeneration, external: true };
   ownsBackend = false;
   storageState.path = state.vault_root;
@@ -315,6 +357,7 @@ async function reuseExternalBackend(state) {
   return state;
 }
 async function configureAndStart(root, vaultRoot, instanceId = newInstanceId(), onConfigured) {
+  await ensureBackendPort();
   const outcome = await runStorageCli(storageArgs(root, instanceId, "configure", ["--root", vaultRoot, "--progress-json"]), (progress) => {
     storageState.progress = progress;
   });
@@ -333,11 +376,8 @@ async function bootstrapStorage() {
     root = preparePackagedBackend();
     let existing;
     try { existing = await readState(); } catch { existing = null; }
-    if (existing) {
-      if (isViewerState(existing)) return reuseExternalBackend(existing);
-      throw new Error(INCOMPATIBLE_BACKEND);
-    }
-
+    if (isViewerState(existing)) return reuseExternalBackend(existing);
+    await ensureBackendPort();
     const status = parseStorageOutcome(await runStorageCli(storageArgs(root, newInstanceId(), "status")));
     applyStorageOutcome(status, true);
     if (status.needsSetup || !status.path) return null;
@@ -350,8 +390,7 @@ async function bootstrapStorage() {
     }
     return backendSession;
   } catch (error) {
-    const incompatible = String(error?.message || error) === INCOMPATIBLE_BACKEND;
-    setStorageError(error, { canChange: !incompatible && !backendSession?.external, needsSetup: false });
+    setStorageError(error, { canChange: !backendSession?.external, needsSetup: false });
     return null;
   } finally {
     storageState.busy = false;
@@ -499,6 +538,16 @@ async function postJson(endpoint, body = {}) {
 function registerIpc() {
   if (registered) return;
   ipcMain.handle("backend:assets", () => backendRequest("/api/assets"));
+  ipcMain.handle("backend:tags", () => backendRequest("/api/tags"));
+  ipcMain.handle("backend:mutate-tags", (_event, change) => {
+    const fields = { create: ["action", "tag"], rename: ["action", "tag", "new_tag"], delete: ["action", "tag"], assign: ["action", "tag", "asset_key"], remove: ["action", "tag", "asset_key"] };
+    const allowed = change && Object.hasOwn(fields, change.action) ? fields[change.action] : null;
+    if (!allowed || Object.keys(change).length !== allowed.length ||
+        !allowed.every((key) => typeof change[key] === "string" && change[key].trim())) {
+      throw new Error("Invalid tag change.");
+    }
+    return postJson("/api/tags", change);
+  });
   ipcMain.handle("backend:favorites", () => backendRequest("/api/favorites"));
   ipcMain.handle("backend:set-favorite", (_event, assetKey, favorite) => {
     if (typeof assetKey !== "string" || !assetKey || typeof favorite !== "boolean") {
@@ -518,6 +567,11 @@ function registerIpc() {
   ipcMain.handle("backend:job", (_event, jobId) => backendRequest(`/api/job/${encodeURIComponent(jobId)}`));
   ipcMain.handle("backend:action", (_event, actionId) => backendRequest(`/api/action/${encodeURIComponent(actionId)}`));
   ipcMain.handle("storage:get", () => getStorage());
+  ipcMain.handle("storage:port-choice", (_event, id, choice) => answerPortChoice(id, choice));
+  ipcMain.handle("storage:retry", () => {
+    if (storageState.busy || transitionPromise || backendSession || quitting) throw new Error("The backend cannot be retried right now.");
+    startupPromise = bootstrapStorage();
+  });
   ipcMain.handle("storage:choose-folder", (_event, currentPath) => chooseStorageFolder(currentPath));
   ipcMain.handle("storage:save", (_event, selectedPath) => saveStorage(selectedPath));
   ipcMain.handle("shell:open-external", (_event, url) => {
@@ -545,6 +599,8 @@ function createWindow() {
     minHeight: 680,
     backgroundColor: "#111214",
     title: "Unity Asset Library",
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    trafficLightPosition: { x: 16, y: 24 },
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -559,6 +615,9 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (!app.isPackaged && app.dock) {
+    app.dock.setIcon(path.join(app.getAppPath(), "assets", "icons", "icon.png"));
+  }
   registerIpc();
   createWindow();
   startupPromise = bootstrapStorage();
@@ -568,6 +627,7 @@ app.on("before-quit", (event) => {
   if (quitting) return;
   event.preventDefault();
   quitting = true;
+  if (pendingPortChoice) answerPortChoice(pendingPortChoice.id, { action: "cancel" });
   void Promise.allSettled([startupPromise, saveQueue, transitionPromise || Promise.resolve()]).then(() => stopOwnedBackend()).finally(() => app.quit());
 });
 

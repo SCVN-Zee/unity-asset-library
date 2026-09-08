@@ -5,11 +5,14 @@
   "description": "A focused desktop library for Unity assets",
   "main": "electron/main.cjs",
   "scripts": {
+    "predev": "node scripts/prepare-electron.cjs",
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && ELECTRON_RENDERER_URL=http://127.0.0.1:5173 electron .\"",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "npm run typecheck && vite build",
+    "prestart": "node scripts/prepare-electron.cjs",
     "start": "electron .",
-    "package": "npm run build && electron-builder --dir"
+    "package": "bash scripts/prepare-python.sh && npm run build && electron-builder --mac --arm64 --dir --publish never",
+    "dist": "bash scripts/prepare-python.sh && npm run build && electron-builder --mac --arm64 --publish never"
   },
   "dependencies": {
     "@gluestack-ui/core": "4.0.0-alpha.0",
@@ -43,6 +46,7 @@
     "tailwindcss": "^3.4.19"
   },
   "devDependencies": {
+    "@electron/asar": "3.4.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^4.7.0",
@@ -56,6 +60,9 @@
   "build": {
     "appId": "com.unityassetlibrary.viewer",
     "productName": "Unity Asset Library",
+    "directories": {
+      "output": "release"
+    },
     "files": [
       "dist/renderer/**/*",
       "electron/**/*",
@@ -64,7 +71,19 @@
     "extraResources": [
       {
         "from": "bin",
-        "to": "ual-backend/bin"
+        "to": "ual-backend/bin",
+        "filter": [
+          "**/*.py"
+        ]
+      },
+      {
+        "from": ".build/python/cpython-3.12.11-macos-aarch64-none",
+        "to": "python",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc"
+        ]
       },
       {
         "from": "state/cache.json",
@@ -72,7 +91,15 @@
       }
     ],
     "mac": {
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "icon": "assets/icons/icon.icns",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "artifactName": "${name}-${version}-${arch}.${ext}"
     }
   },
   "allowScripts": {

@@ -5,6 +5,9 @@ Serves the React/Electron app's fixed JSON API:
 
     GET  /api/state          pending count, capability token, latest action and job
     GET  /api/action/<id>    action stage, progress, result and terminal error
+    GET  /api/assets         index with authoritative user tags
+    GET  /api/tags           lowercase tag catalog and package assignments
+    POST /api/tags           create, rename, delete, assign or remove a user tag
     POST /api/resync/plan    read-only index change preview
     POST /api/resync/apply   confirm index changes only
     POST /api/cleanup/plan   preview old-version disk cleanup
@@ -16,7 +19,7 @@ Serves the React/Electron app's fixed JSON API:
     GET  /api/job/<id>       job status, stage, progress, bounded log tail
 
 The six plan/apply routes return HTTP 202 {job_id}; poll /api/action/<id>.
-API version 4 requires the matching desktop bridge. Execution-time lock
+API version 6 requires the matching desktop bridge and user tag endpoints. Execution-time lock
 contention is a failed action (error_code=busy); admission contention is HTTP 409.
 
 Safety shape: loopback bind only; per-process capability token on every mutating
@@ -52,6 +55,7 @@ import cleanup_versions as cv  # noqa: E402
 import index_assets as ia  # noqa: E402
 import organize_versions as ov  # noqa: E402
 import storage  # noqa: E402
+import user_tags  # noqa: E402
 
 
 SafetyError = cv.SafetyError
@@ -160,8 +164,16 @@ class ViewerService:
         self._apply_organize = ov.apply_organize
         self._index_update = self._index_update_impl
         self._runner = self._run_stage_process
+        self._migrate_user_tags()
 
-    # -- state readers ------------------------------------------------------
+    def _migrate_user_tags(self):
+        """One-time harvest of legacy asset tags, before anything serves or
+        rescans. CLI-only runs migrate inside index_assets; this covers a
+        server started against a never-migrated state dir."""
+        try:
+            user_tags.migrate(self.state)
+        except user_tags.TagStoreError as exc:
+            raise SafetyError(str(exc)) from exc
 
     def _load_assets_impl(self):
         with open(os.path.join(self.state, "assets.json"), encoding="utf-8") as fh:
@@ -325,7 +337,7 @@ class ViewerService:
             action = self._action_snapshot(self._action)
         return {
             "service": "unity-asset-library",
-            "api_version": 5,
+            "api_version": 6,
             "ready": True,
             "vault_root": os.path.realpath(self.root),
             "repo": self.repo,
@@ -336,11 +348,51 @@ class ViewerService:
             "csrf": self.token,
         }
 
-    def op_assets(self):
-        return self._load_assets()
 
     # -- favorites ----------------------------------------------------------
 
+    # -- user tags ------------------------------------------------------------
+
+    def op_assets(self):
+        """User tags are authoritative: the store overlays the index's tags."""
+        try:
+            return user_tags.overlay(self._load_assets(), self.state)
+        except user_tags.TagStoreError as exc:
+            raise SafetyError(str(exc)) from exc
+
+    def op_tags(self):
+        try:
+            return user_tags.load(self.state)
+        except user_tags.TagStoreError as exc:
+            raise SafetyError(str(exc)) from exc
+
+    def op_mutate_tags(self, change):
+        fields = {"create": {"action", "tag"}, "delete": {"action", "tag"},
+                  "rename": {"action", "tag", "new_tag"},
+                  "assign": {"action", "tag", "asset_key"},
+                  "remove": {"action", "tag", "asset_key"}}
+        action = change.get("action")
+        if not isinstance(action, str) or action not in fields or set(change) - {"csrf"} != fields[action]:
+            raise ValueError("invalid tag change")
+        try:
+            user_tags.normalize(change.get("tag"))
+            if action == "rename":
+                user_tags.normalize(change.get("new_tag"))
+        except user_tags.TagStoreError as exc:
+            raise ValueError(str(exc)) from exc
+        if action in ("assign", "remove") and (not isinstance(change["asset_key"], str) or not change["asset_key"].strip()):
+            raise ValueError("asset_key required")
+        try:
+            with self.state_write_lock():
+                if action in ("assign", "remove"):
+                    keys = {a["asset_key"] for a in self._load_assets()["assets"]}
+                    if change["asset_key"] not in keys:
+                        raise UnknownAsset(change["asset_key"])
+                return user_tags.mutate(self.state, change, lock_already_held=True)
+        except user_tags.TagStoreError as exc:
+            raise SafetyError(str(exc)) from exc
+
+    # -- favorites ----------------------------------------------------------
     def _favorites_path(self):
         return os.path.join(self.state, "favorites.json")
 
@@ -902,9 +954,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return False
         return True
 
-    def _read_json(self, schema):
+    def _read_json(self, schema, optional=()):
         """Exact-key JSON body carrying the capability token. Every deviation
-        fails before an operation is even named."""
+        fails before an operation is even named. `optional` keys may appear;
+        keys outside schema+optional never may."""
         if (self.headers.get("Content-Type") or "").split(";")[0].strip() != "application/json":
             self._reject(415, "json_required")
             return None
@@ -922,14 +975,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except (ValueError, UnicodeDecodeError):
             self._reject(400, "malformed_json")
             return None
-        if not isinstance(body, dict) or set(body) != set(schema):
-            self._reject(400, "unexpected_keys", expected=sorted(schema))
+        allowed = set(schema) | set(optional)
+        if not isinstance(body, dict) or not set(body) <= allowed or not set(schema) <= set(body):
+            self._reject(400, "unexpected_keys", expected=sorted(allowed))
             return None
         if not hmac.compare_digest(str(body.get("csrf", "")), self.service.token):
             self._reject(403, "bad_token")
             return None
         return body
-
     # -- routing ------------------------------------------------------------
 
     def do_GET(self):
@@ -942,6 +995,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(service.op_state())
             elif path == "/api/assets":
                 self._send_json(service.op_assets())
+            elif path == "/api/tags":
+                self._send_json(service.op_tags())
             elif path == "/api/favorites":
                 self._send_json(service.op_favorites())
             elif path.startswith("/api/action/"):
@@ -967,21 +1022,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         service = self.service
         schema_by_path = {
-            "/api/resync/plan": ["csrf"],
-            "/api/resync/apply": ["plan_hash", "csrf"],
-            "/api/cleanup/plan": ["csrf"],
-            "/api/cleanup/apply": ["plan_hash", "csrf"],
-            "/api/organize/plan": ["csrf"],
-            "/api/organize/apply": ["plan_hash", "csrf"],
-            "/api/enrich/start": ["csrf"],
-            "/api/enrich/cancel": ["csrf"],
-            "/api/storage/prepare-restart": ["csrf"],
-            "/api/favorites": ["asset_key", "csrf", "favorite"],
+            "/api/resync/plan": (["csrf"], ()),
+            "/api/resync/apply": (["plan_hash", "csrf"], ()),
+            "/api/cleanup/plan": (["csrf"], ()),
+            "/api/cleanup/apply": (["plan_hash", "csrf"], ()),
+            "/api/organize/plan": (["csrf"], ()),
+            "/api/organize/apply": (["plan_hash", "csrf"], ()),
+            "/api/enrich/start": (["csrf"], ()),
+            "/api/enrich/cancel": (["csrf"], ()),
+            "/api/storage/prepare-restart": (["csrf"], ()),
+            "/api/favorites": (["asset_key", "csrf", "favorite"], ()),
+            "/api/tags": (["action", "csrf", "tag"], ("asset_key", "new_tag")),
         }
         if path not in schema_by_path:
             self._send_json({"error": "unknown_route"}, 404)
             return
-        body = self._read_json(schema_by_path[path])
+        required, optional = schema_by_path[path]
+        body = self._read_json(required, optional)
         if body is None:
             return
         try:
@@ -1010,8 +1067,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self._reject(400, "bad_request")
                 else:
                     self._send_json(service.op_set_favorite(asset_key, favorite))
+            elif path == "/api/tags":
+                self._send_json(service.op_mutate_tags(body))
         except UnknownAsset:
             self._send_json({"error": "unknown_asset"}, 404)
+        except ValueError:
+            self._reject(400, "bad_request")
         except Busy as exc:
             payload = {"error": "busy"}
             if exc.job_id:

@@ -1,3 +1,4 @@
+import appIcon from "../../assets/icons/icon.png";
 import {
   useCallback,
   useEffect,
@@ -40,6 +41,11 @@ import {
   FolderOpen,
   LayoutGrid,
   List,
+  PanelRight,
+  Menu,
+  Sun,
+  Moon,
+  Monitor,
   Plus,
   RefreshCw,
   Search,
@@ -81,6 +87,67 @@ function assetSize(asset: Asset) {
 
 function isPending(asset: Asset) {
   return !asset.non_store && asset.resolution?.id_verified !== true;
+}
+
+
+function isValidUserTags(value: unknown): value is UserTags {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as UserTags;
+  const validTags = (tags: unknown): tags is string[] => Array.isArray(tags) && tags.every((tag) => typeof tag === "string" && tag.length > 0 && tag === tag.trim().toLowerCase());
+  return validTags(candidate.tags) && Boolean(candidate.assignments) && typeof candidate.assignments === "object" && !Array.isArray(candidate.assignments) && Object.values(candidate.assignments).every((tags) => validTags(tags) && tags.every((tag) => candidate.tags.includes(tag)));
+}
+
+type FilterState = {
+  query: string;
+  category: string;
+  quick: QuickFilter;
+  author: string;
+  selectedTags: string[];
+  tagMode: "all" | "any";
+  untagged: boolean;
+};
+
+const DEFAULT_FILTERS: FilterState = {
+  query: "",
+  category: "All assets",
+  quick: "all",
+  author: "",
+  selectedTags: [],
+  tagMode: "all",
+  untagged: false,
+};
+
+function loadFilters(): FilterState {
+  try {
+    const saved = JSON.parse(localStorage.getItem("ual:filters") || "null") as Partial<FilterState> | null;
+    if (!saved || typeof saved !== "object") return DEFAULT_FILTERS;
+    return {
+      query: typeof saved.query === "string" ? saved.query : "",
+      category: typeof saved.category === "string" && saved.category ? saved.category : "All assets",
+      quick: (["all", "favorites", "pending", "flagged", "non-store"] as const).includes(saved.quick as QuickFilter) ? (saved.quick as QuickFilter) : "all",
+      author: typeof saved.author === "string" ? saved.author : "",
+      selectedTags: Array.isArray(saved.selectedTags) ? [...new Set(saved.selectedTags.filter((tag): tag is string => typeof tag === "string" && !!tag.trim()).map((tag) => tag.trim().toLowerCase()))] : [],
+      tagMode: saved.tagMode === "any" ? "any" : "all",
+      untagged: saved.untagged === true,
+    };
+  } catch {
+    return DEFAULT_FILTERS;
+  }
+}
+
+// Search tier: 0 = exact name, 1 = every word in name, 2 = every word in name/local_name,
+// 3 = every word across name/local_name/author/tags. null = excluded. Existing sort breaks ties.
+function searchTier(asset: Asset, words: string[], exact: string): number | null {
+  if (!words.length) return 0;
+  const name = asset.name.toLowerCase();
+  const local = (asset.local_name || "").toLowerCase();
+  const author = (asset.author || "").toLowerCase();
+  const tags = (asset.tags || []).join(" ").toLowerCase();
+  if (name === exact) return 0;
+  if (words.every((word) => name.includes(word))) return 1;
+  if (words.every((word) => name.includes(word) || local.includes(word))) return 2;
+  if (words.every((word) => name.includes(word) || local.includes(word) || author.includes(word) || tags.includes(word))) return 3;
+  return null;
 }
 
 function initials(asset: Asset) {
@@ -258,6 +325,7 @@ function StorageScreen({
   onBrowse,
   onSave,
   onCancel,
+  onRetry,
 }: {
   mode: "loading" | "onboarding" | "settings";
   storage: StorageState | null;
@@ -269,6 +337,7 @@ function StorageScreen({
   onBrowse: () => void;
   onSave: () => void;
   onCancel: () => void;
+  onRetry: () => void;
 }) {
   const [pathTouched, setPathTouched] = useState(false);
   if (mode === "loading") {
@@ -284,7 +353,7 @@ function StorageScreen({
   return (
     <div className="storage-shell">
       <header className="storage-topbar">
-        <div className="brand"><div className="brand-mark">UL</div><div><div className="eyebrow">UNITY ASSET LIBRARY</div><h1>{onboarding ? "Set up your library" : "Settings"}</h1></div></div>
+        <div className="brand"><img className="brand-mark" src={appIcon} alt="" draggable={false} /><div><div className="eyebrow">UNITY ASSET LIBRARY</div><h1>{onboarding ? "Set up your library" : "Settings"}</h1></div></div>
         {storage?.ready && <Button type="button" className="button quiet" onPress={onCancel} isDisabled={busy}><Icon as={ArrowLeft} className="icon" aria-hidden="true" focusable={false} />Back to library</Button>}
       </header>
       <main className="storage-main">
@@ -303,7 +372,7 @@ function StorageScreen({
           {busy && <StorageProgress progress={storage?.progress ?? null} />}
           <div className="storage-actions">
             {!onboarding && <Button type="button" className="button quiet" onPress={onCancel} isDisabled={busy}>Cancel</Button>}
-            {displayedError && !busy && <Button type="button" className="button quiet" onPress={handleSave} isDisabled={blocked || !path.trim()}>Retry</Button>}
+            {displayedError && !busy && <Button type="button" className="button quiet" onPress={storage?.ready ? handleSave : onRetry} isDisabled={blocked}>Retry</Button>}
             <Button type="button" className="button primary" onPress={handleSave} isDisabled={busy || blocked || !path.trim()}>{busy ? "Saving…" : saveLabel}<Icon as={ArrowRight} className="icon" aria-hidden="true" focusable={false} /></Button>
           </div>
         </section>
@@ -311,6 +380,50 @@ function StorageScreen({
       </main>
     </div>
   );
+}
+
+function PortRecoveryScreen({ request, onStorage }: { request: PortRecovery; onStorage: (state: StorageState) => void }) {
+  const [port, setPort] = useState(String(request.suggestion));
+  const [error, setError] = useState("");
+  const [sending, setSending] = useState(false);
+  const busy = sending || !request.awaiting;
+  const processName = request.owner?.name || "this process";
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { heading.current?.focus(); }, []);
+  async function answer(choice: PortChoice) {
+    if (busy) return;
+    setSending(true);
+    setError("");
+    try {
+      await api.answerPortChoice(request.id, choice);
+      onStorage(await api.getStorage());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not send your choice. Try again.");
+      setSending(false);
+    }
+  }
+  return <div className="storage-shell port-recovery">
+    <header className="storage-topbar"><div className="brand"><img className="brand-mark" src={appIcon} alt="" draggable={false} /><div><div className="eyebrow">UNITY ASSET LIBRARY</div><h1>Open your library</h1></div></div></header>
+    <main className="storage-main">
+      <section className="storage-card" aria-labelledby="port-heading" aria-busy={busy}>
+        <h2 id="port-heading" ref={heading} tabIndex={-1}>{request.confirm ? `Stop ${processName}?` : `Port ${request.port} is busy`}</h2>
+        <p className="storage-lead">{request.confirm ? <>Stopping <strong>{processName}</strong> will free this port for Asset Library. It may interrupt another app or lose unsaved work.</> : <>Another app is using this port. Use a different one to open your library without interrupting it.</>}</p>
+        {request.owner ? <dl className="port-process"><div><dt>Process</dt><dd>{processName}</dd></div><div><dt>Process ID</dt><dd>{request.owner.pid}</dd></div><div><dt>Port</dt><dd>{request.port}</dd></div></dl> : <p className="storage-help">We couldn’t identify the app, so stopping it here isn’t available.</p>}
+        {request.confirm && <p className="storage-help">We won’t force it to stop. If it stays open, you can use another port.</p>}
+        {!request.confirm && <form onSubmit={(event) => { event.preventDefault(); void answer({ action: "use", port: Number(port) }); }}>
+          <label className="storage-label" htmlFor="server-port">Use a different port</label>
+          <div className="storage-input-row"><div className="storage-input"><input id="server-port" type="number" min="1" max="65535" step="1" required value={port} onChange={(event) => setPort(event.target.value)} disabled={busy} aria-describedby="port-help port-error" /></div><Button type="submit" className="button primary" isDisabled={busy}>Use this port</Button></div>
+          <p className="storage-help" id="port-help">We’ll use this port until you close Asset Library.</p>
+        </form>}
+        <p id="port-error" className="storage-error" role="alert">{error || (!request.confirm ? request.detail : "")}</p>
+        {busy && <p className="storage-help" role="status">{request.confirm ? `Waiting for ${processName} to stop…` : "Checking the port…"}</p>}
+        <div className="storage-actions">
+          <Button type="button" className="button quiet" onPress={() => void answer({ action: "cancel" })} isDisabled={busy}>{request.confirm ? "Keep it running" : "Cancel"}</Button>
+          {request.owner && <Button type="button" className="button" onPress={() => void answer({ action: request.confirm ? "confirm-stop" : "stop" })} isDisabled={busy}>{request.confirm ? "Stop and continue" : "Review stop option"}</Button>}
+        </div>
+      </section>
+    </main>
+  </div>;
 }
 
 function App() {
@@ -326,17 +439,52 @@ function App() {
   const [actionStatus, setActionStatus] = useState<ActionJob | null>(null);
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => new Set());
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [category, setCategory] = useState("All assets");
-  const [quick, setQuick] = useState<QuickFilter>("all");
+  const savedFilters = useMemo(loadFilters, []);
+  const [query, setQuery] = useState(savedFilters.query);
+  const [category, setCategory] = useState(savedFilters.category);
+  const [quick, setQuick] = useState<QuickFilter>(savedFilters.quick);
+  const [author, setAuthor] = useState(savedFilters.author);
+  const [selectedTags, setSelectedTags] = useState<string[]>(savedFilters.selectedTags);
+  const [tagMode, setTagMode] = useState<"all" | "any">(savedFilters.tagMode);
+  const [untagged, setUntagged] = useState(savedFilters.untagged);
   const [sort, setSort] = useState<SortMode>(() => (localStorage.getItem("ual:sort") as SortMode) || "name");
   const [view, setView] = useState<ViewMode>(() => (localStorage.getItem("ual:view") as ViewMode) || "grid");
+  const [inspectorOpen, setInspectorOpen] = useState(() => window.innerWidth >= 1000);
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  const [theme, setTheme] = useState<"system" | "light" | "dark">(() => {
+    const saved = localStorage.getItem("ual:theme");
+    return saved === "light" || saved === "dark" ? saved : "system";
+  });
+  const searchRef = useRef<HTMLInputElement>(null);
+  const detailsToggleRef = useRef<HTMLButtonElement>(null);
+  const detailsCloseRef = useRef<HTMLButtonElement>(null);
+  const inspectorWasOpen = useRef(inspectorOpen);
+  useEffect(() => {
+    if (inspectorOpen && window.innerWidth < 768) detailsCloseRef.current?.focus();
+    else if (!inspectorOpen && inspectorWasOpen.current) detailsToggleRef.current?.focus();
+    inspectorWasOpen.current = inspectorOpen;
+  }, [inspectorOpen]);
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("ual:theme", theme);
+  }, [theme]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [enrichCancelling, setEnrichCancelling] = useState(false);
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState<DialogState>(null);
   const [actionsOpen, setActionsOpen] = useState(false);
+  useEffect(() => {
+    if (storageView !== "library" || dialog || actionsOpen) return;
+    const focusSearch = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    document.addEventListener("keydown", focusSearch);
+    return () => document.removeEventListener("keydown", focusSearch);
+  }, [storageView, dialog, actionsOpen]);
   const actionTriggerRef = useRef<HTMLButtonElement>(null);
   const actionRequestRef = useRef(false);
   const uiRefreshRef = useRef(false);
@@ -347,6 +495,11 @@ function App() {
   const [favPending, setFavPending] = useState<Set<string>>(() => new Set());
   const favEpochRef = useRef(new Map<string, number>());
   const favRevRef = useRef(0);
+  const [userTags, setUserTags] = useState<UserTags | null>(null);
+  const [tagError, setTagError] = useState("");
+  const [tagBusy, setTagBusy] = useState(false);
+  const tagBusyRef = useRef(false);
+  const tagRevRef = useRef(0);
   useEffect(() => {
     if (!actionsOpen) return;
     function handlePointerDown(event: PointerEvent) {
@@ -391,10 +544,13 @@ function App() {
       setStorageView("library");
       storageReady = true;
       const favRev = favRevRef.current;
-      const [nextState, nextIndex, nextFavorites] = await Promise.all([api.getState(), api.getAssets(), api.favorites()]);
+      const tagRev = tagRevRef.current;
+      const [nextState, nextIndex, nextFavorites, nextTags] = await Promise.all([api.getState(), api.getAssets(), api.favorites(), api.getTags()]);
+      if (!isValidUserTags(nextTags)) throw new Error("The tag store returned an unreadable response.");
       if (epoch !== storageEpochRef.current) return false;
       setState(nextState);
       if (favRev === favRevRef.current) setFavorites(nextFavorites.favorites || []);
+      if (tagRev === tagRevRef.current) { setUserTags(nextTags); setTagError(""); }
       const saved = sessionStorage.getItem("ual:action");
       let savedIdentity: { id: string; kind: "resync" | "cleanup" | "organize"; phase: "plan" | "apply" } | null = null;
       try { if (saved) savedIdentity = JSON.parse(saved); } catch { sessionStorage.removeItem("ual:action"); }
@@ -406,6 +562,7 @@ function App() {
     } catch (cause) {
       if (epoch === storageEpochRef.current) {
         if (!storageReady) setStorageView("settings");
+        setTagError("Library refresh failed. Retry before editing tags.");
         setError(cause instanceof Error ? cause.message : "The backend could not be reached.");
       }
     } finally {
@@ -415,7 +572,7 @@ function App() {
   }
 
   const libraryActivity = Boolean(busy) || Boolean(state?.job && ["queued", "running"].includes(state.job.status)) || Boolean(actionStatus && ["queued", "running"].includes(actionStatus.status));
-  const storageChangeBlocked = storageBusy || storage?.canChange === false || libraryActivity;
+  const storageChangeBlocked = storageBusy || storage?.canChange === false || libraryActivity || tagBusy;
 
   async function chooseStorageFolder() {
     if (storageChangeBlocked) return;
@@ -467,6 +624,12 @@ function App() {
       setQuery("");
       setCategory("All assets");
       setQuick("all");
+      setAuthor("");
+      setSelectedTags([]);
+      setTagMode("all");
+      setUntagged(false);
+      setUserTags(null);
+      setTagError("");
       setState(null);
       setActionStatus(null);
       setDialog(null);
@@ -505,6 +668,17 @@ function App() {
   useEffect(() => { void load(); }, []);
   useEffect(() => { localStorage.setItem("ual:sort", sort); }, [sort]);
   useEffect(() => { localStorage.setItem("ual:view", view); }, [view]);
+  useEffect(() => {
+    localStorage.setItem("ual:filters", JSON.stringify({ query, category, quick, author, selectedTags, tagMode, untagged }));
+  }, [query, category, quick, author, selectedTags, tagMode, untagged]);
+  useEffect(() => {
+    if (!userTags) return;
+    const known = new Set(userTags.tags);
+    setSelectedTags((current) => {
+      const next = current.filter((tag) => known.has(tag));
+      return next.length === current.length ? current : next;
+    });
+  }, [userTags]);
   useEffect(() => {
     const job = actionStatus;
     if (!job || dismissedRef.current.has(job.id)) return;
@@ -579,23 +753,33 @@ function App() {
     return roots;
   }, [assets]);
   const favoriteSet = useMemo(() => new Set(favorites), [favorites]);
+  const displayAssets = useMemo<Asset[]>(() => {
+    if (!userTags) return [];
+    return assets.map((asset) => ({ ...asset, tags: userTags.assignments[asset.asset_key] || [] }));
+  }, [assets, userTags]);
+  const tagCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const asset of displayAssets)
+      for (const tag of asset.tags || []) counts.set(tag, (counts.get(tag) || 0) + 1);
+    return counts;
+  }, [displayAssets]);
+  const untaggedCount = useMemo(
+    () => displayAssets.filter((asset) => !(asset.tags || []).length).length,
+    [displayAssets],
+  );
+  const authors = useMemo(
+    () => [...new Set(displayAssets.map((asset) => asset.author || "").filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [displayAssets],
+  );
 
   const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return assets
-      .filter((asset) => {
-        const haystack = [
-          asset.name,
-          asset.local_name,
-          asset.author,
-          asset.category?.path,
-          ...(asset.tags || []),
-          ...(asset.flags || []),
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
-        if (needle && !haystack.includes(needle)) return false;
+    const exact = query.trim().toLowerCase();
+    const words = exact.split(/\s+/).filter(Boolean);
+    return displayAssets
+      .map((asset) => ({ asset, tier: searchTier(asset, words, exact) }))
+      .filter((entry): entry is { asset: Asset; tier: number } => {
+        const { asset, tier } = entry;
+        if (tier === null) return false;
         const assetCategory = asset.category?.path || "Uncategorized";
         if (
           category !== "All assets" &&
@@ -603,26 +787,45 @@ function App() {
           !assetCategory.startsWith(`${category}/`)
         )
           return false;
+        if (author && (asset.author || "") !== author) return false;
         if (quick === "favorites" && !favoriteSet.has(asset.asset_key)) return false;
         if (quick === "pending" && !isPending(asset)) return false;
         if (quick === "flagged" && !(asset.flags || []).length) return false;
         if (quick === "non-store" && !asset.non_store) return false;
+        const assetTags = asset.tags || [];
+        if (untagged && assetTags.length) return false;
+        if (selectedTags.length) {
+          const matches = (tag: string) => assetTags.includes(tag);
+          if (!(tagMode === "all" ? selectedTags.every(matches) : selectedTags.some(matches))) return false;
+        }
         return true;
       })
       .sort((a, b) => {
+        if (a.tier !== b.tier) return a.tier - b.tier;
+        const { asset: a2 } = a;
+        const { asset: b2 } = b;
         if (sort === "author")
           return (
-            (a.author || "").localeCompare(b.author || "") ||
-            a.name.localeCompare(b.name)
+            (a2.author || "").localeCompare(b2.author || "") ||
+            a2.name.localeCompare(b2.name)
           );
         if (sort === "size")
-          return assetSize(b) - assetSize(a) || a.name.localeCompare(b.name);
-        return a.name.localeCompare(b.name);
-      });
-  }, [assets, category, query, quick, sort, favoriteSet]);
-
+          return assetSize(b2) - assetSize(a2) || a2.name.localeCompare(b2.name);
+        return a2.name.localeCompare(b2.name);
+      })
+      .map((entry) => entry.asset);
+  }, [displayAssets, category, author, query, quick, sort, favoriteSet, untagged, selectedTags, tagMode]);
+  function clearFilters() {
+    setQuery("");
+    setCategory("All assets");
+    setQuick("all");
+    setAuthor("");
+    setSelectedTags([]);
+    setTagMode("all");
+    setUntagged(false);
+  }
   const selected =
-    assets.find((asset) => asset.asset_key === selectedKey) ||
+    filtered.find((asset) => asset.asset_key === selectedKey) ||
     filtered[0] ||
     null;
   const flaggedCount = assets.filter(
@@ -633,7 +836,6 @@ function App() {
   const storeCount = assets.filter((asset) => !asset.non_store).length;
   const favoriteCount = assets.filter((asset) => favoriteSet.has(asset.asset_key)).length;
   const selectedFavorited = Boolean(selected && favoriteSet.has(selected.asset_key));
-
   async function toggleFavorite(assetKey: string, favorite: boolean) {
     const epoch = (favEpochRef.current.get(assetKey) || 0) + 1;
     favEpochRef.current.set(assetKey, epoch);
@@ -662,6 +864,45 @@ function App() {
       }
     }
   }
+
+  async function mutateTag(change: TagChange) {
+    if (tagBusyRef.current || !userTags || storageBusy) throw new Error("Tag editing is unavailable.");
+    const epoch = storageEpochRef.current;
+    tagBusyRef.current = true;
+    tagRevRef.current += 1;
+    setTagBusy(true);
+    setTagError("");
+    try {
+      const next = await api.mutateTags(change);
+      if (epoch !== storageEpochRef.current) throw new Error("The library changed during the tag operation.");
+      if (!isValidUserTags(next)) throw new Error("The tag store returned an unreadable response.");
+      tagRevRef.current += 1;
+      setUserTags(next);
+      if (change.action === "rename") setSelectedTags((tags) => [...new Set(tags.map((tag) => tag === change.tag ? change.new_tag!.trim().toLowerCase() : tag))]);
+    } catch (cause) {
+      if (epoch === storageEpochRef.current) setTagError(cause instanceof Error ? cause.message : "The tag change could not be saved.");
+      throw cause;
+    } finally {
+      tagBusyRef.current = false;
+      setTagBusy(false);
+    }
+  }
+
+  async function assignTag(assetKey: string, tag: string) {
+    await mutateTag({ action: "assign", tag, asset_key: assetKey });
+  }
+
+  async function removeTag(assetKey: string, tag: string) {
+    await mutateTag({ action: "remove", tag, asset_key: assetKey });
+  }
+
+  const tagAssignmentCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    if (!userTags) return counts;
+    for (const assigned of Object.values(userTags.assignments))
+      for (const tag of assigned) counts.set(tag, (counts.get(tag) || 0) + 1);
+    return counts;
+  }, [userTags]);
 
   async function runAction(name: "resync" | "cleanup" | "organize") {
     try {
@@ -772,20 +1013,21 @@ function App() {
       : "";
   const jobRunning =
     state?.job && ["queued", "running"].includes(state.job.status);
+  if (storage?.portRecovery) return <PortRecoveryScreen key={storage.portRecovery.id} request={storage.portRecovery} onStorage={setStorage} />;
   if (storageView !== "library") {
-    return <StorageScreen mode={storageView} storage={storage} path={storagePath} error={storageError || (storage?.path === storagePath ? storage?.error || "" : "") || error} busy={storageBusy} blocked={storageChangeBlocked} onPathChange={(nextPath) => { setStoragePath(nextPath); setStorageError(""); }} onBrowse={() => void chooseStorageFolder()} onSave={() => void saveStorageRoot()} onCancel={cancelStorageChanges} />;
+    return <StorageScreen mode={storageView} storage={storage} path={storagePath} error={storageError || (storage?.path === storagePath ? storage?.error || "" : "") || error} busy={storageBusy} blocked={storageChangeBlocked} onPathChange={(nextPath) => { setStoragePath(nextPath); setStorageError(""); }} onBrowse={() => void chooseStorageFolder()} onSave={() => void saveStorageRoot()} onCancel={cancelStorageChanges} onRetry={() => { setStorageError(""); setStorageView("loading"); void api.retryBackend().then(() => load()).catch((cause) => { setStorageView("settings"); setStorageError(String(cause)); }); }} />;
   }
   return (
     <div className="app-shell">
       <header className="topbar">
         <div className="brand">
-          <div className="brand-mark">UL</div>
-          <div>
-            <div className="eyebrow">UNITY ASSET LIBRARY</div>
-            <h1>Asset library</h1>
-          </div>
+          <img className="brand-mark" src={appIcon} alt="" draggable={false} />
+          <h1>Unity Asset Library</h1>
         </div>
         <div className="top-actions">
+          <Button type="button" className="icon-button theme-toggle" title={`Theme: ${theme}. Switch to ${theme === "system" ? "light" : theme === "light" ? "dark" : "system"}`} aria-label={`Theme: ${theme}. Switch to ${theme === "system" ? "light" : theme === "light" ? "dark" : "system"}`} onPress={() => setTheme(theme === "system" ? "light" : theme === "light" ? "dark" : "system")}>
+            <Icon as={theme === "system" ? Monitor : theme === "light" ? Sun : Moon} className="icon" aria-hidden="true" />
+          </Button>
           <Popover
             isOpen={actionsOpen}
             onClose={() => setActionsOpen(false)}
@@ -990,22 +1232,8 @@ function App() {
         </Alert>
       )}
 
-      <main className="workspace" key={storageEpoch}>
-        <aside className="sidebar">
-          <Input className="search-wrap">
-            <Icon
-              as={Search}
-              className="icon"
-              aria-hidden="true"
-              focusable={false}
-            />
-            <InputField
-              value={query}
-              onChangeText={setQuery}
-              placeholder="Search library"
-              aria-label="Search library"
-            />
-          </Input>
+      <main className={`workspace ${inspectorOpen ? "with-inspector" : ""} ${navigationOpen ? "navigation-open" : ""}`} key={storageEpoch}>
+        <aside className="sidebar" id="library-navigation" aria-label="Library navigation">
           <section className="side-section">
             <div className="section-label">Library</div>
             {(
@@ -1025,6 +1253,7 @@ function App() {
                 type="button"
                 key={key}
                 className={`nav-row ${quick === key ? "active" : ""}`}
+                aria-pressed={quick === key}
                 onPress={() => setQuick(key)}
               >
                 <span>{label}</span>
@@ -1052,19 +1281,67 @@ function App() {
                     key={node.path}
                     node={node}
                     selected={category}
-                    onSelect={(path) => {
-                      setCategory(path);
-                      setQuick("all");
-                    }}
+                    onSelect={(path) => { setCategory(path); setNavigationOpen(false); }}
                   />
                 ))}
             </ul>
+          </section>
+          <section className="side-section tags">
+            <div className="section-label">
+              Tags <span>{userTags ? userTags.tags.length : 0}</span>
+            </div>
+            {tagError && <p className="tag-note danger-text" role="alert">{tagError}</p>}
+            {!userTags && !tagError && <p className="tag-note">Tags are unavailable right now.</p>}
+            {userTags && (
+              <>
+                <Button
+                  type="button"
+                  className={`nav-row ${untagged ? "active" : ""}`}
+                  aria-pressed={untagged}
+                  onPress={() => setUntagged(!untagged)}
+                >
+                  <span>Untagged</span>
+                  <span className="nav-count">{untaggedCount}</span>
+                </Button>
+                {[...tagCounts.entries()]
+                  .sort((a, b) => a[0].localeCompare(b[0]))
+                  .map(([tag, count]) => (
+                    <Button
+                      type="button"
+                      key={tag}
+                      className={`nav-row ${selectedTags.includes(tag) ? "active" : ""}`}
+                      aria-pressed={selectedTags.includes(tag)}
+                      onPress={() =>
+                        setSelectedTags((current) =>
+                          current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag],
+                        )
+                      }
+                    >
+                      <span>{tag}</span>
+                      <span className="nav-count">{count}</span>
+                    </Button>
+                  ))}
+                {selectedTags.length > 1 && (
+                  <div className="tag-mode-toggle" role="group" aria-label="Match selected tags">
+                    <Button type="button" className={tagMode === "all" ? "selected" : ""} aria-pressed={tagMode === "all"} onPress={() => setTagMode("all")}>Match all</Button>
+                    <Button type="button" className={tagMode === "any" ? "selected" : ""} aria-pressed={tagMode === "any"} onPress={() => setTagMode("any")}>Match any</Button>
+                  </div>
+                )}
+                <TagManager
+                  tags={userTags.tags}
+                  counts={tagAssignmentCounts}
+                  busy={tagBusy}
+                  error={tagError}
+                  onMutate={mutateTag}
+                />
+              </>
+            )}
           </section>
           <div className="sidebar-foot">
             <div className="mini-status">
               <span className="connection-dot" />
               <span>{storeCount} store records</span>
-              <span className="muted">Python engine online</span>
+              <span className="muted">{error ? "Connection needs attention" : "Library connected"}</span>
             </div>
             <Button type="button" className="settings-link" onPress={() => { setStoragePath(storage?.path || ""); setStorageError(""); setStorageView("settings"); }} isDisabled={storageBusy} aria-label="Open Settings">
               <Icon as={Settings} className="icon" aria-hidden="true" focusable={false} />Settings
@@ -1072,12 +1349,34 @@ function App() {
           </div>
 
         </aside>
-        <section className="content-column">
+        <section className="content-column" aria-label="Asset browser">
+          <div className="library-toolbar">
+            <Button type="button" className="icon-button navigation-toggle" aria-label="Toggle library navigation" aria-expanded={navigationOpen} aria-controls="library-navigation" onPress={() => setNavigationOpen(!navigationOpen)}><Icon as={Menu} className="icon" aria-hidden="true" /></Button>
+          <Input className="search-wrap" role="search">
+            <Icon
+              as={Search}
+              className="icon"
+              aria-hidden="true"
+              focusable={false}
+            />
+            <InputField
+              ref={searchRef}
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search assets, authors, tags…"
+              aria-label="Search library"
+            />
+            {!query && <kbd>⌘ K</kbd>}
+            {query && <Button className="search-clear" aria-label="Clear search" onPress={() => setQuery("")}><Icon as={X} className="icon" aria-hidden="true" /></Button>}
+          </Input>
+
+            <Button ref={detailsToggleRef} type="button" className={`icon-button ${inspectorOpen ? "selected" : ""}`} aria-label={inspectorOpen ? "Hide asset details" : "Show asset details"} title={inspectorOpen ? "Hide asset details" : "Show asset details"} aria-expanded={inspectorOpen} aria-controls="asset-inspector" onPress={() => setInspectorOpen(!inspectorOpen)}><Icon as={PanelRight} className="icon" aria-hidden="true" /></Button>
+          </div>
           <div className="content-head">
             <div>
-              <h2>{quick === "favorites" ? "Favorites" : category}</h2>
+              <h2>{quick === "all" ? category : { favorites: "Favorites", pending: "Needs enrichment", flagged: "Flagged", "non-store": "Local only" }[quick]}</h2>
               <p>
-                {filtered.length} of {assets.length} assets visible
+                {filtered.length.toLocaleString()} assets{filtered.length !== assets.length && ` · ${assets.length.toLocaleString()} in library`}
               </p>
             </div>
             <div className="view-controls">
@@ -1086,6 +1385,8 @@ function App() {
                 className={`icon-button ${view === "grid" ? "selected" : ""}`}
                 onPress={() => setView("grid")}
                 aria-label="Grid view"
+                aria-pressed={view === "grid"}
+                title="Grid view"
               >
                 <Icon
                   as={LayoutGrid}
@@ -1099,6 +1400,8 @@ function App() {
                 className={`icon-button ${view === "list" ? "selected" : ""}`}
                 onPress={() => setView("list")}
                 aria-label="List view"
+                aria-pressed={view === "list"}
+                title="List view"
               >
                 <Icon
                   as={List}
@@ -1107,6 +1410,27 @@ function App() {
                   focusable={false}
                 />
               </Button>
+              <Select
+                className="sort-control"
+                selectedValue={author ? `author:${author}` : "all"}
+                initialLabel={author || "All authors"}
+                onValueChange={(value: string) => setAuthor(value === "all" ? "" : value.slice(7))}
+              >
+                <SelectTrigger className="sort-trigger">
+                  <SelectInput className="sort-input" placeholder="Filter by author" aria-label="Filter by author" />
+                  <SelectIcon>
+                    <Icon as={ChevronDown} className="icon" aria-hidden="true" focusable={false} />
+                  </SelectIcon>
+                </SelectTrigger>
+                <SelectPortal>
+                  <SelectContent className="sort-menu">
+                    <SelectItem value="all" label="All authors" className="sort-option" />
+                    {authors.map((name) => (
+                      <SelectItem key={name} value={`author:${name}`} label={name} className="sort-option" />
+                    ))}
+                  </SelectContent>
+                </SelectPortal>
+              </Select>
               <Select
                 className="sort-control"
                 selectedValue={sort}
@@ -1155,13 +1479,26 @@ function App() {
               </Select>
             </div>
           </div>
+          {(query || category !== "All assets" || quick !== "all" || author || untagged || selectedTags.length > 0) && <div className="filter-context" aria-label="Active filters">
+            {quick !== "all" && <Button className="filter-chip" aria-label="Remove library filter" onPress={() => setQuick("all")}>{ { favorites: "Favorites", pending: "Needs enrichment", flagged: "Flagged", "non-store": "Local only" }[quick]}<Icon as={X} className="icon" aria-hidden="true" /></Button>}
+            {category !== "All assets" && <Button className="filter-chip" aria-label="Remove category filter" onPress={() => setCategory("All assets")}>{category}<Icon as={X} className="icon" aria-hidden="true" /></Button>}
+            {author && <Button className="filter-chip" aria-label="Remove author filter" onPress={() => setAuthor("")}>Author: {author}<Icon as={X} className="icon" aria-hidden="true" /></Button>}
+            {untagged && <Button className="filter-chip" aria-label="Remove untagged filter" onPress={() => setUntagged(false)}>Untagged<Icon as={X} className="icon" aria-hidden="true" /></Button>}
+            {selectedTags.map((tag) => (
+              <Button key={tag} className="filter-chip" aria-label={`Remove tag filter ${tag}`} onPress={() => setSelectedTags((current) => current.filter((item) => item !== tag))}>Tag: {tag}<Icon as={X} className="icon" aria-hidden="true" /></Button>
+            ))}
+            {selectedTags.length > 1 && (
+              <Button className="filter-chip" aria-label={`Switch to matching ${tagMode === "all" ? "any" : "all"} selected tags`} onPress={() => setTagMode(tagMode === "all" ? "any" : "all")}>
+                {tagMode === "all" ? "Match all tags" : "Match any tags"}
+              </Button>
+            )}
+            {query && <Button className="filter-chip" aria-label="Remove search filter" onPress={() => setQuery("")}>Search: {query}<Icon as={X} className="icon" aria-hidden="true" /></Button>}
+            <Button className="filter-reset" onPress={clearFilters}>Clear filters</Button>
+          </div>}
           {actionStatus && !dismissedIds.has(actionStatus.id) && <ActionProgress job={actionStatus} onDismiss={dismissAction} announce={!(dialog && actionStatus.phase === "apply")} />}
           {state?.job && !dismissedIds.has(state.job.id) && <ActionProgress job={state.job} onDismiss={dismissEnrich} />}
           {loading ? (
-            <div className="loading-state">
-              <Spinner className="spinner" aria-label="loading" />
-              Loading your library
-            </div>
+            <div className="library-loading" role="status" aria-label="Loading your library"><span>Loading your library…</span><div className="asset-grid" aria-hidden="true">{Array.from({ length: 8 }, (_, index) => <div className="asset-skeleton" key={index}><div /><span /><span /></div>)}</div></div>
           ) : assets.length === 0 ? (
             <div className="empty-state">
               <Icon as={Folder} className="icon empty-mark" aria-hidden="true" focusable={false} />
@@ -1171,13 +1508,14 @@ function App() {
             </div>
           ) : filtered.length ? (
             <div className={view === "grid" ? "asset-grid" : "asset-list"}>
+              {view === "list" && <div className="list-heading" aria-hidden="true"><span>Asset</span><span>Author</span><span>Category</span><span>Version</span><span /></div>}
               {filtered.map((asset) => (
                 <div className="asset-cell" key={asset.asset_key}>
                   <AssetCard
                     asset={asset}
                     selected={asset.asset_key === selected?.asset_key}
                     view={view}
-                    onClick={() => setSelectedKey(asset.asset_key)}
+                    onClick={() => { setSelectedKey(asset.asset_key); if (window.innerWidth < 768) setInspectorOpen(true); }}
                   />
                   <StarButton
                     assetKey={asset.asset_key}
@@ -1194,12 +1532,18 @@ function App() {
               <Icon as={quick === "favorites" ? Star : CircleSlash} className="icon empty-mark" aria-hidden="true" focusable={false} />
               <h3>{quick === "favorites" && favoriteCount === 0 ? "No favorites yet" : "No assets match"}</h3>
               <p>{quick === "favorites" && favoriteCount === 0 ? "Star assets to pin them here." : "Try clearing a filter or searching for a broader term."}</p>
-              <Button type="button" className="button quiet" onPress={() => { setQuery(""); setCategory("All assets"); setQuick("all"); }}>Clear filters</Button>
+              <Button type="button" className="button quiet" onPress={clearFilters}>Clear filters</Button>
             </div>
           )}
         </section>
 
-        <aside className="inspector">
+        <aside className="inspector" id="asset-inspector" aria-label="Asset details" hidden={!inspectorOpen}>
+          <div className="inspector-heading">
+            <span>Asset details</span>
+            <Button ref={detailsCloseRef} type="button" className="icon-button" aria-label="Close asset details" onPress={() => setInspectorOpen(false)}>
+              <Icon as={X} className="icon" aria-hidden="true" />
+            </Button>
+          </div>
           {selected ? (
             <Inspector
               asset={selected}
@@ -1207,6 +1551,11 @@ function App() {
               favoritePending={selected ? favPending.has(selected.asset_key) : false}
               onToggleFavorite={toggleFavorite}
               onOpen={(url) => void api.openExternal(url)}
+              allTags={userTags?.tags || []}
+              tagBusy={tagBusy || !userTags || storageBusy || loading}
+              tagError={tagError}
+              onAssign={assignTag}
+              onRemove={removeTag}
               onReveal={(filePath) => {
                 void api.revealItem(filePath).catch((cause) => {
                   setError(cause instanceof Error ? cause.message : "The file could not be revealed.");
@@ -1258,15 +1607,17 @@ function AssetCard({
       <Button
         type="button"
         className={`list-row ${selected ? "selected" : ""}`}
+        aria-pressed={selected}
+        title={asset.name}
         onPress={onClick}
       >
         <span className="list-name">
-          <span className="list-avatar">{initials(asset)}</span>
+          <span className="list-avatar">{asset.thumbnail?.remote ? <img src={asset.thumbnail.remote} loading="lazy" alt="" /> : initials(asset)}</span>
           <strong>{asset.name}</strong>
         </span>
         <span>{asset.author || "Unknown author"}</span>
         <span>{asset.category?.path || "Uncategorized"}</span>
-        <span>{asset.upstream_version || "—"}</span>
+        <span>{asset.upstream_version || "Not available"}</span>
         <span>{flagged ? <span className="flag-dot" /> : ""}</span>
       </Button>
     );
@@ -1274,6 +1625,8 @@ function AssetCard({
     <Button
       type="button"
       className={`asset-card ${selected ? "selected" : ""}`}
+      aria-pressed={selected}
+      title={asset.name}
       onPress={onClick}
     >
       <div className="thumb">
@@ -1282,9 +1635,7 @@ function AssetCard({
         ) : (
           <span>{initials(asset)}</span>
         )}
-        <span className="source-badge">
-          {asset.non_store ? "LOCAL" : "STORE"}
-        </span>
+        {asset.non_store && <span className="source-badge">LOCAL</span>}
       </div>
       <div className="card-copy">
         <div className="card-title">{asset.name}</div>
@@ -1305,6 +1656,11 @@ function Inspector({
   onToggleFavorite,
   onOpen,
   onReveal,
+  allTags,
+  tagBusy,
+  tagError,
+  onAssign,
+  onRemove,
 }: {
   asset: Asset;
   favorited: boolean;
@@ -1312,11 +1668,15 @@ function Inspector({
   onToggleFavorite: (assetKey: string, favorite: boolean) => void;
   onOpen: (url: string) => void;
   onReveal: (filePath: string) => void;
+  allTags: string[];
+  tagBusy: boolean;
+  tagError: string;
+  onAssign: (assetKey: string, tag: string) => Promise<void>;
+  onRemove: (assetKey: string, tag: string) => Promise<void>;
 }) {
   const onDisk = (asset.versions || []).find((version) => version.file);
   return (
     <div className="inspector-inner">
-      <div className="inspector-kicker">ASSET DETAILS</div>
       <div
         className="inspector-hero"
         style={
@@ -1325,8 +1685,7 @@ function Inspector({
             : undefined
         }
       >
-        <h2>{asset.name}</h2>
-        <p>{asset.author || "Unknown author"}</p>
+        {!asset.thumbnail?.remote && <span className="inspector-placeholder">{initials(asset)}</span>}
         <StarButton
           assetKey={asset.asset_key}
           name={asset.name}
@@ -1336,6 +1695,7 @@ function Inspector({
           hero
         />
       </div>
+      <div className="inspector-title"><h2>{asset.name}</h2><p>{asset.author || "Unknown author"}</p></div>
       <div className="inspector-actions">
         {asset.store && (
           <Button
@@ -1369,7 +1729,23 @@ function Inspector({
         )}
       </div>
       <div className="detail-block">
-        <div className="section-label">At a glance</div>
+        <div className="section-label">
+          On disk <span>{asset.versions?.length || 0}</span>
+        </div>
+        <div className="version-list">
+          {!asset.versions?.length && <p className="muted">No local archives indexed for this asset.</p>}
+          {(asset.versions || []).map((version, index) => (
+            <div key={(version.file || "Unnamed file") + "-" + index}>
+              <span className="version-filename" title={version.file}>{version.file?.split(/[\\/]/).pop() || "Unnamed file"}</span>
+              {version.file && <details className="version-path"><summary>File path</summary><code>{version.file}</code></details>}
+              <small>{version.duplicate ? "Duplicate" : "Archive"}{version.size_bytes != null ? ` · ${formatBytes(version.size_bytes)}` : ""}</small>
+              {version.file && <Button className="file-reveal" onPress={() => onReveal(version.file!)} aria-label={`Reveal ${version.file} in Finder`}><Icon as={FolderOpen} className="icon" aria-hidden="true" />Reveal in Finder</Button>}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="detail-block">
+        <div className="section-label">Store metadata</div>
         <dl>
           <div>
             <dt>Category</dt>
@@ -1377,43 +1753,47 @@ function Inspector({
           </div>
           <div>
             <dt>Local name</dt>
-            <dd>{asset.local_name || "—"}</dd>
+            <dd>{asset.local_name || "Not available"}</dd>
           </div>
           <div>
             <dt>Store ID</dt>
-            <dd>{asset.store_id || "—"}</dd>
+            <dd>{asset.store_id || "Not available"}</dd>
           </div>
           <div>
-            <dt>Latest version</dt>
-            <dd>{asset.upstream_version || "—"}</dd>
+            <dt>Store version</dt>
+            <dd>{asset.upstream_version || "Not available"}</dd>
           </div>
         </dl>
       </div>
-      {(asset.tags || []).length > 0 && (
-        <div className="detail-block">
-          <div className="section-label">Tags</div>
-          <div className="tag-list">
-            {asset.tags!.map((tag) => (
-              <span key={tag} className="tag">
-                {tag}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
       <div className="detail-block">
-        <div className="section-label">
-          On disk <span>{asset.versions?.length || 0}</span>
-        </div>
-        <div className="version-list">
-          {(asset.versions || []).slice(0, 5).map((version, index) => (
-            <div key={(version.file || "Unnamed file") + "-" + index}>
-              <span>{version.file || "Unnamed file"}</span>
-              <small>{version.duplicate ? "Duplicate" : "Archive"}</small>
-            </div>
+        <div className="section-label">Tags</div>
+        {tagError && <p className="tag-note danger-text" role="alert">{tagError}</p>}
+        <div className="tag-list">
+          {(asset.tags || []).map((tag) => (
+            <span key={tag} className="tag">
+              {tag}
+              <button
+                type="button"
+                className="tag-remove"
+                aria-label={`Remove tag ${tag}`}
+                disabled={tagBusy}
+                onClick={() => void onRemove(asset.asset_key, tag).catch(() => {})}
+              >
+                ×
+              </button>
+            </span>
           ))}
+          {!(asset.tags || []).length && <span className="tag-note">No tags yet.</span>}
         </div>
+        <TagEditor key={asset.asset_key}
+          assetKey={asset.asset_key}
+          allTags={allTags}
+          assigned={asset.tags || []}
+          busy={tagBusy}
+          onAssign={onAssign}
+        />
       </div>
+
     </div>
   );
 }
@@ -1708,7 +2088,7 @@ function ActionDialog({
             isDisabled={busy}
             autoFocus
           >
-            Cancel
+            {applyApplied ? "Done" : "Cancel"}
           </Button>
           <Button
             type="button"
@@ -1731,6 +2111,190 @@ function ActionDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+function TagEditor({
+  assetKey,
+  allTags,
+  assigned,
+  busy,
+  onAssign,
+}: {
+  assetKey: string;
+  allTags: string[];
+  assigned: string[];
+  busy: boolean;
+  onAssign: (assetKey: string, tag: string) => Promise<void>;
+}) {
+  const [value, setValue] = useState("");
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const assignedSet = new Set(assigned);
+  const draft = value.trim().toLowerCase();
+  const suggestions = draft
+    ? allTags.filter((tag) => !assignedSet.has(tag) && tag.includes(draft)).slice(0, 6)
+    : [];
+  const canAdd = draft.length > 0 && !assignedSet.has(draft);
+  async function submit(tag: string) {
+    if (!tag || assignedSet.has(tag) || busy) return;
+    try {
+      await onAssign(assetKey, tag);
+      setValue("");
+      setShowSuggestions(false);
+    } catch {
+      // Error is surfaced by the parent's tagError message.
+    }
+  }
+  return (
+    <div className="tag-editor">
+      <Input className="tag-add">
+        <InputField
+          value={value}
+          onChangeText={(next: string) => { setValue(next); setShowSuggestions(true); }}
+          placeholder="Add a tag…"
+          aria-label={`Add tag to ${assetKey}`}
+        />
+      </Input>
+      <Button type="button" className="button quiet" isDisabled={!canAdd || busy} onPress={() => void submit(draft)}>
+        Add
+      </Button>
+      {showSuggestions && suggestions.length > 0 && (
+        <ul className="tag-suggestions" aria-label="Existing tags">
+          {suggestions.map((tag) => (
+            <li key={tag}>
+              <Button type="button" className="tag-suggestion" isDisabled={busy} onPress={() => void submit(tag)}>
+                {tag}
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function TagManager({
+  tags,
+  counts,
+  busy,
+  error,
+  onMutate,
+}: {
+  tags: string[];
+  counts: Map<string, number>;
+  busy: boolean;
+  error: string;
+  onMutate: (change: TagChange) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [newTag, setNewTag] = useState("");
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  async function run(change: TagChange) {
+    try {
+      await onMutate(change);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  async function create() {
+    const tag = newTag.trim().toLowerCase();
+    if (!tag) return;
+    if (await run({ action: "create", tag })) setNewTag("");
+  }
+  async function submitRename() {
+    if (!renaming) return;
+    const next = renameValue.trim().toLowerCase();
+    if (!next) return;
+    if (await run({ action: "rename", tag: renaming, new_tag: next })) {
+      setRenaming(null);
+      setRenameValue("");
+    }
+  }
+  async function submitDelete() {
+    if (!deleteTarget) return;
+    if (await run({ action: "delete", tag: deleteTarget })) setDeleteTarget(null);
+  }
+  const deleteCount = deleteTarget ? counts.get(deleteTarget) || 0 : 0;
+  return (
+    <div className="tag-manage">
+      <Button type="button" className="nav-row" aria-expanded={open} onPress={() => setOpen(!open)}>
+        <span>Manage tags</span>
+      </Button>
+      {open && (
+        <div className="tag-manage-body">
+          <div className="tag-editor">
+            <Input className="tag-add">
+              <InputField value={newTag} onChangeText={setNewTag} placeholder="New tag" aria-label="New tag name" />
+            </Input>
+            <Button type="button" className="button quiet" isDisabled={busy || !newTag.trim()} onPress={() => void create()}>
+              Create
+            </Button>
+          </div>
+          <ul className="tag-manage-list">
+            {[...tags].sort((a, b) => a.localeCompare(b)).map((tag) => (
+              <li key={tag} className="tag-manage-row">
+                {renaming === tag ? (
+                  <>
+                    <Input className="tag-add">
+                      <InputField value={renameValue} onChangeText={setRenameValue} aria-label={`Rename tag ${tag}`} />
+                    </Input>
+                    <Button type="button" className="tag-manage-action" isDisabled={busy || !renameValue.trim()} onPress={() => void submitRename()}>Save</Button>
+                    <Button type="button" className="tag-manage-action" isDisabled={busy} onPress={() => setRenaming(null)}>Cancel</Button>
+                  </>
+                ) : (
+                  <>
+                    <span className="tag-manage-name">{tag}</span>
+                    <span className="nav-count" aria-label={`${counts.get(tag) || 0} packages tagged ${tag}`}>{counts.get(tag) || 0}</span>
+                    <Button type="button" className="tag-manage-action" isDisabled={busy} onPress={() => { setRenaming(tag); setRenameValue(tag); }}>Rename</Button>
+                    <Button type="button" className="tag-manage-action danger-text" isDisabled={busy} onPress={() => setDeleteTarget(tag)}>Delete</Button>
+                  </>
+                )}
+              </li>
+            ))}
+            {!tags.length && <li className="tag-note">No tags yet. Create one above.</li>}
+          </ul>
+        </div>
+      )}
+      {deleteTarget !== null && (
+        <AlertDialog
+          isOpen
+          onClose={() => { if (!busy) setDeleteTarget(null); }}
+          isKeyboardDismissable={!busy}
+          closeOnOverlayClick={false}
+          className="dialog-overlay"
+        >
+          <AlertDialogBackdrop className="dialog-backdrop" />
+          <AlertDialogContent className="action-dialog" aria-labelledby="tag-delete-title" aria-describedby="tag-delete-description">
+            <AlertDialogHeader className="dialog-top">
+              <div>
+                <div className="eyebrow">CONFIRMATION REQUIRED</div>
+                <h2 id="tag-delete-title">Delete tag</h2>
+              </div>
+              <Button type="button" className="icon-button" isDisabled={busy} aria-label="Close dialog" onPress={() => setDeleteTarget(null)}>
+                <Icon as={X} className="icon" aria-hidden="true" focusable={false} />
+              </Button>
+            </AlertDialogHeader>
+            <AlertDialogBody>
+              <p id="tag-delete-description" className="dialog-lead">
+                Delete the tag “{deleteTarget}” from {deleteCount} {deleteCount === 1 ? "package" : "packages"}, including packages temporarily absent from this library? Package files will not be changed.
+              </p>
+              {error && <p className="tag-note danger-text" role="alert">{error}</p>}
+            </AlertDialogBody>
+            <AlertDialogFooter className="dialog-foot">
+              <Button type="button" className="button quiet" autoFocus isDisabled={busy} onPress={() => setDeleteTarget(null)}>
+                Cancel
+              </Button>
+              <Button type="button" className="button primary" isDisabled={busy} onPress={() => void submitDelete()}>
+                {busy ? "Deleting…" : "Delete tag"}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+    </div>
   );
 }
 

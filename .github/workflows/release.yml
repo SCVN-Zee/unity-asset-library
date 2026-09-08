@@ -1,0 +1,72 @@
+name: Release app
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.0"
+
+      - name: Verify tag matches package version
+        run: |
+          expected="v$(node -p "require('./package.json').version")"
+          if [[ "$GITHUB_REF_NAME" != "$expected" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME must match $expected"
+            exit 1
+          fi
+
+      - run: npm ci
+      - name: Run backend and desktop checks
+        run: make test
+      - name: Build and verify self-contained installers
+        run: make pack
+      - name: Preserve verified installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64
+          path: |
+            release/*.dmg
+            release/*.zip
+          if-no-files-found: error
+
+      # One publisher, one draft. Expose the release only after both uploads.
+      # Refuse to replace an already published release on a rerun.
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          flags=(--latest)
+          if [[ "$version" == *-* ]]; then
+            flags=(--prerelease --latest=false)
+          fi
+          if draft=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft); then
+            if [[ "$draft" != true ]]; then
+              echo "::error::Release is already published; create a new version instead."
+              exit 1
+            fi
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --draft \
+              --title "$GITHUB_REF_NAME" --notes "macOS Apple Silicon (arm64). Python and dependencies are included; no separate runtime installation is needed. This app is ad-hoc signed, not notarized. If macOS blocks first launch, use System Settings > Privacy & Security > Open Anyway. Updates are installed manually." \
+              "${flags[@]}"
+          fi
+          gh release upload "$GITHUB_REF_NAME" release/*.dmg release/*.zip --clobber
+          gh release edit "$GITHUB_REF_NAME" --draft=false "${flags[@]}"

@@ -34,8 +34,8 @@ pack:
 	node scripts/verify-package.cjs
 
 bump:
-	npm version "$(VERSION)" --no-git-tag-version
+	npm version "$(VERSION)" --no-git-tag-version --allow-same-version
 	@v=$$(node -p "require('./package.json').version") && \
-	  git commit --only -m "chore(release): v$$v" -- package.json package-lock.json && \
+	  git commit --only --allow-empty -m "chore(release): v$$v" -- package.json package-lock.json && \
 	  git tag -a "v$$v" -m "v$$v" && \
 	  echo "Release commit + tag created. Push with: git push --atomic origin $$(git branch --show-current) v$$v"

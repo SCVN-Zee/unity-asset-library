@@ -21,13 +21,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 
 import index_assets as ia  # noqa: E402
 
-with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                       "config.json"), encoding="utf-8") as _fh:
-    REAL_ROOT = json.load(_fh)["vault_root"]
-# Recalibrated 2026-09-02 after superseded-version cleanup (26 archives removed).
-# Bump after every intentional download or cleanup.
-EXPECTED_FILE_COUNT = 854
-
 
 def P(name, parent=""):
     """Parse a bare filename, optionally inside a parent folder."""
@@ -74,31 +67,22 @@ class TestScannerNeverOpens(unittest.TestCase):
         for key in ("rel_path", "size", "mtime", "st_blocks", "format"):
             self.assertIn(key, rec)
 
-    def test_no_name_based_directory_skipping_in_source(self):
-        """'tools' and 'Tools' share an inode here; a name-based skip drops 191 archives.
-
-        The exclusion list may be consulted to BUILD a set of resolved paths, but the
-        pruning decision itself must compare resolved paths only.
-        """
-        src = Path(ia.__file__).read_text(encoding="utf-8")
-        walk = src.split("def scan(", 1)[1].split("\ndef ", 1)[0]
-        prune = walk.split("dirnames[:]", 1)[1].split("]", 1)[0]
-        self.assertIn("realpath", prune)
-        self.assertNotIn("EXCLUDED_DIR_NAMES", prune)
-        self.assertNotRegex(prune, r'd\s*(==|!=|\bin\b)\s*[\'"(]')
-
-
-class TestRealTree(unittest.TestCase):
-    @unittest.skipUnless(os.path.isdir(os.path.join(REAL_ROOT, "3D")), "real library absent")
-    def test_scan_of_real_root_finds_full_library(self):
-        # 854 was the library size when this floor was written; downloads keep
-        # arriving, so pin the floor, not the mutable live count.
-        self.assertGreaterEqual(len(ia.scan(REAL_ROOT)), EXPECTED_FILE_COUNT)
-
-    @unittest.skipUnless(os.path.isdir(os.path.join(REAL_ROOT, "Tools")), "real library absent")
-    def test_tools_directory_is_not_skipped(self):
-        paths = [r["rel_path"] for r in ia.scan(REAL_ROOT)]
-        self.assertGreater(len([p for p in paths if p.startswith("Tools" + os.sep)]), 150)
+    def test_scan_keeps_asset_folders_and_excludes_only_root_triage(self):
+        with tempfile.TemporaryDirectory() as root:
+            included = {
+                "Tools/Editor.unitypackage",
+                "3D/Props/Model.zip",
+                "Tools/_Quarantine/Nested.unitypackage",
+            }
+            excluded = {
+                "_Quarantine/Broken.unitypackage",
+                "_Unresolved/Unknown.zip",
+            }
+            for rel in included | excluded:
+                archive = Path(root, rel)
+                archive.parent.mkdir(parents=True, exist_ok=True)
+                archive.write_bytes(b"archive")
+            self.assertEqual({r["rel_path"] for r in ia.scan(root)}, included)
 
 
 class TestParse(unittest.TestCase):

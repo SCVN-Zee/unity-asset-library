@@ -922,15 +922,20 @@ class TestLifecycle(unittest.TestCase):
                                   "bin", "server.py")
 
             def start(identity):
+                env = os.environ.copy()
+                env.pop("PYTHONUNBUFFERED", None)
                 return subprocess.Popen(
                     [sys.executable, script, "--repo", repo, "--instance-id",
                      identity, "--port", str(port)],
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                    env=env)
 
             first = start("restart-one")
             second = None
             client = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
             try:
+                self.assertEqual(select.select([first.stdout], [], [], 10)[0],
+                                 [first.stdout], "server startup output timed out")
                 self.assertIn(str(port), first.stdout.readline())
                 client.request("GET", "/api/state")
                 state_body = json.loads(client.getresponse().read())
@@ -943,6 +948,8 @@ class TestLifecycle(unittest.TestCase):
                 first.terminate()
                 first.wait(timeout=10)
                 second = start("restart-two")
+                self.assertEqual(select.select([second.stdout], [], [], 10)[0],
+                                 [second.stdout], "server restart output timed out")
                 self.assertIn(str(port), second.stdout.readline())
                 client.close()
                 fresh = http.client.HTTPConnection("127.0.0.1", port, timeout=10)

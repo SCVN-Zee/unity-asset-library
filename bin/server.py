@@ -1117,7 +1117,7 @@ def serve(service, port):
         service.shutdown()
         return 2
     url = f"http://127.0.0.1:{port}/"
-    print(f"unity-asset-library API: {url}  (Ctrl-C to stop)")
+    print(f"unity-asset-library API: {url}  (Ctrl-C to stop)", flush=True)
     stopping = threading.Event()
     previous_sigterm = signal.getsignal(signal.SIGTERM)
 

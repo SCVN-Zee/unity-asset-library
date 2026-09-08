@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const vm = require("node:vm");
+const { createRequire } = require("node:module");
 const { execFileSync } = require("node:child_process");
 const asar = require("@electron/asar");
 
@@ -14,17 +15,21 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), "ual-package-"));
 try {
   execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle]);
   assert(asar.extractFile(archive, "dist/renderer/index.html").includes(Buffer.from("<html")));
+  const unpacked = path.join(temp, "app");
+  asar.extractAll(archive, unpacked);
+  const entry = path.join(unpacked, "electron", "main.cjs");
+  const packagedRequire = createRequire(entry);
   // Evaluate the shipped entry point without opening a window or touching user data.
   const app = {
     isPackaged: true, getPath: () => temp, setPath() {},
     whenReady: () => ({ then() {} }), on() {},
   };
   const context = vm.createContext({
-    require: (name) => name === "electron" ? { app } : require(name),
+    require: (name) => name === "electron" ? { app } : packagedRequire(name),
     process: { ...process, env: { PATH: "/nonexistent", HOME: temp }, resourcesPath: resources },
-    __dirname: path.join(resources, "electron"),
+    __dirname: path.dirname(entry),
   });
-  vm.runInContext(asar.extractFile(archive, "electron/main.cjs").toString(), context);
+  vm.runInContext(fs.readFileSync(entry, "utf8"), context);
   const python = vm.runInContext("pythonCommand()", context);
   assert.equal(python, path.join(resources, "python", "bin", "python3"));
   const storage = await vm.runInContext(
@@ -53,7 +58,7 @@ try:
     response.raise_for_status()
     state = response.json()
     assert state["service"] == "unity-asset-library", state
-    assert state["api_version"] == 5 and state["ready"], state
+    assert state["api_version"] == int(sys.argv[3]) and state["ready"], state
     assert state["instance_id"] == "package-smoke", state
     assert os.path.realpath(state["vault_root"]) == os.path.realpath(vault), state
     print("PASS: shipped launcher, bundled Python + requests, child interpreter, configured backend HTTP identity")
@@ -62,7 +67,7 @@ finally:
     thread.join()
     httpd.server_close()
     service.shutdown()
-`, path.join(resources, "ual-backend", "bin"), temp], {
+`, path.join(resources, "ual-backend", "bin"), temp, String(vm.runInContext("API_VERSION", context))], {
     cwd: temp,
     env: { PATH: "/nonexistent", HOME: temp, PYTHONDONTWRITEBYTECODE: "1", PYTHONNOUSERSITE: "1" },
     timeout: 30000,

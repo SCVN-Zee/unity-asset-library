@@ -37,8 +37,8 @@ try {
   assert.equal(storage.needsSetup, true);
   const importWorker = path.join(resources, "ual-backend", "bin", "import_packages.py");
   execFileSync(python, [importWorker, "--help"], { env: { PATH: "/nonexistent", HOME: temp, PYTHONDONTWRITEBYTECODE: "1", PYTHONNOUSERSITE: "1" } });
-  for (const template of ["UnityAssetLibraryImport.cs", "UnityAssetLibraryImport.asmdef"]) {
-    assert(fs.readFileSync(path.join(path.dirname(importWorker), template)).equals(fs.readFileSync(path.join(__dirname, "..", "bin", template))), "Shipped live-import template differs from the verified source");
+  for (const template of ["UnityAssetLibraryImport.cs", "UnityAssetLibraryImport.asmdef", "UnityAssetLibraryBatchRunner.cs", "UnityAssetLibraryBatchRunner.asmdef"]) {
+    assert(fs.readFileSync(path.join(path.dirname(importWorker), template)).equals(fs.readFileSync(path.join(__dirname, "..", "bin", template))), "Shipped import template differs from the verified source");
   }
   assert(!fs.readdirSync(path.join(resources, "python"), { recursive: true })
     .some((name) => name.endsWith(".pyc")), "Launcher must not write bytecode into the signed runtime");

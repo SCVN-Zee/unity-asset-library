@@ -595,6 +595,49 @@ button:focus-visible {
   font-weight: 700;
   letter-spacing: 0.08em;
 }
+.source-badge.availability {
+  color: var(--muted);
+}
+.source-badge.availability[data-availability="cloud_only"],
+.source-badge.availability[data-availability="mixed"] {
+  color: var(--accent);
+}
+.list-row .source-badge {
+  position: static;
+  display: inline-block;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.availability-tag {
+  margin-left: 6px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.availability-tag[data-availability="cloud_only"] { color: var(--accent); }
+.availability-tag[data-availability="missing"] { color: var(--danger, #c0392b); }
+.import-results .prep-progress {
+  display: block;
+  width: 100%;
+  height: 4px;
+  margin-top: 4px;
+  border-radius: 2px;
+  background: var(--line-soft, rgba(128, 128, 128, 0.25));
+  overflow: hidden;
+}
+.import-results .prep-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.prep-bytes {
+  display: block;
+  color: var(--muted);
+}
 .card-copy {
   padding: 12px 5px 6px;
 }

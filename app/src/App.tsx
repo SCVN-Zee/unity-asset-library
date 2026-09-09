@@ -57,7 +57,7 @@ import {
   Star,
   X,
 } from "lucide-react";
-import { ImportDialog, unityPackages } from "./components/ImportDialog";
+import { ImportDialog, availabilityLabel, availabilitySummary, unityPackages } from "./components/ImportDialog";
 
 type QuickFilter = "all" | "favorites" | "pending" | "flagged" | "non-store";
 type ViewMode = "grid" | "list";
@@ -951,6 +951,22 @@ function App() {
     () => [...importSelection].map((key) => assets.find((asset) => asset.asset_key === key)).filter((asset): asset is Asset => Boolean(asset)),
     [importSelection, assets],
   );
+  const refreshEpochRef = useRef(0);
+  const refreshAssets = useCallback(async () => {
+    const epoch = ++refreshEpochRef.current;
+    const storageEpoch = storageEpochRef.current;
+    try {
+      const index = await api.getAssets();
+      if (epoch !== refreshEpochRef.current || storageEpoch !== storageEpochRef.current) return;
+      setAssets(index.assets || []);
+      setSelectedKey((current) => current && index.assets.some((asset) => asset.asset_key === current) ? current : index.assets[0]?.asset_key || null);
+    } catch {
+      // Availability refresh is best-effort browsing metadata; keep the current view.
+    }
+  }, []);
+  useEffect(() => {
+    if (importJob && ["completed", "failed", "cancelled"].includes(importJob.status)) void refreshAssets();
+  }, [importJob?.id, importJob?.status, refreshAssets]);
   const displayAssets = useMemo<Asset[]>(() => {
     if (!userTags) return [];
     return assets.map((asset) => ({ ...asset, tags: userTags.assignments[asset.asset_key] || [] }));
@@ -1794,6 +1810,7 @@ function App() {
           onClose={() => setImportOpen(false)}
           onStart={startImport}
           onStop={stopImport}
+          onRefreshAssets={refreshAssets}
         />
       )}
     </div>
@@ -1811,6 +1828,7 @@ function AssetCard({
   view: ViewMode;
   onClick: (event: { metaKey: boolean; shiftKey: boolean }) => void;
 }) {
+  const availability = availabilitySummary(asset.versions || []);
   const flagged = (asset.flags || []).length > 0;
   if (view === "list")
     return (
@@ -1828,7 +1846,7 @@ function AssetCard({
         <span>{asset.author || "Unknown author"}</span>
         <span>{asset.category?.path || "Uncategorized"}</span>
         <span>{asset.upstream_version || "Not available"}</span>
-        <span>{flagged ? <span className="flag-dot" /> : ""}</span>
+        <span>{flagged ? <span className="flag-dot" /> : ""}{availability && <span className="source-badge availability" data-availability={availability.kind} title={availability.label}>{availability.short}</span>}</span>
       </Button>
     );
   return (
@@ -1846,6 +1864,7 @@ function AssetCard({
           <span>{initials(asset)}</span>
         )}
         {asset.non_store && <span className="source-badge">LOCAL</span>}
+        {availability && <span className="source-badge availability" data-availability={availability.kind} title={availability.label}>{availability.short}</span>}
       </div>
       <div className="card-copy">
         <div className="card-title">{asset.name}</div>
@@ -1940,15 +1959,15 @@ function Inspector({
       </div>
       <div className="detail-block">
         <div className="section-label">
-          On disk <span>{asset.versions?.length || 0}</span>
+          Archive versions <span>{asset.versions?.length || 0}</span>
         </div>
         <div className="version-list">
-          {!asset.versions?.length && <p className="muted">No local archives indexed for this asset.</p>}
+          {!asset.versions?.length && <p className="muted">No archives indexed for this asset.</p>}
           {(asset.versions || []).map((version, index) => (
             <div key={(version.file || "Unnamed file") + "-" + index}>
               <span className="version-filename" title={version.file}>{version.file?.split(/[\\/]/).pop() || "Unnamed file"}</span>
               {version.file && <details className="version-path"><summary>File path</summary><code>{version.file}</code></details>}
-              <small>{version.duplicate ? "Duplicate" : "Archive"}{version.size_bytes != null ? ` · ${formatBytes(version.size_bytes)}` : ""}</small>
+              <small>{version.duplicate ? "Duplicate" : "Archive"}{version.size_bytes != null ? ` · ${formatBytes(version.size_bytes)}` : ""}{availabilityLabel(version.availability) ? ` · ${availabilityLabel(version.availability)}` : ""}</small>
               {version.file && <Button className="file-reveal" onPress={() => onReveal(version.file!)} aria-label={`Reveal ${version.file} in Finder`}><Icon as={FolderOpen} className="icon" aria-hidden="true" />Reveal in Finder</Button>}
             </div>
           ))}

@@ -75,7 +75,9 @@
         "filter": [
           "**/*.py",
           "UnityAssetLibraryImport.cs",
-          "UnityAssetLibraryImport.asmdef"
+          "UnityAssetLibraryImport.asmdef",
+          "UnityAssetLibraryBatchRunner.cs",
+          "UnityAssetLibraryBatchRunner.asmdef"
         ]
       },
       {

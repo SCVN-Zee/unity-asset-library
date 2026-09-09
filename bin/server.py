@@ -5,7 +5,7 @@ Serves the React/Electron app's fixed JSON API:
 
     GET  /api/state          pending count, capability token, latest action and job
     GET  /api/action/<id>    action stage, progress, result and terminal error
-    GET  /api/assets         index with authoritative user tags
+    GET  /api/assets         index with authoritative tags and live archive availability
     GET  /api/tags           lowercase tag catalog and package assignments
     POST /api/tags           create, rename, delete, assign or remove a user tag
     POST /api/resync/plan    read-only index change preview
@@ -43,6 +43,7 @@ import os
 import re
 import secrets
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -422,11 +423,38 @@ class ViewerService:
     # -- user tags ------------------------------------------------------------
 
     def op_assets(self):
-        """User tags are authoritative: the store overlays the index's tags."""
+        """Overlay authoritative tags and current metadata-only availability."""
         try:
-            return user_tags.overlay(self._load_assets(), self.state)
+            data = user_tags.overlay(self._load_assets(), self.state)
         except user_tags.TagStoreError as exc:
             raise SafetyError(str(exc)) from exc
+        root = os.path.realpath(self.root)
+        for asset in data.get("assets", []):
+            for version in asset.get("versions", []):
+                version["availability"] = self._archive_availability(root, version.get("file"))
+        return data
+
+    @staticmethod
+    def _archive_availability(root, relative):
+        # Never open an archive here: reading a placeholder downloads it.
+        if not isinstance(relative, str) or not relative or "\0" in relative or os.path.isabs(relative):
+            return "unknown"
+        try:
+            path = os.path.realpath(os.path.join(root, relative))
+            if not path.startswith(root + os.sep):
+                return "unknown"
+            info = os.stat(path)
+            if not stat.S_ISREG(info.st_mode):
+                return "missing"
+            if sys.platform == "darwin":
+                # Python 3.12 lacks the named Darwin flag (sys/stat.h).
+                dataless = getattr(stat, "SF_DATALESS", 0x40000000)
+                return "cloud_only" if info.st_flags & dataless else "local"
+            return "unknown"
+        except FileNotFoundError:
+            return "missing"
+        except OSError:
+            return "unknown"
 
     def op_tags(self):
         try:

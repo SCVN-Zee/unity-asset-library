@@ -26,6 +26,26 @@ function formatBytes(bytes: number) {
 export function unityPackages(asset: Asset) {
   return (asset.versions || []).filter((version) => (version.file || "").toLowerCase().endsWith(".unitypackage"));
 }
+const AVAILABILITY_LABELS: Record<NonNullable<AssetVersion["availability"]>, string> = {
+  cloud_only: "Cloud only",
+  local: "Local",
+  unknown: "Availability unknown",
+  missing: "Missing",
+};
+
+export function availabilityLabel(availability?: AssetVersion["availability"]) {
+  return availability ? AVAILABILITY_LABELS[availability] : null;
+}
+export function availabilitySummary(versions: AssetVersion[]) {
+  const statuses = (versions || []).map((version) => version.availability);
+  if (!statuses.length || statuses.every((status) => status == null)) return null;
+  if (statuses.every((status) => status === "local")) return { label: "Available locally", short: "ON DISK", kind: "local" };
+  if (statuses.every((status) => status === "cloud_only")) return { label: "Cloud only", short: "CLOUD", kind: "cloud_only" };
+  if (statuses.every((status) => status === "unknown")) return { label: "Availability unknown", short: "UNKNOWN", kind: "unknown" };
+  if (statuses.every((status) => status === "missing")) return { label: "Missing", short: "MISSING", kind: "missing" };
+  return { label: "Mixed availability", short: "MIXED", kind: "mixed" };
+}
+
 
 type ImportDialogProps = {
   assets: Asset[];
@@ -34,9 +54,10 @@ type ImportDialogProps = {
   onClose: () => void;
   onStart: (request: ImportRequest) => Promise<void>;
   onStop: () => void;
+  onRefreshAssets: () => Promise<void>;
 };
 
-export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onStop }: ImportDialogProps) {
+export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onStop, onRefreshAssets }: ImportDialogProps) {
   const running = Boolean(job && ["queued", "running"].includes(job.status));
   const [order, setOrder] = useState<Asset[]>(assets);
   const [chosen, setChosen] = useState<Record<string, string>>(() => {
@@ -71,6 +92,28 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
       setProjectsError(cause instanceof Error ? cause.message : "Could not load Unity Hub projects.");
     }
   }
+  const [refreshing, setRefreshing] = useState(false);
+  useEffect(() => {
+    setOrder((current) => {
+      const byKey = new Map(assets.map((asset) => [asset.asset_key, asset]));
+      const kept = current.map((asset) => byKey.get(asset.asset_key)).filter((asset): asset is Asset => Boolean(asset));
+      const keptKeys = new Set(kept.map((asset) => asset.asset_key));
+      return [...kept, ...assets.filter((asset) => !keptKeys.has(asset.asset_key))];
+    });
+    setChosen((current) => Object.fromEntries(assets.map((asset) => [
+      asset.asset_key,
+      unityPackages(asset).some((version) => version.file === current[asset.asset_key]) ? current[asset.asset_key] : "",
+    ])));
+  }, [assets]);
+  async function refreshAssets() {
+    setRefreshing(true);
+    try {
+      await onRefreshAssets();
+    } finally {
+      setRefreshing(false);
+    }
+  }
+  useEffect(() => { void refreshAssets(); }, []);
   useEffect(() => { void loadProjects(); }, []);
 
   async function inspect(path: string) {
@@ -127,7 +170,7 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
     }
   }
 
-  const allChosen = order.every((asset) => chosen[asset.asset_key]);
+  const allChosen = order.length > 0 && order.every((asset) => unityPackages(asset).some((version) => version.file === chosen[asset.asset_key]));
   const closedModeBlocked = Boolean(projectInfo?.open);
   const liveModeBlocked = Boolean(projectInfo && !projectInfo.open);
   const liveStartBlocked = Boolean(projectInfo && !projectInfo.bridge_ready);
@@ -186,12 +229,14 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
         <AlertDialogBody>
           {showSetup && (
             <>
-              <p className="dialog-lead">Choose the exact archive version for each package, order them, and pick a Unity project. Packages overwrite existing files in the project. There is no rollback.</p>
+              <p className="dialog-lead">Pick an archive version and order for each package, then choose a Unity project. Packages are staged locally (up to 3 at a time), imported in order, and the batch stops at the first failure. Packages overwrite existing files — there is no rollback.</p>
               <section className="import-section" aria-label="Packages">
+                {refreshing && <p className="muted" role="status">Refreshing availability…</p>}
                 <h3>Packages <span>{order.length}</span></h3>
                 <ol className="import-packages">
                   {order.map((asset, index) => {
                     const packages = unityPackages(asset);
+                    const availability = availabilityLabel(packages[0]?.availability);
                     return (
                       <li key={asset.asset_key}>
                         <div className="import-package-order">
@@ -200,24 +245,27 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
                         </div>
                         <div className="import-package-main">
                           <strong title={asset.name}>{asset.name}</strong>
-                          {packages.length > 1 ? (
+                          {packages.length > 1 || !chosen[asset.asset_key] ? (
                             <select
                               className="native-select"
                               value={chosen[asset.asset_key] || ""}
-                              onChange={(event) => setChosen((current) => ({ ...current, [asset.asset_key]: event.target.value }))}
+                              onChange={(event) => { setChosen((current) => ({ ...current, [asset.asset_key]: event.target.value })); void refreshAssets(); }}
                               aria-label={`Archive version for ${asset.name}`}
                             >
                               <option value="" disabled>Choose archive version…</option>
-                              {packages.map((version) => (
-                                <option key={version.file} value={version.file || ""}>
-                                  {(version.file || "").split(/[\\/]/).pop()}{version.size_bytes != null ? ` · ${formatBytes(version.size_bytes)}` : ""}{version.editor_version ? ` · ${version.editor_version}` : ""}
-                                </option>
-                              ))}
+                              {packages.map((version) => {
+                                const label = availabilityLabel(version.availability);
+                                return (
+                                  <option key={version.file} value={version.file || ""}>
+                                    {(version.file || "").split(/[\\/]/).pop()}{version.size_bytes != null ? ` · ${formatBytes(version.size_bytes)}` : ""}{version.editor_version ? ` · ${version.editor_version}` : ""}{label ? ` · ${label}` : ""}
+                                  </option>
+                                );
+                              })}
                             </select>
                           ) : (
-                            <span className="import-package-file" title={packages[0]?.file}>{(packages[0]?.file || "").split(/[\\/]/).pop()}</span>
+                            <span className="import-package-file" title={packages[0]?.file}>{(packages[0]?.file || "").split(/[\\/]/).pop()}{availability && <span className="availability-tag" data-availability={packages[0]?.availability}>{availability}</span>}</span>
                           )}
-                          {!chosen[asset.asset_key] && packages.length > 1 && <span className="import-warning-text" role="alert">Pick an archive version — several are indexed and none is chosen by default.</span>}
+                          {!chosen[asset.asset_key] && <span className="import-warning-text" role="alert">Choose the exact archive version to import.</span>}
                         </div>
                       </li>
                     );
@@ -258,7 +306,7 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
                     <legend>Import mode</legend>
                     <label className="import-mode-option">
                       <input type="radio" name="import-mode" value="closed" checked={mode === "closed"} onChange={() => setMode("closed")} disabled={closedModeBlocked || installingBridge} />
-                      Closed project — launches Unity headlessly, then quits
+                      Closed project — imports the batch in one headless Unity session, then quits. A temporary Editor runner is added and removed for this batch.
                       {closedModeBlocked && <span className="import-warning-text">The project is currently open in Unity. Close it or use live mode.</span>}
                     </label>
                     <label className="import-mode-option">
@@ -302,6 +350,15 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
                       <td title={row.file}>{row.file.split(/[\\/]/).pop() || "—"}</td>
                       <td>
                         {row.status === "pending" && "Pending"}
+                        {(row.status === "preparing" || row.status === "downloading") && (
+                          <>
+                            <Spinner className="spinner" aria-label={row.status === "preparing" ? "Preparing" : "Downloading"} />
+                            {" "}{row.status === "preparing" ? "Preparing staging copy…" : "Downloading…"}
+                            {row.bytes_total ? <small className="prep-bytes">{formatBytes(row.bytes_completed ?? 0)} / {formatBytes(row.bytes_total)}</small> : null}
+                            {row.bytes_total ? <span className="prep-progress" role="progressbar" aria-label="Download progress" aria-valuemin={0} aria-valuemax={row.bytes_total} aria-valuenow={row.bytes_completed ?? 0}><span className="prep-progress-fill" style={{ width: `${Math.min(100, Math.round(((row.bytes_completed ?? 0) / row.bytes_total) * 100))}%` }} /></span> : null}
+                          </>
+                        )}
+                        {row.status === "ready" && "Staged locally"}
                         {row.status === "importing" && <><Spinner className="spinner" aria-label="Importing" /> Importing…</>}
                         {row.status === "imported" && "Imported"}
                         {row.status === "failed" && <span className="danger-text">Failed{row.error ? ` — ${row.error}` : ""}</span>}

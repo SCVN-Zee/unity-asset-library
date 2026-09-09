@@ -13,20 +13,22 @@ const fixtures = [
   { asset_key: 'tools-favorite', name: 'Editor Tool', author: 'Studio', category: { path: 'Tools', levels: ['Tools'] }, versions: [{ file: 'Editor.unitypackage' }] },
   { asset_key: 'docs', name: 'Documentation', author: 'Studio', versions: [{ file: 'Docs.zip' }] },
 ];
+fixtures[0].versions[0].availability = "cloud_only";
+fixtures[1].versions[0].availability = "local";
 const preload = path.join(temporary, 'preload.cjs');
 fs.writeFileSync(preload, `const favorites = new Set(['audio-favorite', 'tools-favorite']); require('electron').contextBridge.exposeInMainWorld('ual', {
   getStorage: async () => ({ path: '/fixture', ready: true, canChange: true, busy: false }),
   getState: async () => ({ pending_enrichment: 0, job: null, action: null, ready: true, vault_root: '/fixture' }),
-  getAssets: async () => ({ assets: ${JSON.stringify(fixtures)} }),
+  getAssets: async () => ({ assets: JSON.parse(localStorage.getItem("ual:test-assets") || ${JSON.stringify(JSON.stringify(fixtures))}) }),
   favorites: async () => ({ favorites: [...favorites] }),
   setFavorite: async (key, enabled) => { if (enabled) favorites.add(key); else favorites.delete(key); return { favorites: [...favorites] }; },
   getTags: async () => ({ tags: [], assignments: {} }),
   getPreferences: async () => { try { return JSON.parse(localStorage.getItem('ual:prefs') || '{}'); } catch { return {}; } },
   setPreferences: async (prefs) => { localStorage.setItem('ual:prefs', JSON.stringify(prefs)); return prefs; },
   getLegacyLibraryRoot: async () => null,
-  importProjects: async () => [],
+  importProjects: async () => [{ path: "/fixture/project", title: "Fixture", version: "6000.3.15f1" }],
   chooseImportProject: async () => null,
-  inspectImportProject: async () => ({ path: '', title: '', version: '', open: false, bridge_installed: false, bridge_ready: false }),
+  inspectImportProject: async (path) => ({ path, title: "Fixture", version: "6000.3.15f1", open: false, bridge_installed: false, bridge_ready: false }),
   installImportBridge: async () => ({ path: '', title: '', version: '', open: false, bridge_installed: false, bridge_ready: false }),
   startImport: async () => { throw new Error('not wired in fixture'); },
   getImport: async () => JSON.parse(localStorage.getItem("ual:test-import") || "null"),
@@ -60,6 +62,8 @@ app.whenReady().then(async () => {
     await win.loadFile(path.join(__dirname, '../dist/renderer/index.html'));
     await waitFor('document.querySelector("img.brand-mark")?.naturalWidth > 0');
     await waitFor('document.querySelectorAll(".asset-card").length === 4');
+    assert.equal(await evaluate(`document.querySelector('[title="Forest Audio"] .availability').getAttribute("data-availability")`), "cloud_only");
+    assert.equal(await evaluate(`document.querySelector('[title="City Audio"] .availability').getAttribute("data-availability")`), "local");
     await click('.side-section .nav-row:nth-of-type(2)');
     await waitFor('document.querySelectorAll(".asset-card").length === 2');
     await click('.category-tree button[title="Audio"]');
@@ -126,6 +130,19 @@ app.whenReady().then(async () => {
       await waitFor('document.querySelectorAll(".asset-cell").length === 4');
     }
     console.log('PASS: grid/list Cmd toggles, forward/backward/union ranges, checkbox parity, ineligible skipping, favorite isolation and filter/sort anchor reset');
+    const refreshed = structuredClone(fixtures);
+    refreshed[0].versions[0].file = "Audio/Forest v2.unitypackage";
+    await evaluate(`localStorage.setItem("ual:test-assets", ${JSON.stringify(JSON.stringify(refreshed))})`);
+    await click('[aria-label="Import 1 selected package"]');
+    await waitFor(`!!document.querySelector('select[aria-label="Archive version for Forest Audio"]')`);
+    await evaluate(`(() => { const select = document.querySelector('select[aria-label="Unity Hub project"]'); select.value = "/fixture/project"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    await waitFor(`!!document.querySelector('[aria-label="Refresh project status"]')`);
+    assert.equal(await evaluate(`document.querySelector('select[aria-label="Archive version for Forest Audio"]').value`), "");
+    assert.equal(await evaluate(`document.querySelector('.import-dialog .dialog-foot .primary').disabled`), true);
+    await evaluate(`(() => { const select = document.querySelector('select[aria-label="Archive version for Forest Audio"]'); select.value = "Audio/Forest v2.unitypackage"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    await waitFor(`!document.querySelector('.import-dialog .dialog-foot .primary').disabled`);
+    await click('.import-dialog [aria-label="Close dialog"]');
+    console.log("PASS: refreshed archive requires explicit selection, never silently substitutes a version");
     await evaluate(`localStorage.setItem("ual:test-import", JSON.stringify({ id: "preparation", kind: "import", status: "running", project: "/fixture/project", mode: "closed", completed: 0, total: 1, results: [{ file: "Cloud.unitypackage", status: "downloading", bytes_completed: 50, bytes_total: 100 }] }))`);
     await win.reload();
     await waitFor(`!!document.querySelector('[aria-label="Open import progress"]')`);
@@ -139,13 +156,23 @@ app.whenReady().then(async () => {
     win.webContents.sendInputEvent({ type: "mouseMove", ...taskBounds });
     await waitFor(`!document.querySelector(".task-details").hidden`);
     await click('[aria-label="Open import progress"]');
-    await waitFor(`!!document.querySelector('.import-dialog')`);
+    await waitFor(`!!document.querySelector('.import-dialog [role="progressbar"]')`);
+    const progress = await evaluate(`(() => { const bar = document.querySelector('.import-dialog [role="progressbar"]'); return { value: Number(bar.getAttribute("aria-valuenow")), max: Number(bar.getAttribute("aria-valuemax")), width: bar.getBoundingClientRect().width, fill: bar.firstElementChild.getBoundingClientRect().width }; })()`);
+    assert.equal(progress.value, 50);
+    assert.equal(progress.max, 100);
+    assert(progress.width > 40, "Preparation progress must be visible, not collapsed by status cell CSS");
+    assert(Math.abs(progress.fill / progress.width - 0.5) < 0.01);
+    console.log("PASS: cloud/local badges and visible proportional preparation progress");
     await click(".import-dialog .dialog-foot .quiet");
+    refreshed[0].versions[0].availability = "local";
+    await evaluate(`localStorage.setItem("ual:test-assets", ${JSON.stringify(JSON.stringify(refreshed))})`);
     await evaluate(`localStorage.setItem("ual:test-import", JSON.stringify({ id: "preparation", kind: "import", status: "failed", error: "Package could not be imported", completed: 0, total: 1, results: [] }))`);
     await waitFor(`!!document.querySelector('.task-indicator[data-status="failed"]')`);
+    await waitFor(`!!document.querySelector('[title="Forest Audio"] [data-availability="local"]')`);
+    console.log("PASS: terminal import refreshes hydrated archive availability");
     await click(".task-indicator");
     await waitFor(`!document.querySelector(".task-details").hidden`);
-    assert.equal(await evaluate(`document.querySelector(".task-details .progress-error").textContent.trim()`), "Package could not be imported");
+    assert.equal(await evaluate(`document.querySelector(".task-details .progress-error").textContent`), "Package could not be imported ");
     await click('[aria-label="Dismiss Import result"]');
     await waitFor(`!document.querySelector(".task-indicator")`);
     console.log("PASS: task hover, focus, Escape, review import, failure details and dismissal");

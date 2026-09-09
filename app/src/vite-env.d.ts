@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 declare global {
-  type AssetVersion = { file?: string; size_bytes?: number; duplicate?: boolean | null; editor_version?: string | null };
+  type AssetVersion = { file?: string; size_bytes?: number; duplicate?: boolean | null; editor_version?: string | null; availability?: "cloud_only" | "local" | "unknown" | "missing" };
   type Asset = {
     asset_key: string;
     name: string;
@@ -36,7 +36,7 @@ declare global {
   type UnityProject = { path: string; title: string; version: string };
   type ImportProject = UnityProject & { open: boolean; bridge_installed: boolean; bridge_ready: boolean };
   type ImportRequest = { project: string; mode: "closed" | "live"; packages: { asset_key: string; file: string }[] };
-  type ImportResultRow = { file: string; status: "pending" | "importing" | "imported" | "failed" | "cancelled"; error?: string };
+  type ImportResultRow = { file: string; status: "pending" | "preparing" | "downloading" | "ready" | "importing" | "imported" | "failed" | "cancelled"; error?: string; bytes_completed?: number | null; bytes_total?: number | null };
   type ActionIdentity = { id: string; kind: "resync" | "cleanup" | "organize"; phase: "plan" | "apply" };
   type Preferences = { theme?: string | null; sort?: string | null; view?: string | null; filters?: Record<string, unknown> | null; action?: ActionIdentity | null };
   type ImportJob = ProgressSnapshot & { id: string; kind: "import"; status: "queued" | "running" | "completed" | "failed" | "cancelled"; project: string; mode: "closed" | "live"; results: ImportResultRow[]; error?: string | null; stop_requested?: boolean };

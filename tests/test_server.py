@@ -320,13 +320,51 @@ class TestApiAndBoundary(ServerHarnessTestCase):
         self.assertIsNone(body["job"])
 
     def test_assets_endpoint_returns_authoritative_index(self):
+        self.h._make_archive("A.unitypackage", b"aaa")
         status, headers, body = self.h.request("GET", "/api/assets")
         self.assertEqual(status, 200)
         self.assertTrue(headers["content-type"].startswith("application/json"))
         # User tags are authoritative and always present after the overlay.
         expected = {"assets": [{"asset_key": "k1", "name": "A", "tags": [], "tag_source": "user",
-                                "versions": [{"file": "A.unitypackage", "size_bytes": 4096}]}]}
+                                "versions": [{"file": "A.unitypackage", "size_bytes": 4096, "availability": "local" if sys.platform == "darwin" else "unknown"}]}]}
         self.assertEqual(json.loads(body), expected)
+
+    def test_availability_refreshes_without_opening_archives(self):
+        import types
+        data = {"assets": [{"asset_key": "k1", "versions": [{"file": "a.unitypackage"}]}]}
+        self.h.service._load_assets = lambda: data
+        real_stat = os.stat
+        archive = os.path.realpath(os.path.join(self.h.vault, "a.unitypackage"))
+        cloud = True
+
+        def metadata(path, *args, **kwargs):
+            info = real_stat(path, *args, **kwargs)
+            if path == archive:
+                return types.SimpleNamespace(st_mode=info.st_mode, st_flags=0x40000000 if cloud else 0)
+            return info
+
+        real_open = open
+
+        def no_archive_reads(path, *args, **kwargs):
+            if str(path).endswith(".unitypackage"):
+                raise AssertionError("Browsing must not hydrate an archive")
+            return real_open(path, *args, **kwargs)
+
+        with mock.patch.object(srv.sys, "platform", "darwin"), mock.patch.object(srv.os, "stat", side_effect=metadata), mock.patch("builtins.open", side_effect=no_archive_reads):
+            self.assertEqual(self.h.service.op_assets()["assets"][0]["versions"][0]["availability"], "cloud_only")
+            cloud = False
+            self.assertEqual(self.h.service.op_assets()["assets"][0]["versions"][0]["availability"], "local")
+        os.unlink(archive)
+        self.assertEqual(self.h.service.op_assets()["assets"][0]["versions"][0]["availability"], "missing")
+
+    def test_availability_does_not_stat_paths_outside_library(self):
+        outside = os.path.join(self.h._tmp.name, "outside.unitypackage")
+        with open(outside, "wb") as stream:
+            stream.write(b"private")
+        os.symlink(outside, os.path.join(self.h.vault, "escape.unitypackage"))
+        with mock.patch.object(srv.os, "stat", side_effect=AssertionError("Outside stat")):
+            for relative in ("../outside.unitypackage", outside, "escape.unitypackage", None, "x\0"):
+                self.assertEqual(self.h.service._archive_availability(self.h.vault, relative), "unknown")
 
     def test_no_cors_header_anywhere(self):
         _, headers_get, _ = self.h.request("GET", "/api/state")

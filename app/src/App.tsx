@@ -476,6 +476,10 @@ function App() {
   const [dialog, setDialog] = useState<DialogState>(null);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [importSelection, setImportSelection] = useState<Set<string>>(() => new Set());
+  const selectionAnchor = useRef<string | null>(null);
+  useEffect(() => {
+    selectionAnchor.current = null;
+  }, [query, category, quick, author, sort, selectedTags, tagMode, untagged, storageEpoch]);
   const [importOpen, setImportOpen] = useState(false);
   const [importJob, setImportJob] = useState<ImportJob | null>(null);
   const importTriggerRef = useRef<HTMLButtonElement>(null);
@@ -617,18 +621,35 @@ function App() {
     }
   }
   function selectVisibleImport() {
+    selectionAnchor.current = null;
     setImportSelection((current) => {
       const next = new Set(current);
       for (const asset of filtered) if (unityPackages(asset).length > 0) next.add(asset.asset_key);
       return next;
     });
   }
-  function toggleImportSelection(key: string) {
+  function selectAsset(asset: Asset, { metaKey, shiftKey }: { metaKey: boolean; shiftKey: boolean }, checkbox = false) {
+    setSelectedKey(asset.asset_key);
+    if (!checkbox && window.innerWidth < 768 && !metaKey && !shiftKey) setInspectorOpen(true);
+    if (importActive || unityPackages(asset).length === 0) return;
+    const index = filtered.findIndex((item) => item.asset_key === asset.asset_key);
+    const anchor = filtered.findIndex((item) => item.asset_key === selectionAnchor.current);
+    if (!shiftKey || anchor < 0) selectionAnchor.current = asset.asset_key;
     setImportSelection((current) => {
-      const next = new Set(current);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
+      if (shiftKey && anchor >= 0) {
+        const next = metaKey ? new Set(current) : new Set<string>();
+        for (let i = Math.min(anchor, index); i <= Math.max(anchor, index); i++) {
+          if (unityPackages(filtered[i]).length > 0) next.add(filtered[i].asset_key);
+        }
+        return next;
+      }
+      if (metaKey || checkbox) {
+        const next = new Set(current);
+        if (next.has(asset.asset_key)) next.delete(asset.asset_key);
+        else next.add(asset.asset_key);
+        return next;
+      }
+      return new Set([asset.asset_key]);
     });
   }
   async function startImport(request: ImportRequest) {
@@ -1437,7 +1458,7 @@ function App() {
             <Button type="button" className="button quiet" onPress={selectVisibleImport} isDisabled={loading || importActive} aria-label="Select visible packages for import">Select visible</Button>
             {importSelection.size > 0 && (
               <>
-                <Button type="button" className="button quiet" onPress={() => setImportSelection(new Set())} isDisabled={importActive} aria-label="Clear import selection">Clear selection</Button>
+                <Button type="button" className="button quiet" onPress={() => { selectionAnchor.current = null; setImportSelection(new Set()); }} isDisabled={importActive} aria-label="Clear import selection">Clear selection</Button>
                 <Button ref={importTriggerRef} type="button" className="button primary" onPress={() => setImportOpen(true)} isDisabled={importActive} aria-label={`Import ${importSelection.size} selected package${importSelection.size === 1 ? "" : "s"}`}>Import {importSelection.size}</Button>
               </>
             )}
@@ -1592,14 +1613,14 @@ function App() {
                 <div className="asset-cell" key={asset.asset_key}>
                   {unityPackages(asset).length > 0 && (
                     <label className="import-check">
-                      <input type="checkbox" checked={importSelection.has(asset.asset_key)} onChange={() => toggleImportSelection(asset.asset_key)} disabled={importActive} aria-label={`Select ${asset.name} for import`} />
+                      <input type="checkbox" checked={importSelection.has(asset.asset_key)} onChange={(event) => selectAsset(asset, event.nativeEvent as MouseEvent, true)} disabled={importActive} aria-label={`Select ${asset.name} for import`} />
                     </label>
                   )}
                   <AssetCard
                     asset={asset}
-                    selected={asset.asset_key === selected?.asset_key}
+                    selected={importSelection.has(asset.asset_key)}
                     view={view}
-                    onClick={() => { setSelectedKey(asset.asset_key); if (window.innerWidth < 768) setInspectorOpen(true); }}
+                    onClick={(event) => selectAsset(asset, event)}
                   />
                   <StarButton
                     assetKey={asset.asset_key}
@@ -1693,7 +1714,7 @@ function AssetCard({
   asset: Asset;
   selected: boolean;
   view: ViewMode;
-  onClick: () => void;
+  onClick: (event: { metaKey: boolean; shiftKey: boolean }) => void;
 }) {
   const flagged = (asset.flags || []).length > 0;
   if (view === "list")

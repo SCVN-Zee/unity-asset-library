@@ -5,7 +5,7 @@ Commands: projects; inspect --project PATH; install --project PATH;
           run --request REQUEST.json
 Request: {id, repo, root, project, mode: "closed"|"live",
           packages: [{asset_key, file}], cancel_file?}
-`file` is library-relative. `repo/state/assets.json` is the authoritative index.
+`<root>/.data/assets.json` is the authoritative index.
 Output: UL_PROGRESS JSON lines followed by one terminal JSON line. Exit 0 means
 completed/cancelled, 1 package failure, 2 preflight failure. Creating cancel_file
 or sending SIGINT/SIGTERM stops after the current package, never mid-import.
@@ -344,7 +344,7 @@ def _wait_live_done(project, req_id, pid):
 
 
 def run_import(fields):
-    state_dir = os.path.join(fields["repo"], "state")
+    state_dir = ia.data_dir(fields["root"])
     results = [{"file": row["file"], "status": "pending"} for row in fields["packages"]]
     completed = 0
     current = None

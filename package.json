@@ -86,10 +86,6 @@
           "!**/__pycache__/**",
           "!**/*.pyc"
         ]
-      },
-      {
-        "from": "state/cache.json",
-        "to": "ual-backend/state/cache.json"
       }
     ],
     "mac": {

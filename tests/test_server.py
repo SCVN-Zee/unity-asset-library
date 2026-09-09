@@ -76,7 +76,7 @@ class Harness:
         repo = self._tmp.name
         self.vault = os.path.join(repo, "vault")
         self.static = os.path.join(repo, "static")
-        self.state = os.path.join(repo, "state")
+        self.state = os.path.join(self.vault, ".data")
         for path in (self.vault, self.static, self.state):
             os.makedirs(path)
         # Two real archives: plan fingerprints lstat them.
@@ -203,10 +203,10 @@ class StateLockContentionTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.repo = self._tmp.name
-        self.state = os.path.join(self.repo, "state")
         self.root = os.path.join(self.repo, "vault")
+        self.state = os.path.join(self.root, ".data")
         self.static = os.path.join(self.repo, "static")
-        for path in (self.state, self.root, self.static):
+        for path in (self.root, self.static, self.state):
             os.makedirs(path)
         with open(os.path.join(self.state, "assets.json"), "w", encoding="utf-8") as fh:
             json.dump(ia.build([]), fh)
@@ -449,14 +449,14 @@ class TestResyncAndCleanup(ServerHarnessTestCase):
         with open(path, "rb") as fh:
             self.assertEqual(fh.read(), before)  # Closing the preview needs no write request.
         self.assertFalse(os.path.exists(os.path.join(self.h.state, "pending-enrichment.json")))
-        with mock.patch.object(ia, "output_dir", return_value=self.h.static), \
-                mock.patch.object(ia, "scan", side_effect=AssertionError("unreviewed rescan")):
+        with mock.patch.object(ia, "scan", side_effect=AssertionError("unreviewed rescan")):
             status, _, result = self.post("/api/resync/apply", {"plan_hash": plan["plan_hash"]})
         self.assertEqual(status, 200, result)
         self.assertTrue(result["state_refreshed"])
         self.assertNotIn("preview", result)
         self.assertEqual(ia.manifest_of(service._load_assets()), {"a.unitypackage": 3, "b.unitypackage": 5})
-        self.assertEqual(sorted(os.listdir(self.h.vault)), ["a.unitypackage", "b.unitypackage"])
+        self.assertEqual(sorted(os.listdir(self.h.vault)),
+                         [".data", "a.unitypackage", "b.unitypackage"])
         self.assertEqual(self.h.apply_cleanup_calls, [])
         _, _, unchanged = self.post("/api/resync/plan")
         self.assertEqual(unchanged["preview"]["totals"], {"added": 0, "removed": 0, "resized": 0})

@@ -92,6 +92,10 @@ class UnknownAsset(Exception):
         self.asset_key = asset_key
 
 
+class LibraryMismatch(Exception):
+    """A request named a different library than the one that is open."""
+
+
 # ---------------------------------------------------------------------------
 # request-bound plan fingerprints
 # ---------------------------------------------------------------------------
@@ -137,7 +141,8 @@ class ViewerService:
             raise SafetyError("backend repository identity does not match configuration")
         self.root = os.path.abspath(cfg["vault_root"])
         self.instance_id = str(instance_id or secrets.token_hex(16))
-        self.state = os.path.join(self.repo, "state")
+        # All persistent user-side data lives in the vault's .data directory.
+        self.state = storage._ensure_data_dir(self.root)
         self.bin_dir = os.path.join(self.repo, "bin")
         self.resolve_py = os.path.join(self.bin_dir, "resolve_store.py")
         self.index_py = os.path.join(self.bin_dir, "index_assets.py")
@@ -163,6 +168,11 @@ class ViewerService:
         self._capture_organize_snapshot = ov.capture_snapshot
         self._apply_organize = ov.apply_organize
         self._index_update = self._index_update_impl
+        try:
+            with ia.state_write_lock(self.state, "storage migration", blocking=True):
+                storage.ensure_migrated(self.repo, cfg)
+        except storage.StorageError as exc:
+            raise SafetyError(str(exc)) from exc
         self._runner = self._run_stage_process
         self._migrate_user_tags()
 
@@ -337,7 +347,7 @@ class ViewerService:
             action = self._action_snapshot(self._action)
         return {
             "service": "unity-asset-library",
-            "api_version": 6,
+            "api_version": storage.API_VERSION,
             "ready": True,
             "vault_root": os.path.realpath(self.root),
             "repo": self.repo,
@@ -350,6 +360,64 @@ class ViewerService:
 
 
     # -- favorites ----------------------------------------------------------
+    # -- preferences --------------------------------------------------------
+
+    PREFERENCE_KEYS = ("theme", "sort", "view", "filters")
+    PREFERENCE_OPTIONAL_KEYS = ("action",)
+
+    def _preferences_path(self):
+        return os.path.join(self.state, "preferences.json")
+
+    def op_preferences(self):
+        """Stored preferences object; missing file is an empty object."""
+        try:
+            with open(self._preferences_path(), encoding="utf-8") as fh:
+                prefs = json.load(fh)
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError) as exc:
+            raise SafetyError(f"preferences file is unreadable: {exc}") from exc
+        if not isinstance(prefs, dict):
+            raise SafetyError("preferences file is invalid")
+        return prefs
+
+    def op_set_preferences(self, preferences, library_root, only_if_missing):
+        """Atomically replace .data/preferences.json. `only_if_missing` never
+        overwrites an existing file (used by the legacy migration seed)."""
+        if (not isinstance(library_root, str) or not library_root
+                or os.path.realpath(os.path.abspath(library_root)) != os.path.realpath(self.root)):
+            raise LibraryMismatch("library_root does not match the open library")
+        self._validate_preferences(preferences)
+        path = self._preferences_path()
+        try:
+            with self.state_write_lock():
+                if only_if_missing and os.path.exists(path):
+                    return self.op_preferences()
+                ia.write_atomic(path, json.dumps(preferences, indent=1, sort_keys=True))
+        except ia.StateWriteBusy as exc:
+            raise Busy(str(exc)) from exc
+        except OSError as exc:
+            raise SafetyError(f"preferences are not writable: {exc}") from exc
+        return preferences
+
+    def _validate_preferences(self, preferences):
+        if not isinstance(preferences, dict):
+            raise ValueError("preferences must be an object")
+        allowed = set(self.PREFERENCE_KEYS) | set(self.PREFERENCE_OPTIONAL_KEYS)
+        if not set(self.PREFERENCE_KEYS) <= set(preferences) or not set(preferences) <= allowed:
+            raise ValueError(f"preferences keys must include {sorted(self.PREFERENCE_KEYS)} "
+                             f"and only {sorted(allowed)}")
+        for key in ("theme", "sort", "view"):
+            if not isinstance(preferences[key], str):
+                raise ValueError(f"preferences.{key} must be a string")
+        action = preferences.get("action")
+        if action is not None:
+            if not isinstance(action, dict) or not set(action) <= {"id", "kind", "phase"} \
+                    or not all(isinstance(v, str) for v in action.values()):
+                raise ValueError("preferences.action must be null or an object with "
+                                 "string id/kind/phase")
+        if not isinstance(preferences["filters"], dict):
+            raise ValueError("preferences.filters must be an object")
 
     # -- user tags ------------------------------------------------------------
 
@@ -405,7 +473,7 @@ class ViewerService:
         except FileNotFoundError:
             return []
         except (ValueError, UnicodeDecodeError) as exc:
-            raise SafetyError("the favorites store is unreadable; fix or remove state/favorites.json") from exc
+            raise SafetyError("the favorites store is unreadable; fix or remove the library’s .data/favorites.json") from exc
         if (not isinstance(data, dict) or set(data) != {"favorites"}
                 or not isinstance(data["favorites"], list)
                 or not all(isinstance(key, str) and key for key in data["favorites"])):
@@ -749,11 +817,11 @@ class ViewerService:
     def _job_body(self, job):
         stages = (
             ("resolve", [sys.executable, "-u", self.resolve_py, "resolve", "--resume",
-                         "--pending", "--progress-json"], False),
+                         "--pending", "--progress-json", "--state", self.state], False),
             ("enrich", [sys.executable, "-u", self.resolve_py, "enrich", "--state-lock-held",
-                         "--progress-json"], True),
+                         "--progress-json", "--state", self.state], True),
             ("emit", [sys.executable, "-u", self.index_py, "emit", "--state-lock-held",
-                       "--progress-json"], True),
+                       "--progress-json", "--root", self.root, "--state", self.state], True),
         )
         with self._job_lock:
             if job["status"] == "cancelled":
@@ -999,6 +1067,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(service.op_tags())
             elif path == "/api/favorites":
                 self._send_json(service.op_favorites())
+            elif path == "/api/preferences":
+                self._send_json(service.op_preferences())
             elif path.startswith("/api/action/"):
                 snapshot = service.op_action(path[len("/api/action/"):])
                 if snapshot is None:
@@ -1033,6 +1103,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "/api/storage/prepare-restart": (["csrf"], ()),
             "/api/favorites": (["asset_key", "csrf", "favorite"], ()),
             "/api/tags": (["action", "csrf", "tag"], ("asset_key", "new_tag")),
+            "/api/preferences": (["csrf", "preferences", "library_root"],
+                                 ("only_if_missing",)),
         }
         if path not in schema_by_path:
             self._send_json({"error": "unknown_route"}, 404)
@@ -1067,12 +1139,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self._reject(400, "bad_request")
                 else:
                     self._send_json(service.op_set_favorite(asset_key, favorite))
+            elif path == "/api/preferences":
+                only_if_missing = body.get("only_if_missing", False)
+                if not isinstance(only_if_missing, bool):
+                    self._reject(400, "bad_request")
+                else:
+                    self._send_json(service.op_set_preferences(
+                        body.get("preferences"), body.get("library_root"),
+                        only_if_missing))
             elif path == "/api/tags":
                 self._send_json(service.op_mutate_tags(body))
         except UnknownAsset:
             self._send_json({"error": "unknown_asset"}, 404)
         except ValueError:
             self._reject(400, "bad_request")
+        except LibraryMismatch as exc:
+            self._send_json({"error": "library_mismatch", "detail": str(exc)}, 409)
         except Busy as exc:
             payload = {"error": "busy"}
             if exc.job_id:

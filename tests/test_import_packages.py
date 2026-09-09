@@ -21,7 +21,7 @@ class ImportTests(unittest.TestCase):
         self.base = Path(self.temp.name).resolve()
         self.root = self.base / "library"
         self.project = self.base / "Unity project"
-        self.state = self.base / "state"
+        self.state = self.root / ".data"
         for directory in (self.root, self.state, self.project / "Assets", self.project / "ProjectSettings"):
             directory.mkdir(parents=True, exist_ok=True)
         (self.project / "ProjectSettings/ProjectVersion.txt").write_text("m_EditorVersion: 2022.3.16f1\n")

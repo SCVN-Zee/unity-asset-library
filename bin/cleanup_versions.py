@@ -115,6 +115,9 @@ def _candidate_path(root, rel_path):
         raise SafetyError(f"unsafe candidate path: {rel_path!r}")
     root = os.path.realpath(os.path.abspath(root))
     path = os.path.abspath(os.path.join(root, rel_path))
+    data = os.path.realpath(os.path.join(root, ".data"))
+    if os.path.commonpath((data, os.path.realpath(path))) == data or os.path.relpath(path, root).split(os.sep)[0] == ".data":
+        raise SafetyError("library data files cannot be changed as assets")
     try:
         if os.path.commonpath((root, path)) != root or os.path.commonpath((root, os.path.realpath(path))) != root:
             raise SafetyError(f"candidate escapes vault: {rel_path}")
@@ -360,7 +363,7 @@ def main(argv=None, progress=None, state_lock_held=False):
 
     cfg = {} if args.root else ia.load_config()
     root = os.path.abspath(args.root or cfg["vault_root"])
-    state = os.path.abspath(args.state) if args.state else ia.state_dir()
+    state = os.path.abspath(args.state) if args.state else ia.data_dir(root)
     try:
         _root_identity(root)
         scanned = ia.scan(root, strict=True, progress=progress)

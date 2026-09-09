@@ -595,7 +595,7 @@ def main(argv=None, progress=None, state_lock_held=False):
 
     cfg = {} if args.root else ia.load_config()
     root = os.path.abspath(args.root or cfg["vault_root"])
-    state = os.path.abspath(args.state) if args.state else ia.state_dir()
+    state = os.path.abspath(args.state) if args.state else ia.data_dir(root)
     try:
         cv._root_identity(root)
         scanned = ia.scan(root, strict=True, progress=progress)

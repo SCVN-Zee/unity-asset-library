@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
-"""Storage configuration and crash-safe index rebuilds for the asset library."""
+"""Storage configuration and crash-safe index rebuilds for the asset library.
+
+All persistent user-side data lives in the chosen library at <vault>/.data
+(flat state JSON, reports, recovery journal, locks, preferences). The repo's
+config.json is only the agreed exception: the last-opened-library pointer.
+Legacy repo state/ is copied
+into .data once (gated by a durable completion marker), never overwritten,
+and never deleted.
+"""
 
 from __future__ import annotations
 
 import argparse
 import contextlib
-import errno
 import fcntl
 import json
 import os
 import re
 import secrets
-import stat
 import sys
-import tempfile
 import uuid
 from datetime import datetime, timezone
 
@@ -23,12 +28,19 @@ import index_assets as ia  # noqa: E402
 import resolve_store  # noqa: E402
 from progress import json_progress  # noqa: E402
 
-API_VERSION = 6
+API_VERSION = 7
 JOURNAL_NAME = "storage-journal.json"
 JOURNAL_VERSION = 1
+DATA_DIR_NAME = ".data"
 _INSTANCE_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 _TXN_RE = re.compile(r"^[0-9a-f]{32}$")
 _ALLOWED = ("assets", "pending", "review", "meta", "csv", "config")
+
+# Existing destination files win; migration keeps the old files as a recovery backup.
+_LEGACY_MIGRATABLE = ("assets.json", "cache.json", "overrides.json", "user_tags.json",
+                      "pending-enrichment.json", "review-queue.md", "index-meta.json",
+                      "favorites.json", "preferences.json", "search-worklist.json", "CHANGES.md")
+MIGRATION_MARKER = "legacy-migrated.json"
 
 
 class StorageError(RuntimeError):
@@ -61,36 +73,50 @@ def _repo(value=None):
     return os.path.realpath(os.path.abspath(value or ia.repo_dir()))
 
 
-def _state(repo):
+def _legacy_state(repo):
     return os.path.join(repo, "state")
+
+
+def data_dir(root):
+    """All persistent user-side data for one library lives here."""
+    return os.path.join(root, DATA_DIR_NAME)
+
+
+def _ensure_data_dir(root):
+    target = data_dir(root)
+    # A symlinked .data could silently relocate every user-side file outside
+    # the library; only a real directory is accepted.
+    if os.path.islink(target) or (os.path.exists(target) and not os.path.isdir(target)):
+        raise StorageError(f"library data directory must be a real directory: {target}")
+    try:
+        os.makedirs(target, exist_ok=True)
+    except OSError as exc:
+        raise StorageError(f"library data directory is not writable: {target}") from exc
+    return target
 
 
 def _config_path(repo):
     return os.path.join(repo, "config.json")
 
 
-def _journal_path(repo):
-    return os.path.join(_state(repo), JOURNAL_NAME)
+def _journal_path(state):
+    return os.path.join(state, JOURNAL_NAME)
 
 
 def _canonical_root(path):
     if not isinstance(path, str) or not path.strip():
-        raise StorageError("vault root must be a non-empty path")
+        raise StorageError("vault root is missing")
     absolute = os.path.abspath(os.path.expanduser(path))
-    try:
-        st = os.lstat(absolute)
-    except OSError as exc:
-        raise StorageError(f"vault root is unavailable: {absolute}") from exc
-    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
-        raise StorageError("vault root must be a real directory, not a symlink")
+    if not os.path.isdir(absolute):
+        raise StorageError(f"vault root is not a directory: {absolute}")
     return os.path.realpath(absolute)
 
 
 def _reject_workspace_overlap(root, repo):
-    # Generated config/state must never be scanned as part of the selected vault.
+    # The application workspace must never be scanned as part of the vault.
     try:
         if os.path.commonpath((root, repo)) == root:
-            raise StorageError("vault root cannot contain the application workspace")
+            raise StorageError("application workspace is inside the vault root")
     except ValueError as exc:
         raise StorageError("vault root and application workspace are on different volumes") from exc
 
@@ -112,38 +138,16 @@ def _load_config(repo):
     return value
 
 
-def _safe_output_rel(cfg):
-    value = cfg.get("output_dir", ".")
-    if not isinstance(value, str) or os.path.isabs(value):
-        raise StorageError("output_dir must be a relative application path")
-    normalized = os.path.normpath(value)
-    if normalized == ".." or normalized.startswith(".." + os.sep):
-        raise StorageError("output_dir cannot escape the application workspace")
-    return "." if normalized == "." else normalized
-
-
-def _output_dir(repo, cfg):
-    rel = _safe_output_rel(cfg)
-    return os.path.join(repo, rel) if rel != "." else repo
-def _validated_output_dir(repo, root, cfg):
-    output = os.path.realpath(_output_dir(repo, cfg))
-    repo = os.path.realpath(repo)
-    root = os.path.realpath(root)
-    try:
-        if os.path.commonpath((repo, output)) != repo:
-            raise StorageError("generated output must remain inside the application workspace")
-        if os.path.commonpath((root, output)) == root:
-            raise StorageError("generated output cannot be written inside the vault")
-    except ValueError as exc:
-        raise StorageError("generated output is on a different volume") from exc
-    return output
-
+def _write_pointer(repo, root):
+    """Repo config.json is only the agreed exception: the last-opened
+    library path, nothing else."""
+    _write_json(_config_path(repo), {"vault_root": root})
 
 
 def _identity(root):
     try:
         return list(cv._root_identity(root))
-    except cv.SafetyError as exc:
+    except Exception as exc:
         raise StorageError(str(exc)) from exc
 
 
@@ -162,7 +166,7 @@ def _valid_index(state, root, repo):
     if not os.path.exists(metadata):
         # Indexes made before storage binding are safe to adopt once, but never
         # silently adopt an index when a recovery journal is present.
-        if os.path.exists(_journal_path(repo)):
+        if os.path.exists(_journal_path(state)):
             return False, "index binding is incomplete"
         return True, None
     try:
@@ -179,8 +183,9 @@ def _valid_index(state, root, repo):
         return False, "index binding is unreadable"
     return True, None
 
-def _journal_read(repo):
-    path = _journal_path(repo)
+
+def _journal_read(state, legacy_output=False):
+    path = _journal_path(state)
     if not os.path.exists(path):
         return None
     try:
@@ -203,56 +208,60 @@ def _journal_read(repo):
         raise StorageError("storage recovery journal contains unsafe progress")
     journal["backed_up"] = backed_up
     journal["existed"] = existed
-    output_rel = journal.get("output_rel", ".")
-    if not isinstance(output_rel, str) or os.path.isabs(output_rel):
-        raise StorageError("storage recovery journal contains an unsafe output path")
-    normalized = os.path.normpath(output_rel)
-    if normalized == ".." or normalized.startswith(".." + os.sep):
-        raise StorageError("storage recovery journal contains an unsafe output path")
-    journal["output_rel"] = "." if normalized == "." else normalized
+    if legacy_output:
+        # Legacy journals targeted the repo output dir for csv and the repo
+        # config.json itself; recovery must restore those original paths.
+        output_rel = journal.get("output_rel", ".")
+        if not isinstance(output_rel, str) or os.path.isabs(output_rel):
+            raise StorageError("storage recovery journal contains an unsafe output path")
+        normalized = os.path.normpath(output_rel)
+        if normalized == ".." or normalized.startswith(".." + os.sep):
+            raise StorageError("storage recovery journal contains an unsafe output path")
+        journal["output_rel"] = "." if normalized == "." else normalized
     return journal
 
 
-def _paths(repo, txn, output_rel):
-    state = _state(repo)
-    output = os.path.join(repo, output_rel) if output_rel != "." else repo
-    targets = {
+def _targets(state):
+    return {
         "assets": os.path.join(state, "assets.json"),
         "pending": os.path.join(state, "pending-enrichment.json"),
         "review": os.path.join(state, "review-queue.md"),
         "meta": os.path.join(state, "index-meta.json"),
-        "csv": os.path.join(output, "assets.csv"),
-        "config": _config_path(repo),
-    }
-    return {
-        name: (target, os.path.join(os.path.dirname(target), f".storage-{kind}-{txn}-{name}"))
-        for name, target in targets.items()
-        for kind in ("stage", "backup")
+        "csv": os.path.join(state, "assets.csv"),
+        "config": os.path.join(state, "config.json"),
     }
 
 
-def _entry_paths(repo, txn, output_rel, name):
+def _entry_paths(state, txn, name):
     if name not in _ALLOWED:
         raise StorageError("unsafe storage transaction entry")
-    state = _state(repo)
-    output = os.path.join(repo, output_rel) if output_rel != "." else repo
-    output_real = os.path.realpath(output)
-    repo_real = os.path.realpath(repo)
-    try:
-        if os.path.commonpath((repo_real, output_real)) != repo_real:
-            raise StorageError("storage transaction output escapes the application workspace")
-        cfg = _load_config(repo)
-        if cfg is not None:
-            configured_root = os.path.realpath(os.path.abspath(cfg["vault_root"]))
-            if os.path.commonpath((configured_root, output_real)) == configured_root:
-                raise StorageError("storage transaction output cannot be inside the vault")
-    except ValueError as exc:
-        raise StorageError("storage transaction output is on a different volume") from exc
+    target = _targets(state)[name]
+    return (target,
+            os.path.join(state, f".storage-stage-{txn}-{name}"),
+            os.path.join(state, f".storage-backup-{txn}-{name}"))
+
+
+def _legacy_output_dir(repo, output_rel):
+    repo = _repo(repo)
+    if not isinstance(output_rel, str) or os.path.isabs(output_rel):
+        raise StorageError("unsafe legacy output path")
+    output = os.path.realpath(os.path.join(repo, output_rel))
+    if os.path.commonpath((repo, output)) != repo:
+        raise StorageError("legacy output escapes the application workspace")
+    return output
+
+
+def _legacy_entry_paths(repo, txn, name, output_rel):
+    """Recover the old journal using its original target-adjacent staging files."""
+    if name not in _ALLOWED:
+        raise StorageError("unsafe storage transaction entry")
+    legacy = _legacy_state(repo)
+    output = _legacy_output_dir(repo, output_rel)
     targets = {
-        "assets": os.path.join(state, "assets.json"),
-        "pending": os.path.join(state, "pending-enrichment.json"),
-        "review": os.path.join(state, "review-queue.md"),
-        "meta": os.path.join(state, "index-meta.json"),
+        "assets": os.path.join(legacy, "assets.json"),
+        "pending": os.path.join(legacy, "pending-enrichment.json"),
+        "review": os.path.join(legacy, "review-queue.md"),
+        "meta": os.path.join(legacy, "index-meta.json"),
         "csv": os.path.join(output, "assets.csv"),
         "config": _config_path(repo),
     }
@@ -269,26 +278,41 @@ def _remove(path):
         pass
 
 
-def recover(repo):
-    """Restore a prepared/applying transaction using only the fixed allowlist."""
-    journal = _journal_read(repo)
+def recover(repo, state=None):
+    """Restore a prepared/applying transaction using only the fixed allowlist.
+
+    A journal found in the legacy repo state/ targets the legacy layout (csv
+    in the repo output dir, config at the repo root); a journal in .data
+    targets the relocated layout.
+    """
+    repo = _repo(repo)
+    legacy = _legacy_state(repo)
+    if state is None:
+        state = legacy
+    legacy_mode = os.path.realpath(state) == os.path.realpath(legacy)
+    journal = _journal_read(state, legacy_output=legacy_mode)
     if journal is None:
         return False
     txn = journal["txn"]
-    output_rel = journal["output_rel"]
     names = journal["entries"]
     committed = journal.get("status") == "committed"
     status = journal.get("status")
     if status not in ("prepared", "applying", "committed"):
         raise StorageError("storage recovery journal has an invalid status")
+
+    def entry(name):
+        if legacy_mode:
+            return _legacy_entry_paths(repo, txn, name, journal.get("output_rel", "."))
+        return _entry_paths(state, txn, name)
+
     if status == "prepared":
         for name in names:
-            _, stage, _ = _entry_paths(repo, txn, output_rel, name)
+            _, stage, _ = entry(name)
             _remove(stage)
-        _remove(_journal_path(repo))
+        _remove(_journal_path(state))
         return True
     for name in reversed(names):
-        target, stage, backup = _entry_paths(repo, txn, output_rel, name)
+        target, stage, backup = entry(name)
         if committed:
             _remove(backup)
             _remove(stage)
@@ -299,7 +323,88 @@ def recover(repo):
         elif name in journal.get("backed_up", []) and name not in journal.get("existed", []):
             _remove(target)
         _remove(stage)
-    _remove(_journal_path(repo))
+    _remove(_journal_path(state))
+    return True
+
+
+def _legacy_owner_root(legacy):
+    """The library a legacy repo state/ belongs to, from its index binding."""
+    try:
+        with open(os.path.join(legacy, "index-meta.json"), encoding="utf-8") as fh:
+            bound = json.load(fh).get("vault_root")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not isinstance(bound, str) or not bound:
+        return None
+    return os.path.realpath(bound)
+
+
+def ensure_migrated(repo, cfg):
+    """Copy legacy repo state/ into <vault>/.data once.
+
+    Only runs when the legacy state's index binding matches the library being
+    opened (no cross-library bleed). A durable completion marker in .data ends
+    migration permanently, so a destination file deleted afterwards is never
+    resurrected. Existing destination files always win; legacy files are never
+    deleted.
+    """
+    legacy = _legacy_state(repo)
+    if not os.path.isdir(legacy):
+        return False
+    root = _canonical_root(cfg["vault_root"])
+    state = _ensure_data_dir(root)
+    marker = os.path.join(state, MIGRATION_MARKER)
+    if os.path.exists(marker):
+        return False
+    with _lock(os.path.join(legacy, "server-instance.lock"), blocking=False), ia.state_write_lock(legacy, "legacy migration", blocking=True):
+        recover(repo, state=legacy)
+        copied = []
+        if _legacy_owner_root(legacy) == root:
+            sources = [(name, os.path.join(legacy, name)) for name in _LEGACY_MIGRATABLE]
+            old_cfg = _load_config(repo) or cfg
+            output = _legacy_output_dir(repo, old_cfg.get("output_dir", "."))
+            sources.append(("assets.csv", os.path.join(output, "assets.csv")))
+            for name, src in sources:
+                dst = os.path.join(state, name)
+                if not os.path.isfile(src) or os.path.lexists(dst):
+                    continue
+                try:
+                    with open(src, encoding="utf-8") as fh:
+                        payload = fh.read()
+                except OSError as exc:
+                    raise StorageError(f"legacy state file is unreadable: {src}") from exc
+                try:
+                    ia.write_atomic(dst, payload)
+                except OSError as exc:
+                    raise StorageError(f"library data directory is not writable: {state}") from exc
+                copied.append(name)
+        _write_json(marker, {"complete": True, "copied": copied})
+    return bool(copied)
+
+
+def recover_startup(repo=None):
+    """Recover a crashed storage transaction for the last-opened library."""
+    repo = _repo(repo)
+    legacy = _legacy_state(repo)
+    if os.path.exists(_journal_path(legacy)):
+        with _lock(os.path.join(legacy, "server-instance.lock"), blocking=False):
+            with ia.state_write_lock(legacy, "legacy storage recover", blocking=True):
+                recover(repo, state=legacy)
+    try:
+        cfg = _load_config(repo)
+    except StorageError:
+        cfg = None
+    state = _legacy_state(repo)
+    if cfg is not None:
+        try:
+            root = _canonical_root(cfg["vault_root"])
+            _reject_workspace_overlap(root, repo)
+            state = _ensure_data_dir(root)
+        except StorageError:
+            state = _legacy_state(repo)
+    if os.path.exists(_journal_path(state)):
+        with _lock(os.path.join(state, "server-instance.lock"), blocking=False), ia.state_write_lock(state, "storage recover", blocking=True):
+            recover(repo, state=state)
     return True
 
 
@@ -314,17 +419,8 @@ def _write_json(path, value):
 
 def status(repo=None):
     repo = _repo(repo)
-    os.makedirs(_state(repo), exist_ok=True)
-    # A live server owns this lock. It is safe to read its stable state, but
-    # recovery must wait until the owner has exited.
     try:
-        with _lock(os.path.join(_state(repo), "server-instance.lock"), blocking=False):
-            with ia.state_write_lock(_state(repo), "storage status", blocking=True):
-                recover(repo)
-    except (StorageError, ia.StateWriteBusy) as exc:
-        if isinstance(exc, StorageError) and "another backend instance" not in str(exc):
-            return _state_payload(repo, path=None, ready=False, needs_setup=False, error=str(exc))
-    try:
+        recover_startup(repo)
         cfg = _load_config(repo)
     except StorageError as exc:
         return _state_payload(repo, path=None, ready=False, needs_setup=False, error=str(exc))
@@ -336,7 +432,23 @@ def status(repo=None):
     except StorageError as exc:
         raw = cfg.get("vault_root") if isinstance(cfg, dict) else None
         return _state_payload(repo, path=raw, ready=False, needs_setup=False, error=str(exc))
-    ready, error = _valid_index(_state(repo), root, repo)
+    state = _ensure_data_dir(root)
+    # A live server owns this lock. It is safe to read its stable state, but
+    # recovery must wait until the owner has exited.
+    try:
+        with _lock(os.path.join(state, "server-instance.lock"), blocking=False):
+            with ia.state_write_lock(state, "storage status", blocking=True):
+                recover(repo, state=state)
+                ensure_migrated(repo, cfg)
+    except (StorageError, ia.StateWriteBusy) as exc:
+        if isinstance(exc, StorageError) and "another backend instance" not in str(exc):
+            return _state_payload(repo, path=root, ready=False, needs_setup=False, error=str(exc))
+    # Once migration/configuration succeeds the repo config is reduced to
+    # the last-opened pointer, dropping any legacy keys.
+    fresh = _load_config(repo)
+    if fresh is not None and set(fresh) != {"vault_root"}:
+        _write_pointer(repo, root)
+    ready, error = _valid_index(state, root, repo)
     needs_index = not ready and error == "index is not built yet"
     if needs_index:
         error = None
@@ -374,23 +486,21 @@ def _read_cache(state):
 
 def configure(repo=None, root=None, instance_id=None, progress=False):
     repo = _repo(repo)
-    state = _state(repo)
-    os.makedirs(state, exist_ok=True)
+    recover_startup(repo)
     token = instance_id or secrets.token_hex(16)
     if not isinstance(token, str) or not _INSTANCE_RE.fullmatch(token):
         raise StorageError("instance id is invalid")
     selected = _canonical_root(root)
     _reject_workspace_overlap(selected, repo)
-    output_rel = "."
+    state = _ensure_data_dir(selected)
     txn = uuid.uuid4().hex
     progress_cb = json_progress if progress else None
     with _lock(os.path.join(state, "server-instance.lock"), blocking=False):
         with ia.state_write_lock(state, "storage configure", blocking=True):
-            recover(repo)
-            old_cfg = _load_config(repo) or {}
-            output_rel = _safe_output_rel(old_cfg)
-            output_dir = _validated_output_dir(repo, selected, old_cfg)
-            os.makedirs(output_dir, exist_ok=True)
+            recover(repo, state=state)
+            # Legacy repo state only ever migrates into the library its
+            # index binding names; switching libraries never bleeds data.
+            ensure_migrated(repo, {"vault_root": selected})
             before = _identity(selected)
             scanned = ia.scan(selected, strict=True, progress=progress_cb)
             if _identity(selected) != before:
@@ -414,19 +524,15 @@ def configure(repo=None, root=None, instance_id=None, progress=False):
             pending = _pending_for(data, cache)
             metadata = {"api_version": API_VERSION, "vault_root": selected,
                         "repo": repo, "root_identity": before}
-            config = dict(old_cfg)
-            config.setdefault("output_dir", ".")
-            config.pop("instance_id", None)
-            config.update({"vault_root": selected, "repo": repo,
-                           "api_version": API_VERSION})
+            config = {"vault_root": selected, "repo": repo, "api_version": API_VERSION}
             stage_names = ["assets", "pending", "review", "meta", "csv", "config"]
             journal = {"version": JOURNAL_VERSION, "txn": txn, "status": "prepared",
-                       "entries": stage_names, "output_rel": output_rel,
+                       "entries": stage_names,
                        "backed_up": [], "existed": []}
-            _write_json(_journal_path(repo), journal)
+            _write_json(_journal_path(state), journal)
             try:
                 for name in stage_names:
-                    target, stage, _ = _entry_paths(repo, txn, output_rel, name)
+                    target, stage, _ = _entry_paths(state, txn, name)
                     os.makedirs(os.path.dirname(stage), exist_ok=True)
                     if name == "assets":
                         _write_json(stage, data)
@@ -441,63 +547,60 @@ def configure(repo=None, root=None, instance_id=None, progress=False):
                     else:
                         _write_json(stage, config)
                 journal["status"] = "applying"
-                _write_json(_journal_path(repo), journal)
+                _write_json(_journal_path(state), journal)
                 for name in stage_names:
-                    target, stage, backup = _entry_paths(repo, txn, output_rel, name)
+                    target, stage, backup = _entry_paths(state, txn, name)
                     if os.path.exists(target):
                         journal["existed"].append(name)
                         os.replace(target, backup)
                     journal["backed_up"].append(name)
-                    _write_json(_journal_path(repo), journal)
+                    _write_json(_journal_path(state), journal)
                     os.replace(stage, target)
                 journal["status"] = "committed"
-                _write_json(_journal_path(repo), journal)
-                recover(repo)
+                _write_json(_journal_path(state), journal)
+                recover(repo, state=state)
+                # The repo config.json pointer is written only after the
+                # journaled commit succeeded.
+                _write_pointer(repo, selected)
             except BaseException:
                 try:
-                    recover(repo)
+                    recover(repo, state=state)
                 except BaseException:
                     pass
                 raise
     return _state_payload(repo, path=selected, ready=True, needs_setup=False, error=None)
 
 
-def recover_startup(repo=None):
-    """Recover a crashed storage transaction while owning both stable locks."""
-    repo = _repo(repo)
-    state = _state(repo)
-    os.makedirs(state, exist_ok=True)
-    with _lock(os.path.join(state, "server-instance.lock"), blocking=False):
-        with ia.state_write_lock(state, "storage startup", blocking=True):
-            return recover(repo)
-
-
 def _parser():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", default=None, help="application workspace")
-    parser.add_argument("--instance-id", default=None, help="backend instance identity")
-    sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("status")
-    configure_parser = sub.add_parser("configure")
-    configure_parser.add_argument("--root", required=True)
-    configure_parser.add_argument("--progress-json", action="store_true")
+    parser.add_argument("steps", nargs="+", choices=["status", "configure"])
+    parser.add_argument("--repo", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--root", default=None,
+                        help="vault root for configure (default: last-opened pointer)")
+    parser.add_argument("--instance-id", dest="instance_id", default=None,
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--progress-json", dest="progress_json", action="store_true",
+                        help="emit machine-readable progress events")
     return parser
 
 
 def main(argv=None):
     args = _parser().parse_args(argv)
-    repo = _repo(args.repo)
     try:
-        if args.command == "status":
-            print(json.dumps(status(repo), sort_keys=True))
-            return 0
-        outcome = configure(repo, args.root, args.instance_id, args.progress_json)
-        print(json.dumps(outcome, sort_keys=True))
-        return 0
-    except (StorageError, OSError, ValueError, KeyError) as exc:
-        print(json.dumps(_state_payload(repo, path=None, ready=False,
-                                        needs_setup=False, error=str(exc)), sort_keys=True))
-        return 1
+        if "configure" in args.steps:
+            if not args.root:
+                raise StorageError("configure requires --root")
+            outcome = configure(repo=args.repo, root=args.root,
+                                instance_id=args.instance_id,
+                                progress=args.progress_json)
+        else:
+            outcome = status(repo=args.repo)
+    except StorageError as exc:
+        outcome = {"path": None, "ready": False, "needsSetup": False,
+                   "needsIndex": False, "error": str(exc)}
+    # One JSON line on stdout: the Electron host parses single-line outcomes.
+    print(json.dumps(outcome))
+    return 0 if outcome.get("ready") or outcome.get("needsSetup") else 1
 
 
 if __name__ == "__main__":

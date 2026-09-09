@@ -11,7 +11,7 @@ app.setPath("userData", path.join(app.getPath("appData"), app.isPackaged ? "Unit
 
 let backendPort = 8765;
 const SERVICE = "unity-asset-library";
-const API_VERSION = 6;
+const API_VERSION = 7;
 const { resolvePort } = require("./port-recovery.cjs");
 let backendProcess = null;
 let ownsBackend = false;
@@ -195,7 +195,6 @@ function preparePackagedBackend() {
     ? path.join(app.getPath("userData"), "backend")
     : path.resolve(__dirname, "..");
   fs.mkdirSync(root, { recursive: true });
-  fs.mkdirSync(path.join(root, "state"), { recursive: true });
   if (app.isPackaged && fs.existsSync(path.join(template, "bin"))) {
     fs.cpSync(path.join(template, "bin"), path.join(root, "bin"), { recursive: true });
   }
@@ -396,6 +395,7 @@ async function bootstrapStorage() {
     } else {
       await startOwnedBackend(root, status.path);
     }
+    captureLegacyLibraryRoot();
     return backendSession;
   } catch (error) {
     setStorageError(error, { canChange: !backendSession?.external, needsSetup: false });
@@ -529,12 +529,12 @@ async function backendRequest(endpoint, options = {}) {
   return value;
 }
 
-async function postJson(endpoint, body = {}) {
+async function postJson(endpoint, body = {}, options = {}) {
   const guard = assertBackendRequestAllowed();
-  assertImportIdle();
+  if (!options.allowDuringImport) assertImportIdle();
   const state = await readState();
   assertOwnState(state, guard.session);
-  assertImportIdle();
+  if (!options.allowDuringImport) assertImportIdle();
   const value = await requestJson(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -562,6 +562,37 @@ function importCli(command, extra = [], onProgress) {
   const root = app.isPackaged ? path.join(process.resourcesPath, "ual-backend") : path.resolve(__dirname, "..");
   return runPythonCli([path.join(root, "bin", "import_packages.py"), command, ...extra], onProgress, root);
 }
+const PREF_KEYS = ["theme", "sort", "view", "filters", "action"];
+let legacyLibraryRoot = null;
+
+function captureLegacyLibraryRoot() {
+  // The retained legacy index binds old browser preferences to their original library,
+  // even after the last-opened pointer changes. Never infer ownership from that pointer.
+  try { legacyLibraryRoot = canonicalPath(JSON.parse(fs.readFileSync(path.join(configRepoRoot(), "state", "index-meta.json"), "utf8")).vault_root); } catch { legacyLibraryRoot = null; }
+}
+
+function configRepoRoot() {
+  return app.isPackaged ? path.join(app.getPath("userData"), "backend") : path.resolve(__dirname, "..");
+}
+
+captureLegacyLibraryRoot();
+
+function validPreferences(prefs) {
+  if (!prefs || typeof prefs !== "object" || Array.isArray(prefs)) return false;
+  return Object.keys(prefs).every((key) => {
+    if (!PREF_KEYS.includes(key)) return false;
+    if (key === "filters") return typeof prefs[key] === "object" && prefs[key] !== null && !Array.isArray(prefs[key]);
+    if (key === "action") {
+      if (prefs[key] === null || prefs[key] === undefined) return true;
+      const action = prefs[key];
+      return Boolean(action) && typeof action === "object" && !Array.isArray(action) && typeof action.id === "string" && action.id.length > 0 &&
+        typeof action.kind === "string" && ["resync", "cleanup", "organize"].includes(action.kind) &&
+        typeof action.phase === "string" && ["plan", "apply"].includes(action.phase);
+    }
+    return typeof prefs[key] === "string" || prefs[key] === null || prefs[key] === undefined;
+  });
+}
+
 
 function importProjectPath(value) {
   if (typeof value !== "string" || !path.isAbsolute(value) || value.includes("\0")) throw new Error("Choose an absolute Unity project path.");
@@ -713,8 +744,15 @@ function registerIpc() {
     if (target !== root && !target.startsWith(root + path.sep)) throw new Error("This file is outside the library folder.");
     return shell.showItemInFolder(target);
   });
+  ipcMain.handle("prefs:get", () => backendRequest("/api/preferences"));
+  ipcMain.handle("prefs:set", (_event, prefs, libraryRoot, onlyIfMissing) => {
+    if (!validPreferences(prefs) || typeof libraryRoot !== "string" || !libraryRoot.trim()) throw new Error("Invalid preferences payload.");
+    const body = { preferences: prefs, library_root: libraryRoot };
+    if (onlyIfMissing === true) body.only_if_missing = true;
+    return postJson("/api/preferences", body, { allowDuringImport: true });
+  });
+  ipcMain.handle("prefs:legacy-root", () => legacyLibraryRoot);
 }
-
 function createWindow() {
   const window = new BrowserWindow({
     width: 1480,

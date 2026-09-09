@@ -853,9 +853,9 @@ class TestPendingEnrichmentFlag(unittest.TestCase):
 
 
 class TestOutputDirRouting(unittest.TestCase):
-    """config output_dir relocates generated CSV output relative to the repo."""
+    """Generated CSV now lives in the state dir alongside the index."""
 
-    def test_output_dir_resolves_relative_to_repo(self):
+    def test_emit_writes_csv_into_state_dir(self):
         root = tempfile.mkdtemp()
         state = os.path.join(root, "state")
         os.makedirs(state)
@@ -865,16 +865,13 @@ class TestOutputDirRouting(unittest.TestCase):
             fh.write(b"\0" * 500)
         ia.main(["scan", "--root", vault, "--state", state])
 
-        fake_repo = tempfile.mkdtemp()
         with mock.patch.object(ia, "load_config",
-                               return_value={"vault_root": vault,
-                                             "output_dir": "gallery"}), \
-             mock.patch.object(ia, "repo_dir", return_value=fake_repo):
+                               return_value={"vault_root": vault}):
             ia.main(["emit", "--state", state])
 
-        self.assertTrue(os.path.exists(os.path.join(fake_repo, "gallery", "assets.csv")))
+        self.assertTrue(os.path.exists(os.path.join(state, "assets.csv")))
         self.assertTrue(os.path.exists(os.path.join(state, "review-queue.md")))
-        self.assertFalse(os.path.exists(os.path.join(fake_repo, "gallery", "index.html")))
+        self.assertFalse(os.path.exists(os.path.join(vault, "assets.csv")))
 
 
 if __name__ == "__main__":

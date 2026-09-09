@@ -43,7 +43,7 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), "ual-bootstrap-"));
 
     // A compatible external backend is surfaced but never made mutable by this desktop shell.
     const externalState = {
-      service: "unity-asset-library", api_version: 6, ready: true, csrf: "external-token",
+      service: "unity-asset-library", api_version: 7, ready: true, csrf: "external-token",
       vault_root: selected, repo: temp, instance_id: "other-process",
     };
     context.fetch = async () => ({ ok: true, text: async () => JSON.stringify(externalState) });
@@ -53,7 +53,12 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), "ual-bootstrap-"));
     assert.equal(externalStorage.ready, true);
     assert.equal(externalStorage.canChange, false);
     vm.runInContext("registerIpc()", context);
-    // Stale replies and skipping confirmation must not release the active prompt.
+    // Invalid preference payloads must fail before contacting the backend.
+    for (const bad of [null, "x", [], { theme: 5 }, { nope: "x" }, { action: { id: "a", kind: "bogus", phase: "plan" } }]) {
+      await assert.rejects(async () => handlers["prefs:set"]({}, bad, selected), /Invalid preferences/);
+    }
+    await assert.rejects(async () => handlers["prefs:set"]({}, { theme: "dark" }, ""), /Invalid preferences/);
+    assert.throws(() => handlers["prefs:set"]({}), /Invalid preferences/);
     const choicePromise = vm.runInContext("askPortChoice({ port: 8765, suggestion: 8766, owner: { pid: 123, identity: \"test\" }, detail: \"\", confirm: false })", context);
     const requestId = vm.runInContext("getStorage().portRecovery.id", context);
     const answer = (id, choice) => handlers["storage:port-choice"]({}, id, choice);

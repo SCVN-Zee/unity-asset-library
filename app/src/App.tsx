@@ -118,21 +118,45 @@ const DEFAULT_FILTERS: FilterState = {
   untagged: false,
 };
 
-function loadFilters(): FilterState {
+function sanitizeFilters(saved: Partial<FilterState> | null): FilterState {
+  if (!saved || typeof saved !== "object") return DEFAULT_FILTERS;
+  return {
+    query: typeof saved.query === "string" ? saved.query : "",
+    category: typeof saved.category === "string" && saved.category ? saved.category : "All assets",
+    quick: (["all", "favorites", "pending", "flagged", "non-store"] as const).includes(saved.quick as QuickFilter) ? (saved.quick as QuickFilter) : "all",
+    author: typeof saved.author === "string" ? saved.author : "",
+    selectedTags: Array.isArray(saved.selectedTags) ? [...new Set(saved.selectedTags.filter((tag): tag is string => typeof tag === "string" && !!tag.trim()).map((tag) => tag.trim().toLowerCase()))] : [],
+    tagMode: saved.tagMode === "any" ? "any" : "all",
+    untagged: saved.untagged === true,
+  };
+}
+
+const LEGACY_PREFERENCE_KEYS = ["ual:theme", "ual:sort", "ual:view", "ual:filters", "ual:action"];
+
+function readLegacyPreferences(): Preferences | null {
   try {
-    const saved = JSON.parse(localStorage.getItem("ual:filters") || "null") as Partial<FilterState> | null;
-    if (!saved || typeof saved !== "object") return DEFAULT_FILTERS;
+    const filters = localStorage.getItem("ual:filters");
+    const action = sessionStorage.getItem("ual:action");
+    const theme = localStorage.getItem("ual:theme");
+    const sort = localStorage.getItem("ual:sort");
+    const view = localStorage.getItem("ual:view");
+    if (!filters && !action && !theme && !sort && !view) return null;
     return {
-      query: typeof saved.query === "string" ? saved.query : "",
-      category: typeof saved.category === "string" && saved.category ? saved.category : "All assets",
-      quick: (["all", "favorites", "pending", "flagged", "non-store"] as const).includes(saved.quick as QuickFilter) ? (saved.quick as QuickFilter) : "all",
-      author: typeof saved.author === "string" ? saved.author : "",
-      selectedTags: Array.isArray(saved.selectedTags) ? [...new Set(saved.selectedTags.filter((tag): tag is string => typeof tag === "string" && !!tag.trim()).map((tag) => tag.trim().toLowerCase()))] : [],
-      tagMode: saved.tagMode === "any" ? "any" : "all",
-      untagged: saved.untagged === true,
+      theme: theme === "light" || theme === "dark" ? theme : "system",
+      sort: sort === "author" || sort === "size" ? sort : "name",
+      view: view === "list" ? "list" : "grid",
+      filters: filters ? sanitizeFilters(JSON.parse(filters) as Partial<FilterState>) : DEFAULT_FILTERS,
+      action: action ? (JSON.parse(action) as ActionIdentity) : null,
     };
   } catch {
-    return DEFAULT_FILTERS;
+    throw new Error("Previous preferences are unreadable; the originals were kept. Repair them before retrying migration.");
+  }
+}
+
+function clearLegacyPreferences() {
+  for (const key of LEGACY_PREFERENCE_KEYS) {
+    localStorage.removeItem(key);
+    sessionStorage.removeItem(key);
   }
 }
 
@@ -367,7 +391,7 @@ function StorageScreen({
             <Input className="storage-input"><Icon as={Folder} className="icon" aria-hidden="true" focusable={false} /><InputField id="storage-path" value={path} onChangeText={handlePathChange} placeholder="/Users/you/Assets" aria-label="Library folder" aria-invalid={Boolean(displayedError)} aria-describedby={displayedError ? "storage-help storage-error" : "storage-help"} disabled={busy || blocked} /></Input>
             <Button type="button" className="button" onPress={onBrowse} isDisabled={busy || blocked} aria-label="Browse for library folder"><Icon as={FolderOpen} className="icon" aria-hidden="true" focusable={false} />Browse</Button>
           </div>
-          <p id="storage-help" className="storage-help">The full path is stored locally. Existing files are never moved or deleted.</p>
+          <p id="storage-help" className="storage-help">Your index, tags, favorites, and preferences stay in this folder’s <code>.data</code> directory. Asset packages are not moved or deleted during setup.</p>
           {displayedError && <p id="storage-error" className="storage-error" role="alert">{displayedError}</p>}
           {blocked && !busy && <p className="storage-notice" role="status">{blockedByExternalBackend ? "Another Unity Asset Library backend is using this library. Stop it before changing folders." : "Library activity is in progress. You can change this folder when it finishes."}</p>}
           {busy && <StorageProgress progress={storage?.progress ?? null} />}
@@ -437,25 +461,24 @@ function App() {
   const [storageBusy, setStorageBusy] = useState(false);
   const storageEpochRef = useRef(0);
   const [storageEpoch, setStorageEpoch] = useState(0);
+  const prefsHydratedRef = useRef(false);
+  const prefsSaveChainRef = useRef(Promise.resolve());
+  const libraryRootRef = useRef<string | null>(null);
   const [actionStatus, setActionStatus] = useState<ActionJob | null>(null);
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => new Set());
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const savedFilters = useMemo(loadFilters, []);
-  const [query, setQuery] = useState(savedFilters.query);
-  const [category, setCategory] = useState(savedFilters.category);
-  const [quick, setQuick] = useState<QuickFilter>(savedFilters.quick);
-  const [author, setAuthor] = useState(savedFilters.author);
-  const [selectedTags, setSelectedTags] = useState<string[]>(savedFilters.selectedTags);
-  const [tagMode, setTagMode] = useState<"all" | "any">(savedFilters.tagMode);
-  const [untagged, setUntagged] = useState(savedFilters.untagged);
-  const [sort, setSort] = useState<SortMode>(() => (localStorage.getItem("ual:sort") as SortMode) || "name");
-  const [view, setView] = useState<ViewMode>(() => (localStorage.getItem("ual:view") as ViewMode) || "grid");
+  const [query, setQuery] = useState(DEFAULT_FILTERS.query);
+  const [category, setCategory] = useState(DEFAULT_FILTERS.category);
+  const [quick, setQuick] = useState<QuickFilter>(DEFAULT_FILTERS.quick);
+  const [author, setAuthor] = useState(DEFAULT_FILTERS.author);
+  const [selectedTags, setSelectedTags] = useState<string[]>(DEFAULT_FILTERS.selectedTags);
+  const [tagMode, setTagMode] = useState<"all" | "any">(DEFAULT_FILTERS.tagMode);
+  const [untagged, setUntagged] = useState(DEFAULT_FILTERS.untagged);
+  const [sort, setSort] = useState<SortMode>("name");
+  const [view, setView] = useState<ViewMode>("grid");
   const [inspectorOpen, setInspectorOpen] = useState(() => window.innerWidth >= 1000);
   const [navigationOpen, setNavigationOpen] = useState(false);
-  const [theme, setTheme] = useState<"system" | "light" | "dark">(() => {
-    const saved = localStorage.getItem("ual:theme");
-    return saved === "light" || saved === "dark" ? saved : "system";
-  });
+  const [theme, setTheme] = useState<"system" | "light" | "dark">("system");
   const searchRef = useRef<HTMLInputElement>(null);
   const detailsToggleRef = useRef<HTMLButtonElement>(null);
   const detailsCloseRef = useRef<HTMLButtonElement>(null);
@@ -467,7 +490,7 @@ function App() {
   }, [inspectorOpen]);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem("ual:theme", theme);
+    savePreferencesNow();
   }, [theme]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
@@ -500,6 +523,16 @@ function App() {
   const actionGenerationRef = useRef(0);
   const dismissedRef = useRef(dismissedIds);
   dismissedRef.current = dismissedIds;
+  const prefsRef = useRef<Preferences>({});
+  prefsRef.current = {
+    theme,
+    sort,
+    view,
+    filters: { query, category, quick, author, selectedTags, tagMode, untagged },
+    action: actionStatus && !dismissedIds.has(actionStatus.id) && !["completed", "failed", "cancelled"].includes(actionStatus.status)
+      ? { id: actionStatus.id, kind: actionStatus.kind, phase: actionStatus.phase }
+      : null,
+  };
   const importActive = Boolean(importJob && ["queued", "running"].includes(importJob.status));
   useEffect(() => {
     setImportSelection((current) => {
@@ -551,6 +584,37 @@ function App() {
       document.removeEventListener("pointerdown", handlePointerDown, true);
     };
   }, [actionsOpen]);
+  function savePreferencesNow(extra?: Partial<Preferences>) {
+    if (!prefsHydratedRef.current || !libraryRootRef.current) return;
+    const prefs = { ...prefsRef.current, ...extra };
+    const epoch = storageEpochRef.current;
+    const root = libraryRootRef.current;
+    prefsSaveChainRef.current = prefsSaveChainRef.current
+      .then(async () => {
+        if (epoch !== storageEpochRef.current) return;
+        await api.setPreferences(prefs, root);
+      })
+      .catch((cause: unknown) => {
+        if (epoch === storageEpochRef.current) setError(cause instanceof Error ? cause.message : "Preferences could not be saved.");
+      });
+  }
+
+  function applyPreferences(prefs: Preferences) {
+    if (prefs.theme === "light" || prefs.theme === "dark" || prefs.theme === "system") setTheme(prefs.theme);
+    if (prefs.sort === "name" || prefs.sort === "author" || prefs.sort === "size") setSort(prefs.sort);
+    if (prefs.view === "grid" || prefs.view === "list") setView(prefs.view);
+    if (prefs.filters && typeof prefs.filters === "object") {
+      const next = sanitizeFilters(prefs.filters as Partial<FilterState>);
+      setQuery(next.query);
+      setCategory(next.category);
+      setQuick(next.quick);
+      setAuthor(next.author);
+      setSelectedTags(next.selectedTags);
+      setTagMode(next.tagMode);
+      setUntagged(next.untagged);
+    }
+  }
+
   async function load() {
     const epoch = storageEpochRef.current;
     let loaded = false;
@@ -585,9 +649,39 @@ function App() {
       setState(nextState);
       if (favRev === favRevRef.current) setFavorites(nextFavorites.favorites || []);
       if (tagRev === tagRevRef.current) { setUserTags(nextTags); setTagError(""); }
-      const saved = sessionStorage.getItem("ual:action");
-      let savedIdentity: { id: string; kind: "resync" | "cleanup" | "organize"; phase: "plan" | "apply" } | null = null;
-      try { if (saved) savedIdentity = JSON.parse(saved); } catch { sessionStorage.removeItem("ual:action"); }
+      let savedIdentity: ActionIdentity | null = null;
+      try {
+        let prefs: Preferences = await api.getPreferences();
+        if (epoch !== storageEpochRef.current) return false;
+        if (!prefs || typeof prefs !== "object") prefs = {};
+        if (Object.keys(prefs).length === 0) {
+          // One-time legacy migration: seed only the library that was open pre-upgrade.
+          const legacyRoot = await api.getLegacyLibraryRoot();
+          const legacy = legacyRoot && legacyRoot === nextState.vault_root ? readLegacyPreferences() : null;
+          if (legacy) {
+            try {
+              const seeded = await api.setPreferences(legacy, nextState.vault_root, true);
+              if (epoch !== storageEpochRef.current) return false;
+              if (seeded && typeof seeded === "object") prefs = seeded;
+              clearLegacyPreferences();
+            } catch (migrateCause) {
+              // Keep originals and leave saving disabled until a hydration succeeds.
+              if (epoch === storageEpochRef.current) {
+                setError(migrateCause instanceof Error ? migrateCause.message : "Migrating previous preferences failed; the originals were kept.");
+              }
+              return false;
+            }
+          }
+        }
+        applyPreferences(prefs);
+        savedIdentity = prefs.action ? { id: prefs.action.id, kind: prefs.action.kind, phase: prefs.action.phase } : null;
+        libraryRootRef.current = nextState.vault_root;
+        prefsHydratedRef.current = true;
+      } catch (prefsCause) {
+        if (epoch === storageEpochRef.current) {
+          setError(prefsCause instanceof Error ? prefsCause.message : "Preferences could not be loaded; defaults are in use and changes will not be saved.");
+        }
+      }
       if (!uiRefreshRef.current && nextState.action && !dismissedRef.current.has(nextState.action.id)) setActionStatus(nextState.action);
       else if (!uiRefreshRef.current && savedIdentity && (!nextState.action || nextState.action.id !== savedIdentity.id)) setActionStatus({ id: savedIdentity.id, kind: savedIdentity.kind, phase: savedIdentity.phase, status: "running", stage: "Recovering operation", completed: 0, total: null, current_item: null, counts: {} });
       setAssets(nextIndex.assets || []);
@@ -677,6 +771,7 @@ function App() {
     const epoch = storageEpochRef.current;
     setStorageBusy(true);
     setStorageError("");
+    await prefsSaveChainRef.current.catch(() => {});
     let stopped = false;
     const poll = async () => {
       if (stopped || epoch !== storageEpochRef.current) return;
@@ -700,7 +795,7 @@ function App() {
       setStoragePath(nextStorage.path || nextPath);
       setStorageView("library");
       setStorageError("");
-      setAssets([]);
+      actionGenerationRef.current += 1;
       setSelectedKey(null);
       setQuery("");
       setCategory("All assets");
@@ -715,7 +810,11 @@ function App() {
       setActionStatus(null);
       setDialog(null);
       setDismissedIds(new Set());
-      sessionStorage.removeItem("ual:action");
+      prefsHydratedRef.current = false;
+      prefsSaveChainRef.current = Promise.resolve();
+      setSort("name");
+      setView("grid");
+      setTheme("system");
       actionGenerationRef.current += 1;
       setLoading(true);
       await load();
@@ -747,11 +846,7 @@ function App() {
 
 
   useEffect(() => { void load(); }, []);
-  useEffect(() => { localStorage.setItem("ual:sort", sort); }, [sort]);
-  useEffect(() => { localStorage.setItem("ual:view", view); }, [view]);
-  useEffect(() => {
-    localStorage.setItem("ual:filters", JSON.stringify({ query, category, quick, author, selectedTags, tagMode, untagged }));
-  }, [query, category, quick, author, selectedTags, tagMode, untagged]);
+  useEffect(() => { savePreferencesNow(); }, [sort, view, query, category, quick, author, selectedTags, tagMode, untagged]);
   useEffect(() => {
     if (!userTags) return;
     const known = new Set(userTags.tags);
@@ -994,7 +1089,7 @@ function App() {
       setBusy(name);
       setError("");
       const response = name === "resync" ? await api.resync() : name === "cleanup" ? await api.cleanupPlan() : await api.organizePlan();
-      sessionStorage.setItem("ual:action", JSON.stringify({ id: response.job_id, kind: name, phase: "plan" }));
+      savePreferencesNow({ action: { id: response.job_id, kind: name, phase: "plan" } });
       setActionStatus({ id: response.job_id, kind: name, phase: "plan", status: "queued", stage: "Starting", completed: 0, total: null, current_item: null, counts: {} });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The action could not start.");
@@ -1033,7 +1128,7 @@ function App() {
       setBusy(dialog.mode);
       setError("");
       const response = dialog.mode === "resync" ? await api.resyncApply(dialog.result.plan_hash) : dialog.mode === "cleanup" ? await api.cleanupApply(dialog.result.plan_hash) : await api.organizeApply(dialog.result.plan_hash);
-      sessionStorage.setItem("ual:action", JSON.stringify({ id: response.job_id, kind: dialog.mode, phase: "apply" }));
+      savePreferencesNow({ action: { id: response.job_id, kind: dialog.mode, phase: "apply" } });
       setActionStatus({ id: response.job_id, kind: dialog.mode, phase: "apply", status: "queued", stage: "Starting", completed: 0, total: null, current_item: null, counts: {} });
     } catch (cause) {
       setBusy(null);
@@ -1048,7 +1143,7 @@ function App() {
     const marker = job.id + ":" + job.status;
     if (actionTerminalRef.current === marker) return;
     actionTerminalRef.current = marker;
-    sessionStorage.removeItem("ual:action");
+    savePreferencesNow({ action: null });
     if (job.phase === "plan") {
       setBusy(null);
       if (job.status === "completed" && job.result) {

@@ -13,11 +13,11 @@ resolved absolute path, never by name.
 
 The vault root comes from ../config.json ("vault_root"); --root overrides it for
 one run and --state relocates the state directory (tests pass both to sandbox).
-State lives in this repo's state/, never inside the vault. assets.csv and
+State lives in the vault's .data/ directory, never in the tool repo.
 review-queue.md are generated outputs; React/Electron is the supported viewer.
 
 Usage:
-    python3 index_assets.py scan          # write state/assets.json
+    python3 index_assets.py scan          # write <library>/.data/assets.json
     python3 index_assets.py emit          # write assets.csv + review-queue.md
     python3 index_assets.py scan emit
 """
@@ -37,9 +37,9 @@ from datetime import datetime, timezone
 from progress import emit_progress, json_progress
 ARCHIVE_EXTS = (".unitypackage", ".zip")
 
-# Excluded by resolved path, never by name. The tool lives outside the vault now,
-# so only its in-vault triage folders remain excluded.
-EXCLUDED_DIR_NAMES = ("_Quarantine", "_Unresolved")
+# Excluded by resolved path, never by name. Covers the in-vault triage folders
+# and the library's own .data state directory.
+EXCLUDED_DIR_NAMES = ("_Quarantine", "_Unresolved", ".data")
 
 # Integrity thresholds as byte literals. Never "100 KB" — the decimal/binary
 # ambiguity already produced wrong counts in this project's history.
@@ -679,7 +679,7 @@ def emit_review_queue(data, path):
               "Each of these was searched and the candidate id failed verification, or no "
               "id was found. Common causes: the publisher renamed the package upstream, "
               "the listing was delisted, or two SKUs share a name. Paste the block below "
-              "into `.index/overrides.json` and fill in what you know, then re-run "
+              "into the library’s `.data/overrides.json` and fill in what you know, then re-run "
               "`resolve_store.py enrich`.", "",
               "```json", "{"]
         for i, a in enumerate(sorted(failed, key=lambda x: x["name"])):
@@ -693,7 +693,7 @@ def emit_review_queue(data, path):
     L += [f"## Non-store archives ({len(ns)})", "",
           "Flagged `non_store: true`. Phase 2 skips them entirely: no lookups spent, "
           "and they are excluded from the unresolved count and the >=85% denominator. "
-          "Correct any misflag via `.index/overrides.json`.", ""]
+          "Correct any misflag via the library’s `.data/overrides.json`.", ""]
     for a in ns:
         for v in a["versions"]:
             L.append(f"- `{v['file']}`")
@@ -872,8 +872,15 @@ def repo_dir():
 
 
 def state_dir():
-    """Tool state lives in the repo's state/, never inside the vault."""
-    return os.path.join(repo_dir(), "state")
+    """All user-side state lives in the configured vault's .data directory."""
+    return data_dir(load_config()["vault_root"])
+
+
+def data_dir(root):
+    target = os.path.join(os.path.abspath(root), ".data")
+    if os.path.islink(target) or (os.path.exists(target) and not os.path.isdir(target)):
+        raise ValueError(f"library data directory must be a real directory: {target}")
+    return target
 
 
 def load_config():
@@ -881,24 +888,16 @@ def load_config():
     with open(os.path.join(repo_dir(), "config.json"), encoding="utf-8") as fh:
         return json.load(fh)
 
-def output_dir(root, cfg=None):
-    """Directory for generated CSV output. Configured "output_dir" resolves
-    against this repo; without one, output targets the vault root itself."""
-    if cfg is None:
-        cfg = load_config()
-    out_dir = cfg.get("output_dir")
-    if out_dir:
-        return os.path.abspath(os.path.join(repo_dir(), out_dir))
-    return root
 
 
 def main(argv=None, state_lock_held=False, scanned=None, progress=None):
     probe = argparse.ArgumentParser(add_help=False)
     probe.add_argument("--state", default=None)
+    probe.add_argument("--root", default=None)
     probe.add_argument("--state-lock-held", action="store_true")
     probe_args, _ = probe.parse_known_args(argv)
     held = state_lock_held or probe_args.state_lock_held
-    index_dir = os.path.abspath(probe_args.state) if probe_args.state else state_dir()
+    index_dir = os.path.abspath(probe_args.state) if probe_args.state else data_dir(probe_args.root) if probe_args.root else state_dir()
     try:
         if held:
             return _main_unlocked(argv, scanned=scanned, progress=progress)
@@ -913,7 +912,7 @@ def _main_unlocked(argv=None, scanned=None, progress=None):
     ap.add_argument("--root", default=None,
                     help="vault root override (default: config.json vault_root)")
     ap.add_argument("--state", default=None,
-                    help="state dir override (default: repo state/)")
+                    help="state dir override (default: selected library .data/)")
     ap.add_argument("--state-lock-held", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--progress-json", action="store_true",
                     help="emit machine-readable progress events")
@@ -923,7 +922,7 @@ def _main_unlocked(argv=None, scanned=None, progress=None):
 
     cfg = {} if args.root else load_config()
     root = os.path.abspath(args.root) if args.root else cfg["vault_root"]
-    index_dir = os.path.abspath(args.state) if args.state else state_dir()
+    index_dir = os.path.abspath(args.state) if args.state else data_dir(root)
     assets_json = os.path.join(index_dir, "assets.json")
 
     data = None
@@ -1029,8 +1028,7 @@ def _main_unlocked(argv=None, scanned=None, progress=None):
         data = user_tags.overlay(data, index_dir)
         data = annotate_pending(
             data, os.path.join(index_dir, "pending-enrichment.json"))
-        out_dir = output_dir(root, cfg)
-        rows = emit_csv(data, os.path.join(out_dir, "assets.csv"))
+        rows = emit_csv(data, os.path.join(index_dir, "assets.csv"))
         emit_review_queue(data, os.path.join(index_dir, "review-queue.md"))
         print(f"emit: assets.csv ({rows} rows), review-queue -> {index_dir}")
         emit_progress(progress, "emit", 1, 1, None, emitted_rows=rows)

@@ -18,7 +18,7 @@ const localRequire = createRequire(entry);
     let finishWorker;
     const appEvents = {};
     let nativeQuits = 0;
-    const state = { service: 'unity-asset-library', api_version: 6, ready: true, csrf: 'test', vault_root: root, repo: root, instance_id: 'fixture', job: null, action: null };
+    const state = { service: 'unity-asset-library', api_version: 7, ready: true, csrf: 'test', vault_root: root, repo: root, instance_id: 'fixture', job: null, action: null };
     const app = { isPackaged: false, getPath: () => root, setPath() {}, whenReady: () => ({ then() {} }), on: (name, handler) => { appEvents[name] = handler; }, quit: () => { nativeQuits++; } };
     const context = vm.createContext({
       require: (name) => name === "electron" ? { app, ipcMain: { handle: (name, fn) => { handlers[name] = fn; } }, dialog: { showMessageBox: async () => ({ response: choice }), showMessageBoxSync: () => choice } } : localRequire(name),

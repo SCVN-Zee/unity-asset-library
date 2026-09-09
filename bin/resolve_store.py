@@ -866,11 +866,13 @@ def main(argv=None, state_lock_held=False):
     probe = argparse.ArgumentParser(add_help=False)
     probe.add_argument("command", choices=["spike", "resolve", "enrich", "export-titles", "import-ids"])
     probe.add_argument("--state-lock-held", action="store_true")
+    probe.add_argument("--state", default=None)
     probe_args, _ = probe.parse_known_args(argv)
     held = state_lock_held or probe_args.state_lock_held
     if probe_args.command == "enrich" and not held:
         from index_assets import state_dir, state_write_lock
-        with state_write_lock(state_dir(), "resolve_store enrich", blocking=True):
+        index_dir = os.path.abspath(probe_args.state) if probe_args.state else state_dir()
+        with state_write_lock(index_dir, "resolve_store enrich", blocking=True):
             return _main_unlocked(argv)
     return _main_unlocked(argv)
 def _main_unlocked(argv=None):
@@ -890,13 +892,14 @@ def _main_unlocked(argv=None):
                     help="export-titles: only assets queued in pending-enrichment.json")
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--state-lock-held", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--state", default=None, help="library data directory override")
     ap.add_argument("--progress-json", action="store_true",
                     help="emit structured UL_PROGRESS events to stdout")
     ap.add_argument("--limit", type=int, default=30)
     ap.add_argument("--base-delay", type=float, default=4.0)
     args = ap.parse_args(argv)
 
-    index_dir = state_dir()
+    index_dir = os.path.abspath(args.state) if args.state else state_dir()
     assets_json = os.path.join(index_dir, "assets.json")
     cache_path = os.path.join(index_dir, "cache.json")
     overrides_path = os.path.join(index_dir, "overrides.json")

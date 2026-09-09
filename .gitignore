@@ -9,7 +9,8 @@ node_modules/
 /config.json
 /assets.csv
 
-# Local inventory and runtime state; only Store crawl data is shared.
+# Portable library metadata and legacy app state.
+.data/
 /state/*
 !/state/cache.json
 

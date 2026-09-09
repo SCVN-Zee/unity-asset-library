@@ -3,7 +3,7 @@
 
 Tags are user data, not derived index metadata: a rescan must never rewrite
 them and enrichment must never override them. They live in their own file
-(state/user_tags.json) shaped exactly like the desktop bridge contract:
+(<library>/.data/user_tags.json) shaped exactly like the desktop bridge contract:
 
     {"tags": [...], "assignments": {asset_key: [tag, ...]}}
 
@@ -79,7 +79,7 @@ def load(state_dir):
         return {"tags": [], "assignments": {}}
     except (ValueError, UnicodeDecodeError) as exc:
         raise TagStoreError("the user tag store is unreadable; "
-                            f"fix or remove state/{STORE_NAME}") from exc
+                            f"fix or remove the library’s .data/{STORE_NAME}") from exc
     return _validate(data)
 
 

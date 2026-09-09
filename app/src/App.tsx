@@ -36,6 +36,9 @@ import {
   ChevronDown,
   ChevronRight,
   CircleSlash,
+  CircleCheck,
+  CircleAlert,
+  Package,
   ExternalLink,
   Folder,
   FolderOpen,
@@ -266,6 +269,8 @@ type ProgressProps = {
   job: ProgressSnapshot & { id: string; status: string; kind?: string; phase?: string; error?: string | null; error_code?: string | null; result?: ActionResult | null };
   onDismiss?: (id: string) => void;
   announce?: boolean;
+  compact?: boolean;
+  onReview?: () => void;
 };
 
 const PROGRESS_STAGE_LABELS: Record<string, string> = {
@@ -284,7 +289,8 @@ const PROGRESS_STAGE_LABELS: Record<string, string> = {
 
 const PROGRESS_COUNT_LABELS: Record<string, string> = { moved: "files moved", skipped: "files skipped", staged: "files staged", removed: "files deleted", rolled_back: "files rolled back", rollback_failed: "rollback failures", resolved: "resolved", failed: "failed", blocked: "blocked", imported: "packages imported", cancelled: "packages cancelled", index_added: "index entries added", index_removed: "index entries removed", index_resized: "index entries resized", inventory_examined: "inventory examined", inventory_found: "inventory found" };
 
-function ActionProgress({ job, onDismiss, announce = true }: ProgressProps) {
+function ActionProgress({ job, onDismiss, announce = true, compact = false, onReview }: ProgressProps) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!["queued", "running"].includes(job.status) || !job.started_at) return;
@@ -309,7 +315,7 @@ function ActionProgress({ job, onDismiss, announce = true }: ProgressProps) {
   const rollbackIncomplete = result?.rollback_incomplete === true;
   const displayCounts = Object.entries(counts).filter(([key]) => Boolean(PROGRESS_COUNT_LABELS[key]) || key.startsWith("index_") || key.startsWith("inventory_"));
   const guidance = rollbackIncomplete ? "Residual files may need manual attention." : refreshFailed ? "Verify the library before trying again." : "";
-  return (
+  const panel = (
     <section className={["progress-panel", terminal ? "terminal" : "", job.status === "failed" ? "failed" : ""].join(" ")} data-progress-id={job.id} aria-label={title + " progress"}>
       <div className="progress-heading">
         <div><strong>{title}</strong><span className="progress-status">{outcome}</span></div>
@@ -320,7 +326,19 @@ function ActionProgress({ job, onDismiss, announce = true }: ProgressProps) {
       {(total !== null || !terminal || job.current_item) && <div className="progress-meta">{total !== null && <span>{total === 0 ? "No items in this stage" : completed + " of " + total + " in this stage"}{total !== 0 && percent !== undefined ? " · " + percent + "%" : ""}</span>}{total === null && !terminal && <span>{unknownProgress}</span>}{job.current_item && <span className="progress-current" title={job.current_item}>Current: {job.current_item}</span>}</div>}
       <div className="progress-counts">{displayCounts.filter(([, value]) => typeof value === "number").map(([key, value]) => <span key={key}><strong>{value}</strong> {key === "skipped" && job.kind === "enrich" ? "assets skipped" : PROGRESS_COUNT_LABELS[key] || key.replaceAll("_", " ")}</span>)}</div>
       {(job.error || job.error_code || guidance) && <p className="progress-error">{rollbackIncomplete && <strong>Rollback incomplete. </strong>}{refreshFailed && <strong>Changes applied, but index refresh failed. </strong>}{job.error && <span>{job.error} </span>}{guidance && <span>{guidance}</span>}{!job.error && !guidance && job.error_code}</p>}
+      {onReview && <Button type="button" className="button quiet task-review" onPress={onReview} aria-label="Open import progress">Review import</Button>}
     </section>
+  );
+  if (!compact) return panel;
+  return (
+    <div className="header-task" onMouseEnter={() => setDetailsOpen(true)} onMouseLeave={() => setDetailsOpen(false)} onFocus={() => setDetailsOpen(true)} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setDetailsOpen(false); }} onKeyDown={(event) => { if (event.key === "Escape") { setDetailsOpen(false); event.stopPropagation(); } }}>
+      <Button type="button" className="task-indicator" data-status={job.status} aria-label={`${title}: ${outcome}${!terminal && percent !== undefined ? `, ${percent}%` : ""}. Show details`} aria-expanded={detailsOpen} aria-controls={`task-details-${job.id}`} onPress={() => setDetailsOpen(true)}>
+        <Icon as={job.status === "failed" ? CircleAlert : job.status === "completed" ? CircleCheck : job.status === "cancelled" ? CircleSlash : job.kind === "enrich" ? Sparkles : job.kind === "import" ? Package : RefreshCw} className="icon" aria-hidden="true" />
+        <span className="task-label">{actionLabel}</span>
+        {!terminal && (percent === undefined ? <Spinner className="spinner task-spinner" aria-hidden="true" /> : <span className="task-percent">{percent}%</span>)}
+      </Button>
+      <div className="task-details" id={`task-details-${job.id}`} hidden={!detailsOpen}>{panel}</div>
+    </div>
   );
 }
 type StorageView = "loading" | "onboarding" | "settings" | "library";
@@ -1187,10 +1205,6 @@ function App() {
     setState((current) => current ? { ...current, job: null } : current);
   }
 
-  const jobFailure =
-    state?.job?.status === "failed"
-      ? state.job.error || "Enrichment failed."
-      : "";
   const jobRunning =
     state?.job && ["queued", "running"].includes(state.job.status);
   if (storage?.portRecovery) return <PortRecoveryScreen key={storage.portRecovery.id} request={storage.portRecovery} onStorage={setStorage} />;
@@ -1205,6 +1219,11 @@ function App() {
           <h1>Unity Asset Library</h1>
         </div>
         <div className="top-actions">
+          <div className="header-tasks" role="group" aria-label="Background tasks">
+            {actionStatus && !dismissedIds.has(actionStatus.id) && <ActionProgress compact job={actionStatus} onDismiss={dismissAction} announce={!(dialog && actionStatus.phase === "apply")} />}
+            {state?.job && !dismissedIds.has(state.job.id) && <ActionProgress compact job={state.job} onDismiss={dismissEnrich} />}
+            {importJob && !dismissedIds.has(importJob.id) && <ActionProgress compact job={importJob} onDismiss={dismissImportJob} onReview={importActive ? () => setImportOpen(true) : undefined} />}
+          </div>
           <Button type="button" className="icon-button theme-toggle" title={`Theme: ${theme}. Switch to ${theme === "system" ? "light" : theme === "light" ? "dark" : "system"}`} aria-label={`Theme: ${theme}. Switch to ${theme === "system" ? "light" : theme === "light" ? "dark" : "system"}`} onPress={() => setTheme(theme === "system" ? "light" : theme === "light" ? "dark" : "system")}>
             <Icon as={theme === "system" ? Monitor : theme === "light" ? Sun : Moon} className="icon" aria-hidden="true" />
           </Button>
@@ -1392,22 +1411,11 @@ function App() {
           </Popover>
         </div>
       </header>
-      {(error || jobFailure) && (
+      {error && (
         <Alert className="error-banner">
-          <strong>{jobFailure ? "Enrichment failed" : "Backend notice"}</strong>
-          <span>{error || jobFailure}</span>
-          <Button
-            type="button"
-            onPress={() => {
-              if (jobFailure)
-                setState((current) =>
-                  current ? { ...current, job: null } : current,
-                );
-              setError("");
-              if (!jobFailure) void load();
-            }}
-          >
-            {jobFailure ? "Dismiss" : "Retry"}
+          <strong>Backend notice</strong>
+          <span>{error}</span>
+          <Button type="button" onPress={() => { setError(""); void load(); }}>Retry
           </Button>
         </Alert>
       )}
@@ -1684,14 +1692,6 @@ function App() {
             {query && <Button className="filter-chip" aria-label="Remove search filter" onPress={() => setQuery("")}>Search: {query}<Icon as={X} className="icon" aria-hidden="true" /></Button>}
             <Button className="filter-reset" onPress={clearFilters}>Clear filters</Button>
           </div>}
-          {actionStatus && !dismissedIds.has(actionStatus.id) && <ActionProgress job={actionStatus} onDismiss={dismissAction} announce={!(dialog && actionStatus.phase === "apply")} />}
-          {state?.job && !dismissedIds.has(state.job.id) && <ActionProgress job={state.job} onDismiss={dismissEnrich} />}
-          {importJob && !dismissedIds.has(importJob.id) && (
-            <div className="import-progress">
-              <ActionProgress job={importJob} onDismiss={dismissImportJob} />
-              {importActive && <Button type="button" className="button quiet" onPress={() => setImportOpen(true)} aria-label="Open import progress">Review import</Button>}
-            </div>
-          )}
           {loading ? (
             <div className="library-loading" role="status" aria-label="Loading your library"><span>Loading your library…</span><div className="asset-grid" aria-hidden="true">{Array.from({ length: 8 }, (_, index) => <div className="asset-skeleton" key={index}><div /><span /><span /></div>)}</div></div>
           ) : assets.length === 0 ? (

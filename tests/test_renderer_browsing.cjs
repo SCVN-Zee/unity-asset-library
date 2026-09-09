@@ -29,7 +29,7 @@ fs.writeFileSync(preload, `const favorites = new Set(['audio-favorite', 'tools-f
   inspectImportProject: async () => ({ path: '', title: '', version: '', open: false, bridge_installed: false, bridge_ready: false }),
   installImportBridge: async () => ({ path: '', title: '', version: '', open: false, bridge_installed: false, bridge_ready: false }),
   startImport: async () => { throw new Error('not wired in fixture'); },
-  getImport: async () => null,
+  getImport: async () => JSON.parse(localStorage.getItem("ual:test-import") || "null"),
   stopImport: async () => { throw new Error('not wired in fixture'); }
 });`);
 let win;
@@ -126,6 +126,29 @@ app.whenReady().then(async () => {
       await waitFor('document.querySelectorAll(".asset-cell").length === 4');
     }
     console.log('PASS: grid/list Cmd toggles, forward/backward/union ranges, checkbox parity, ineligible skipping, favorite isolation and filter/sort anchor reset');
+    await evaluate(`localStorage.setItem("ual:test-import", JSON.stringify({ id: "preparation", kind: "import", status: "running", project: "/fixture/project", mode: "closed", completed: 0, total: 1, results: [{ file: "Cloud.unitypackage", status: "downloading", bytes_completed: 50, bytes_total: 100 }] }))`);
+    await win.reload();
+    await waitFor(`!!document.querySelector('[aria-label="Open import progress"]')`);
+    assert.equal(await evaluate(`document.querySelector(".task-details").hidden`), true);
+    win.webContents.focus();
+    await evaluate(`document.querySelector(".topbar .task-indicator").focus()`);
+    await waitFor(`!document.querySelector(".task-details").hidden`);
+    await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+    await waitFor(`document.querySelector(".task-details").hidden`);
+    const taskBounds = await evaluate(`(() => { const r = document.querySelector(".task-indicator").getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`);
+    win.webContents.sendInputEvent({ type: "mouseMove", ...taskBounds });
+    await waitFor(`!document.querySelector(".task-details").hidden`);
+    await click('[aria-label="Open import progress"]');
+    await waitFor(`!!document.querySelector('.import-dialog')`);
+    await click(".import-dialog .dialog-foot .quiet");
+    await evaluate(`localStorage.setItem("ual:test-import", JSON.stringify({ id: "preparation", kind: "import", status: "failed", error: "Package could not be imported", completed: 0, total: 1, results: [] }))`);
+    await waitFor(`!!document.querySelector('.task-indicator[data-status="failed"]')`);
+    await click(".task-indicator");
+    await waitFor(`!document.querySelector(".task-details").hidden`);
+    assert.equal(await evaluate(`document.querySelector(".task-details .progress-error").textContent.trim()`), "Package could not be imported");
+    await click('[aria-label="Dismiss Import result"]');
+    await waitFor(`!document.querySelector(".task-indicator")`);
+    console.log("PASS: task hover, focus, Escape, review import, failure details and dismissal");
   } catch (error) {
     console.error(error);
     exitCode = 1;

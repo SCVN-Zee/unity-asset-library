@@ -18,7 +18,14 @@ fs.writeFileSync(preload, `require('electron').contextBridge.exposeInMainWorld('
   getAssets: async () => ({ assets: ${JSON.stringify(fixtures)} }),
   getState: async () => ({ pending_enrichment: 0, job: null, action: null, ready: true }),
   favorites: async () => ({ favorites: ['audio-favorite', 'tools-favorite'] }),
-  getTags: async () => ({ tags: [], assignments: {} })
+  getTags: async () => ({ tags: [], assignments: {} }),
+  importProjects: async () => [],
+  chooseImportProject: async () => null,
+  inspectImportProject: async () => ({ path: '', title: '', version: '', open: false, bridge_installed: false, bridge_ready: false }),
+  installImportBridge: async () => ({ path: '', title: '', version: '', open: false, bridge_installed: false, bridge_ready: false }),
+  startImport: async () => { throw new Error('not wired in fixture'); },
+  getImport: async () => null,
+  stopImport: async () => { throw new Error('not wired in fixture'); }
 });`);
 let win;
 const evaluate = (code) => win.webContents.executeJavaScript(code);

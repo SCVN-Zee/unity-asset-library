@@ -33,6 +33,11 @@ declare global {
   type ActionResult = { preview?: ActionPreview; plan_hash?: string; [key: string]: unknown };
   type TagChange = { action: "create" | "rename" | "delete" | "assign" | "remove"; tag: string; new_tag?: string; asset_key?: string };
   type UserTags = { tags: string[]; assignments: Record<string, string[]> };
+  type UnityProject = { path: string; title: string; version: string };
+  type ImportProject = UnityProject & { open: boolean; bridge_installed: boolean; bridge_ready: boolean };
+  type ImportRequest = { project: string; mode: "closed" | "live"; packages: { asset_key: string; file: string }[] };
+  type ImportResultRow = { file: string; status: "pending" | "importing" | "imported" | "failed" | "cancelled"; error?: string };
+  type ImportJob = ProgressSnapshot & { id: string; kind: "import"; status: "queued" | "running" | "completed" | "failed" | "cancelled"; project: string; mode: "closed" | "live"; results: ImportResultRow[]; error?: string | null; stop_requested?: boolean };
   type UalBridge = {
     getStorage: () => Promise<StorageState>;
     answerPortChoice: (id: string, choice: PortChoice) => Promise<void>;
@@ -57,6 +62,13 @@ declare global {
     revealItem: (filePath: string) => Promise<void>;
     getTags: () => Promise<UserTags>;
     mutateTags: (change: TagChange) => Promise<UserTags>;
+    importProjects: () => Promise<UnityProject[]>;
+    chooseImportProject: () => Promise<string | null>;
+    inspectImportProject: (path: string) => Promise<ImportProject>;
+    installImportBridge: (path: string) => Promise<ImportProject>;
+    startImport: (request: ImportRequest) => Promise<ImportJob>;
+    getImport: () => Promise<ImportJob | null>;
+    stopImport: (id: string) => Promise<ImportJob>;
   };
   interface Window { ual: UalBridge }
 }

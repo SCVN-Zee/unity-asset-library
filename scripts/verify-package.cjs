@@ -33,8 +33,13 @@ try {
   const python = vm.runInContext("pythonCommand()", context);
   assert.equal(python, path.join(resources, "python", "bin", "python3"));
   const storage = await vm.runInContext(
-    'runStorageCli(storageArgs(preparePackagedBackend(), "package-smoke", "status"))', context);
+    'runPythonCli(storageArgs(preparePackagedBackend(), "package-smoke", "status"))', context);
   assert.equal(storage.needsSetup, true);
+  const importWorker = path.join(resources, "ual-backend", "bin", "import_packages.py");
+  execFileSync(python, [importWorker, "--help"], { env: { PATH: "/nonexistent", HOME: temp, PYTHONDONTWRITEBYTECODE: "1", PYTHONNOUSERSITE: "1" } });
+  for (const template of ["UnityAssetLibraryImport.cs", "UnityAssetLibraryImport.asmdef"]) {
+    assert(fs.readFileSync(path.join(path.dirname(importWorker), template)).equals(fs.readFileSync(path.join(__dirname, "..", "bin", template))), "Shipped live-import template differs from the verified source");
+  }
   assert(!fs.readdirSync(path.join(resources, "python"), { recursive: true })
     .some((name) => name.endsWith(".pyc")), "Launcher must not write bytecode into the signed runtime");
   const result = execFileSync(python, ["-c", `

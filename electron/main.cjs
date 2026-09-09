@@ -3,6 +3,7 @@ const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const os = require("node:os");
 
 // Preserve existing libraries and preferences across the rename to Unity Asset
 // Library: keep each environment on its historical userData directory.
@@ -17,12 +18,17 @@ let ownsBackend = false;
 let backendSession = null;
 let backendGeneration = 0;
 let quitting = false;
+let quitReady = false;
 let registered = false;
 let startupPromise = Promise.resolve();
 let saveQueue = Promise.resolve();
 let transitionPromise = null;
 const backendOutput = [];
 let pendingPortChoice = null;
+let importJob = null;
+let importAdmission = false;
+let importPromise = Promise.resolve();
+let importCancelFile = null;
 const storageState = {
   path: null,
   ready: false,
@@ -219,12 +225,12 @@ function parseStorageOutcome(value) {
   return { path: value.path, ready: value.ready, needsSetup: value.needsSetup, needsIndex: value.needsIndex === true, error: value.error };
 }
 
-function runStorageCli(args, onProgress) {
+function runPythonCli(args, onProgress, cwd = args[args.indexOf("--repo") + 1]) {
   return new Promise((resolve, reject) => {
     let child;
     try {
       child = spawn(pythonCommand(), args, {
-        cwd: args[args.indexOf("--repo") + 1],
+        cwd,
         env: { ...process.env, PYTHONUNBUFFERED: "1", PYTHONDONTWRITEBYTECODE: "1" },
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -250,19 +256,21 @@ function runStorageCli(args, onProgress) {
           }
           continue;
         }
-        try { outcome = parseStorageOutcome(JSON.parse(line)); } catch { /* diagnostics below */ }
+        try { outcome = JSON.parse(line); } catch { /* diagnostics below */ }
       }
     };
     child.stdout.on("data", consume);
-    child.stderr.on("data", (chunk) => { stderr += String(chunk); appendBackendOutput("storage", chunk); });
+    child.stderr.on("data", (chunk) => { stderr = (stderr + String(chunk)).slice(-16000); appendBackendOutput("python", chunk); });
     child.on("error", reject);
     child.on("close", (code) => {
       if (stdout.trim()) {
-        try { outcome = parseStorageOutcome(JSON.parse(stdout.trim())); } catch { /* report below */ }
+        try { outcome = JSON.parse(stdout.trim()); } catch { /* report below */ }
       }
       if (code !== 0 || !outcome) {
-        const detail = outcome?.error || stderr.trim() || `Storage configuration failed (exit ${code ?? "unknown"}).`;
-        reject(new Error(detail));
+        const detail = outcome?.error || stderr.trim() || `Python command failed (exit ${code ?? "unknown"}).`;
+        const error = new Error(detail);
+        error.outcome = outcome;
+        reject(error);
         return;
       }
       resolve(outcome);
@@ -358,9 +366,9 @@ async function reuseExternalBackend(state) {
 }
 async function configureAndStart(root, vaultRoot, instanceId = newInstanceId(), onConfigured) {
   await ensureBackendPort();
-  const outcome = await runStorageCli(storageArgs(root, instanceId, "configure", ["--root", vaultRoot, "--progress-json"]), (progress) => {
+  const outcome = parseStorageOutcome(await runPythonCli(storageArgs(root, instanceId, "configure", ["--root", vaultRoot, "--progress-json"]), (progress) => {
     storageState.progress = progress;
-  });
+  }));
   const configuredPath = canonicalPath(outcome.path);
   if (!outcome.ready || !configuredPath || !pathsEqual(configuredPath, vaultRoot)) {
     throw new Error(outcome.error || "Storage backend did not activate the selected folder.");
@@ -378,7 +386,7 @@ async function bootstrapStorage() {
     try { existing = await readState(); } catch { existing = null; }
     if (isViewerState(existing)) return reuseExternalBackend(existing);
     await ensureBackendPort();
-    const status = parseStorageOutcome(await runStorageCli(storageArgs(root, newInstanceId(), "status")));
+    const status = parseStorageOutcome(await runPythonCli(storageArgs(root, newInstanceId(), "status")));
     applyStorageOutcome(status, true);
     if (status.needsSetup || !status.path) return null;
     if (!status.ready) {
@@ -424,6 +432,7 @@ async function recoverPrevious(root, previousPath, reconfigure) {
 
 async function performSaveStorage(selectedPath) {
   if (typeof selectedPath !== "string" || !selectedPath.trim()) throw new Error("Choose a library folder before saving.");
+  assertImportIdle();
   if (!storageState.canChange) throw new Error("The active backend is external and cannot be reconfigured from this window.");
   storageState.busy = true;
   storageState.progress = null;
@@ -522,8 +531,10 @@ async function backendRequest(endpoint, options = {}) {
 
 async function postJson(endpoint, body = {}) {
   const guard = assertBackendRequestAllowed();
+  assertImportIdle();
   const state = await readState();
   assertOwnState(state, guard.session);
+  assertImportIdle();
   const value = await requestJson(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -535,8 +546,121 @@ async function postJson(endpoint, body = {}) {
   return value;
 }
 
+function importActive() {
+  return importAdmission || Boolean(importJob && ["queued", "running"].includes(importJob.status));
+}
+
+function assertImportIdle() {
+  if (importActive()) throw new Error("Wait for the import to finish, or stop after the current package.");
+}
+
+function importSnapshot() {
+  return importJob ? JSON.parse(JSON.stringify(importJob)) : null;
+}
+
+function importCli(command, extra = [], onProgress) {
+  const root = app.isPackaged ? path.join(process.resourcesPath, "ual-backend") : path.resolve(__dirname, "..");
+  return runPythonCli([path.join(root, "bin", "import_packages.py"), command, ...extra], onProgress, root);
+}
+
+function importProjectPath(value) {
+  if (typeof value !== "string" || !path.isAbsolute(value) || value.includes("\0")) throw new Error("Choose an absolute Unity project path.");
+  return fs.realpathSync(value);
+}
+
+async function installImportBridge(projectPath) {
+  assertImportIdle();
+  assertBackendRequestAllowed();
+  const project = importProjectPath(projectPath);
+  importAdmission = true;
+  try {
+    const choice = await dialog.showMessageBox({
+      type: "warning", title: "Install Unity import bridge?",
+      message: "Install the Editor-only import bridge in this project?",
+      detail: project + "\n\nAdds an Editor-only script and assembly definition under Assets/UnityAssetLibraryImport. Unity will compile and reload scripts. No packages are imported yet.",
+      buttons: ["Cancel", "Install bridge"], defaultId: 0, cancelId: 0, noLink: true,
+    });
+    return await importCli(choice.response === 1 ? "install" : "inspect", ["--project", project]);
+  } finally {
+    importAdmission = false;
+  }
+}
+
+function updateImportProgress(event) {
+  if (!event || typeof event !== "object" || !importJob) return;
+  for (const key of ["stage", "completed", "total", "current_item", "counts", "results"]) {
+    if (Object.hasOwn(event, key)) importJob[key] = event[key];
+  }
+}
+
+async function executeImport(request, guard) {
+  let temp;
+  try {
+    const state = await backendRequest("/api/state");
+    if (guard.generation !== backendGeneration || guard.session !== backendSession) throw new Error("The library changed. Review your selection again.");
+    if ([state.job, state.action].some((job) => job && ["queued", "running"].includes(job.status))) throw new Error("Wait for the active library operation before importing.");
+    temp = fs.mkdtempSync(path.join(os.tmpdir(), "ual-import-"));
+    importCancelFile = path.join(temp, "cancel");
+    const manifest = path.join(temp, "request.json");
+    fs.writeFileSync(manifest, JSON.stringify({ ...request, id: importJob.id, repo: guard.session.root, root: guard.session.vaultRoot, cancel_file: importCancelFile }), { mode: 0o600 });
+    if (importJob.stop_requested) fs.writeFileSync(importCancelFile, "stop");
+    importJob.status = "running";
+    importJob.stage = "preflight";
+    const outcome = await importCli("run", ["--request", manifest], updateImportProgress);
+    if (!outcome || !["completed", "failed", "cancelled"].includes(outcome.status)) throw new Error("The import worker ended without a terminal result. Check the project before retrying.");
+    updateImportProgress(outcome);
+    importJob.status = outcome.status;
+    importJob.error = outcome.error || null;
+  } catch (error) {
+    if (error.outcome?.results?.length) updateImportProgress(error.outcome);
+    importJob.status = "failed";
+    importJob.error = String(error.message || error);
+  } finally {
+    importJob.finished_at = Date.now() / 1000;
+    importCancelFile = null;
+    if (temp) fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function startImport(request) {
+  assertImportIdle();
+  if (quitting) throw new Error("The application is quitting.");
+  const guard = assertBackendRequestAllowed();
+  if (!request || !["closed", "live"].includes(request.mode) || !Array.isArray(request.packages) || !request.packages.length || request.packages.length > 1000 ||
+      Object.keys(request).some((key) => !["project", "mode", "packages"].includes(key)) ||
+      request.packages.some((item) => !item || typeof item.asset_key !== "string" || !item.asset_key.trim() || typeof item.file !== "string" || !item.file.trim() || Object.keys(item).some((key) => !["asset_key", "file"].includes(key)))) throw new Error("Choose packages, exact archive versions and a target project before importing.");
+  const project = importProjectPath(request.project);
+  // Freeze the reviewed selection; the worker validates it against the index under lock.
+  const packages = request.packages.map(({ asset_key, file }) => ({ asset_key, file }));
+  importJob = { id: crypto.randomUUID(), kind: "import", status: "queued", stage: "queued", project, mode: request.mode,
+    completed: 0, total: packages.length, current_item: null, counts: {}, started_at: Date.now() / 1000,
+    results: packages.map(({ file }) => ({ file, status: "pending" })), error: null, stop_requested: false };
+  importPromise = executeImport({ project, mode: request.mode, packages }, guard);
+  return importSnapshot();
+}
+
+function stopImport(id) {
+  if (!importJob || importJob.id !== id) throw new Error("This import job is no longer available.");
+  if (["queued", "running"].includes(importJob.status)) {
+    importJob.stop_requested = true;
+    if (importCancelFile) fs.writeFileSync(importCancelFile, "stop", { mode: 0o600 });
+  }
+  return importSnapshot();
+}
+
+
 function registerIpc() {
   if (registered) return;
+  ipcMain.handle("import:projects", () => importCli("projects"));
+  ipcMain.handle("import:choose-project", async () => {
+    const result = await dialog.showOpenDialog({ title: "Choose Unity project", properties: ["openDirectory"] });
+    return result.canceled ? null : result.filePaths[0] || null;
+  });
+  ipcMain.handle("import:inspect", (_event, project) => importCli("inspect", ["--project", importProjectPath(project)]));
+  ipcMain.handle("import:install-bridge", (_event, project) => installImportBridge(project));
+  ipcMain.handle("import:start", (_event, request) => startImport(request));
+  ipcMain.handle("import:status", () => importSnapshot());
+  ipcMain.handle("import:stop", (_event, id) => stopImport(id));
   ipcMain.handle("backend:assets", () => backendRequest("/api/assets"));
   ipcMain.handle("backend:tags", () => backendRequest("/api/tags"));
   ipcMain.handle("backend:mutate-tags", (_event, change) => {
@@ -608,6 +732,12 @@ function createWindow() {
       sandbox: true,
     },
   });
+  window.on("close", (event) => {
+    if (!quitReady && importActive()) {
+      event.preventDefault();
+      app.quit();
+    }
+  });
 
   const devUrl = process.env.ELECTRON_RENDERER_URL;
   if (devUrl) window.loadURL(devUrl);
@@ -624,11 +754,20 @@ app.whenReady().then(() => {
 });
 
 app.on("before-quit", (event) => {
-  if (quitting) return;
+  if (quitReady) return;
   event.preventDefault();
+  if (quitting || importAdmission) return;
+  if (importActive()) {
+    const choice = dialog.showMessageBoxSync({ type: "warning", title: "Import in progress",
+      message: "Stop the queue and quit after the current package finishes?",
+      detail: "Unity will not be interrupted mid-import. Already imported assets remain in the project.",
+      buttons: ["Keep importing", "Stop after current and quit"], defaultId: 0, cancelId: 0, noLink: true });
+    if (choice !== 1) return;
+    stopImport(importJob.id);
+  }
   quitting = true;
   if (pendingPortChoice) answerPortChoice(pendingPortChoice.id, { action: "cancel" });
-  void Promise.allSettled([startupPromise, saveQueue, transitionPromise || Promise.resolve()]).then(() => stopOwnedBackend()).finally(() => app.quit());
+  void Promise.allSettled([startupPromise, saveQueue, importPromise, transitionPromise || Promise.resolve()]).then(() => stopOwnedBackend()).finally(() => { quitReady = true; app.quit(); });
 });
 
 app.on("window-all-closed", () => {

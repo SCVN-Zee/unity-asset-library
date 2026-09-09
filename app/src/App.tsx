@@ -54,6 +54,7 @@ import {
   Star,
   X,
 } from "lucide-react";
+import { ImportDialog, unityPackages } from "./components/ImportDialog";
 
 type QuickFilter = "all" | "favorites" | "pending" | "flagged" | "non-store";
 type ViewMode = "grid" | "list";
@@ -251,13 +252,13 @@ const PROGRESS_STAGE_LABELS: Record<string, string> = {
   stage: "Staging files for cleanup", move: "Moving files", remove: "Removing files",
   rollback: "Rolling back changes", refresh: "Refreshing index",
   resolve: "Looking up store details", enrich: "Merging store details", merge: "Merging store details",
-  write: "Saving index", emit: "Writing library outputs", complete: "Finished",
   "refreshing index": "Refreshing index", "index refreshed": "Index refreshed",
   "index refresh failed": "Index refresh failed",
+  import: "Importing packages", install: "Installing import bridge", stopping: "Stopping after current package",
   unknown: "Outcome unknown", "outcome unknown": "Outcome unknown",
 };
 
-const PROGRESS_COUNT_LABELS: Record<string, string> = { moved: "files moved", skipped: "files skipped", staged: "files staged", removed: "files deleted", rolled_back: "files rolled back", rollback_failed: "rollback failures", resolved: "resolved", failed: "failed", blocked: "blocked", index_added: "index entries added", index_removed: "index entries removed", index_resized: "index entries resized", inventory_examined: "inventory examined", inventory_found: "inventory found" };
+const PROGRESS_COUNT_LABELS: Record<string, string> = { moved: "files moved", skipped: "files skipped", staged: "files staged", removed: "files deleted", rolled_back: "files rolled back", rollback_failed: "rollback failures", resolved: "resolved", failed: "failed", blocked: "blocked", imported: "packages imported", cancelled: "packages cancelled", index_added: "index entries added", index_removed: "index entries removed", index_resized: "index entries resized", inventory_examined: "inventory examined", inventory_found: "inventory found" };
 
 function ActionProgress({ job, onDismiss, announce = true }: ProgressProps) {
   const [now, setNow] = useState(() => Date.now());
@@ -272,8 +273,8 @@ function ActionProgress({ job, onDismiss, announce = true }: ProgressProps) {
   const percent = total === null ? undefined : total === 0 ? 0 : Math.min(100, Math.round((completed / total) * 100));
   const terminal = ["completed", "failed", "cancelled"].includes(job.status);
   const counts = job.counts || {};
-  const actionLabel = job.kind === "resync" ? "Resync" : job.kind === "cleanup" ? "Cleanup" : job.kind === "organize" ? "Organize" : "Enrich";
-  const phaseLabel = job.kind === "enrich" ? "" : " · " + (job.phase === "apply" ? "Apply" : "Preview");
+  const actionLabel = job.kind === "import" ? "Import" : job.kind === "resync" ? "Resync" : job.kind === "cleanup" ? "Cleanup" : job.kind === "organize" ? "Organize" : "Enrich";
+  const phaseLabel = job.kind === "enrich" || job.kind === "import" ? "" : " · " + (job.phase === "apply" ? "Apply" : "Preview");
   const title = actionLabel + phaseLabel;
   const rawStage = (job.stage || (job.status === "queued" ? "waiting" : "working")).toLowerCase();
   const outcome = job.status === "completed" ? "Completed" : job.status === "cancelled" ? "Cancelled" : job.status === "failed" ? "Failed" : job.status === "queued" ? "Queued" : "In progress";
@@ -474,6 +475,10 @@ function App() {
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState<DialogState>(null);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [importSelection, setImportSelection] = useState<Set<string>>(() => new Set());
+  const [importOpen, setImportOpen] = useState(false);
+  const [importJob, setImportJob] = useState<ImportJob | null>(null);
+  const importTriggerRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (storageView !== "library" || dialog || actionsOpen) return;
     const focusSearch = (event: KeyboardEvent) => {
@@ -491,6 +496,31 @@ function App() {
   const actionGenerationRef = useRef(0);
   const dismissedRef = useRef(dismissedIds);
   dismissedRef.current = dismissedIds;
+  const importActive = Boolean(importJob && ["queued", "running"].includes(importJob.status));
+  useEffect(() => {
+    setImportSelection((current) => {
+      const next = new Set([...current].filter((key) => assets.some((asset) => asset.asset_key === key && unityPackages(asset).length > 0)));
+      return next.size === current.size ? current : next;
+    });
+  }, [assets]);
+  useEffect(() => {
+    setImportSelection(new Set());
+    setImportOpen(false);
+  }, [storageEpoch]);
+  useEffect(() => {
+    if (storageView !== "library") return;
+    let cancelled = false;
+    api.getImport().then((job) => { if (!cancelled && job) setImportJob(job); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [storageView, storageEpoch]);
+  useEffect(() => {
+    if (!importJob || !["queued", "running"].includes(importJob.status)) return;
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      api.getImport().then((next) => { if (!cancelled) setImportJob(next); }).catch(() => {});
+    }, 600);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [importJob?.id, importJob?.status]);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [favPending, setFavPending] = useState<Set<string>>(() => new Set());
   const favEpochRef = useRef(new Map<string, number>());
@@ -571,7 +601,7 @@ function App() {
     return loaded;
   }
 
-  const libraryActivity = Boolean(busy) || Boolean(state?.job && ["queued", "running"].includes(state.job.status)) || Boolean(actionStatus && ["queued", "running"].includes(actionStatus.status));
+  const libraryActivity = Boolean(busy) || importActive || Boolean(state?.job && ["queued", "running"].includes(state.job.status)) || Boolean(actionStatus && ["queued", "running"].includes(actionStatus.status));
   const storageChangeBlocked = storageBusy || storage?.canChange === false || libraryActivity || tagBusy;
 
   async function chooseStorageFolder() {
@@ -585,6 +615,36 @@ function App() {
     } catch (cause) {
       setStorageError(cause instanceof Error ? cause.message : "The folder picker could not be opened.");
     }
+  }
+  function selectVisibleImport() {
+    setImportSelection((current) => {
+      const next = new Set(current);
+      for (const asset of filtered) if (unityPackages(asset).length > 0) next.add(asset.asset_key);
+      return next;
+    });
+  }
+  function toggleImportSelection(key: string) {
+    setImportSelection((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+  async function startImport(request: ImportRequest) {
+    const job = await api.startImport(request);
+    setImportJob(job);
+  }
+  async function stopImport() {
+    if (!importJob) return;
+    try {
+      setImportJob(await api.stopImport(importJob.id));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not stop the import.");
+    }
+  }
+  function dismissImportJob(id: string) {
+    setDismissedIds((current) => new Set(current).add(id));
   }
 
   async function saveStorageRoot() {
@@ -753,6 +813,10 @@ function App() {
     return roots;
   }, [assets]);
   const favoriteSet = useMemo(() => new Set(favorites), [favorites]);
+  const importAssets = useMemo<Asset[]>(
+    () => [...importSelection].map((key) => assets.find((asset) => asset.asset_key === key)).filter((asset): asset is Asset => Boolean(asset)),
+    [importSelection, assets],
+  );
   const displayAssets = useMemo<Asset[]>(() => {
     if (!userTags) return [];
     return assets.map((asset) => ({ ...asset, tags: userTags.assignments[asset.asset_key] || [] }));
@@ -1098,7 +1162,7 @@ function App() {
                   setActionsOpen(false);
                   void runAction("resync");
                 }}
-                isDisabled={Boolean(busy) || loading}
+                isDisabled={Boolean(busy) || loading || importActive}
               >
                 <Icon
                   as={RefreshCw}
@@ -1123,7 +1187,7 @@ function App() {
                   setActionsOpen(false);
                   void startEnrich();
                 }}
-                isDisabled={Boolean(busy) || loading || Boolean(jobRunning)}
+                isDisabled={Boolean(busy) || loading || importActive || Boolean(jobRunning)}
               >
                 <Icon
                   as={Sparkles}
@@ -1147,7 +1211,7 @@ function App() {
                   setActionsOpen(false);
                   void runAction("organize");
                 }}
-                isDisabled={Boolean(busy) || loading}
+                isDisabled={Boolean(busy) || loading || importActive}
               >
                 <Icon
                   as={Folder}
@@ -1173,7 +1237,7 @@ function App() {
                   setActionsOpen(false);
                   void runAction("cleanup");
                 }}
-                isDisabled={Boolean(busy) || loading}
+                isDisabled={Boolean(busy) || loading || importActive}
               >
                 <Icon
                   as={Folder}
@@ -1369,6 +1433,15 @@ function App() {
             {!query && <kbd>⌘ K</kbd>}
             {query && <Button className="search-clear" aria-label="Clear search" onPress={() => setQuery("")}><Icon as={X} className="icon" aria-hidden="true" /></Button>}
           </Input>
+          <div className="import-controls">
+            <Button type="button" className="button quiet" onPress={selectVisibleImport} isDisabled={loading || importActive} aria-label="Select visible packages for import">Select visible</Button>
+            {importSelection.size > 0 && (
+              <>
+                <Button type="button" className="button quiet" onPress={() => setImportSelection(new Set())} isDisabled={importActive} aria-label="Clear import selection">Clear selection</Button>
+                <Button ref={importTriggerRef} type="button" className="button primary" onPress={() => setImportOpen(true)} isDisabled={importActive} aria-label={`Import ${importSelection.size} selected package${importSelection.size === 1 ? "" : "s"}`}>Import {importSelection.size}</Button>
+              </>
+            )}
+          </div>
 
             <Button ref={detailsToggleRef} type="button" className={`icon-button ${inspectorOpen ? "selected" : ""}`} aria-label={inspectorOpen ? "Hide asset details" : "Show asset details"} title={inspectorOpen ? "Hide asset details" : "Show asset details"} aria-expanded={inspectorOpen} aria-controls="asset-inspector" onPress={() => setInspectorOpen(!inspectorOpen)}><Icon as={PanelRight} className="icon" aria-hidden="true" /></Button>
           </div>
@@ -1497,6 +1570,12 @@ function App() {
           </div>}
           {actionStatus && !dismissedIds.has(actionStatus.id) && <ActionProgress job={actionStatus} onDismiss={dismissAction} announce={!(dialog && actionStatus.phase === "apply")} />}
           {state?.job && !dismissedIds.has(state.job.id) && <ActionProgress job={state.job} onDismiss={dismissEnrich} />}
+          {importJob && !dismissedIds.has(importJob.id) && (
+            <div className="import-progress">
+              <ActionProgress job={importJob} onDismiss={dismissImportJob} />
+              {importActive && <Button type="button" className="button quiet" onPress={() => setImportOpen(true)} aria-label="Open import progress">Review import</Button>}
+            </div>
+          )}
           {loading ? (
             <div className="library-loading" role="status" aria-label="Loading your library"><span>Loading your library…</span><div className="asset-grid" aria-hidden="true">{Array.from({ length: 8 }, (_, index) => <div className="asset-skeleton" key={index}><div /><span /><span /></div>)}</div></div>
           ) : assets.length === 0 ? (
@@ -1511,6 +1590,11 @@ function App() {
               {view === "list" && <div className="list-heading" aria-hidden="true"><span>Asset</span><span>Author</span><span>Category</span><span>Version</span><span /></div>}
               {filtered.map((asset) => (
                 <div className="asset-cell" key={asset.asset_key}>
+                  {unityPackages(asset).length > 0 && (
+                    <label className="import-check">
+                      <input type="checkbox" checked={importSelection.has(asset.asset_key)} onChange={() => toggleImportSelection(asset.asset_key)} disabled={importActive} aria-label={`Select ${asset.name} for import`} />
+                    </label>
+                  )}
                   <AssetCard
                     asset={asset}
                     selected={asset.asset_key === selected?.asset_key}
@@ -1584,6 +1668,16 @@ function App() {
           finalFocusRef={actionTriggerRef}
           onClose={() => setDialog(null)}
           onConfirm={() => void confirmDialog()}
+        />
+      )}
+      {importOpen && (
+        <ImportDialog
+          assets={importAssets}
+          job={importJob}
+          finalFocusRef={importTriggerRef}
+          onClose={() => setImportOpen(false)}
+          onStart={startImport}
+          onStop={stopImport}
         />
       )}
     </div>

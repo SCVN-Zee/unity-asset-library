@@ -1436,11 +1436,6 @@ button:focus-visible {
 .import-dialog .dialog-foot { margin: 0; padding: 16px 24px; border-top: 1px solid var(--line); flex-shrink: 0; background: var(--panel); }
 .import-dialog .button { white-space: nowrap; }
 .import-project-path { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); }
-.import-mode-option { padding: 10px; border: 1px solid var(--line); border-radius: 6px; }
-.import-mode-option:has(input:checked) { border-color: var(--accent-border); background: var(--accent-soft); }
-.import-mode-option small { display: block; color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 4px; }
-.import-mode-option strong { font-size: 13px; }
-.import-mode-option input { accent-color: var(--accent); }
 .import-dialog .import-warning-text { color: var(--accent-text); }
 .import-dialog .import-warning { font-size: 12px; line-height: 1.5; color: var(--text); }
 .import-warning strong { display: block; }
@@ -1463,13 +1458,9 @@ button:focus-visible {
 .import-project-info div { display: flex; gap: 8px; }
 .import-project-info dt { color: var(--muted); min-width: 64px; }
 .import-project-info dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.import-mode { border: 0; padding: 0; margin: 12px 0 0; display: grid; gap: 8px; }
-.import-mode legend { font-size: 0.9rem; color: var(--muted); margin-bottom: 6px; padding: 0; }
-.import-mode-option { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; }
-.import-mode-option .import-warning-text { grid-column: 2; }
-.install-bridge { margin-top: 12px; padding: 10px; border: 1px solid var(--line-soft); border-radius: 8px; display: grid; gap: 8px; }
-.install-bridge p { margin: 0; font-size: 0.88rem; color: var(--muted); }
-.install-bridge .button { justify-self: start; }
+.import-overwrite { display: flex; align-items: flex-start; gap: 8px; margin-top: 16px; font-size: 13px; line-height: 1.5; cursor: pointer; }
+.import-overwrite input { accent-color: var(--accent); margin-top: 3px; flex-shrink: 0; }
+.import-backup { display: block; margin-top: 6px; color: var(--muted); overflow-wrap: anywhere; }
 .import-warning { margin: 12px 0 0; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, #d97706 12%, transparent); border: 1px solid color-mix(in srgb, #d97706 40%, transparent); font-size: 0.88rem; }
 .import-warning-text { color: #d97706; font-size: 0.85rem; }
 .import-actions { display: flex; gap: 8px; justify-content: flex-end; }

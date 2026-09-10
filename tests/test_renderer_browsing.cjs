@@ -28,9 +28,11 @@ fs.writeFileSync(preload, `const favorites = new Set(['audio-favorite', 'tools-f
   getLegacyLibraryRoot: async () => null,
   importProjects: async () => [{ path: "/fixture/project", title: "Fixture", version: "6000.3.15f1" }],
   chooseImportProject: async () => null,
-  inspectImportProject: async (path) => ({ path, title: "Fixture", version: "6000.3.15f1", open: false, bridge_installed: false, bridge_ready: false }),
-  installImportBridge: async () => ({ path: '', title: '', version: '', open: false, bridge_installed: false, bridge_ready: false }),
-  startImport: async () => { throw new Error('not wired in fixture'); },
+  inspectImportProject: async (path) => ({ path, title: "Fixture", version: "6000.3.15f1" }),
+  startImport: async (request) => {
+    localStorage.setItem("ual:test-request", JSON.stringify(request));
+    return { id: "fixture-install", kind: "import", status: "completed", project: request.project, completed: request.packages.length, total: request.packages.length, results: request.packages.map(({ file }) => ({ file, status: "installed", ...(request.overwrite ? { backup_path: "/fixture/project/.ual-import-backups/fixture" } : {}) })) };
+  },
   getImport: async () => JSON.parse(localStorage.getItem("ual:test-import") || "null"),
   stopImport: async () => { throw new Error('not wired in fixture'); }
 });`);
@@ -140,14 +142,24 @@ app.whenReady().then(async () => {
     await click('[aria-label="Import 1 selected package"]');
     await waitFor(`!!document.querySelector('select[aria-label="Archive version for Forest Audio"]')`);
     await evaluate(`(() => { const select = document.querySelector('select[aria-label="Unity Hub project"]'); select.value = "/fixture/project"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
-    await waitFor(`!!document.querySelector('[aria-label="Refresh project status"]')`);
+    await waitFor(`!!document.querySelector(".import-project-info")`);
     assert.equal(await evaluate(`document.querySelector('select[aria-label="Archive version for Forest Audio"]').value`), "");
     assert.equal(await evaluate(`document.querySelector('.import-dialog .dialog-foot .primary').disabled`), true);
     await evaluate(`(() => { const select = document.querySelector('select[aria-label="Archive version for Forest Audio"]'); select.value = "Audio/Forest v2.unitypackage"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
     await waitFor(`!document.querySelector('.import-dialog .dialog-foot .primary').disabled`);
-    await click('.import-dialog [aria-label="Close dialog"]');
-    console.log("PASS: refreshed archive requires explicit selection, never silently substitutes a version");
-    await evaluate(`localStorage.setItem("ual:test-import", JSON.stringify({ id: "preparation", kind: "import", status: "running", project: "/fixture/project", mode: "closed", completed: 0, total: 1, results: [{ file: "Cloud.unitypackage", status: "downloading", bytes_completed: 50, bytes_total: 100 }] }))`);
+    assert.equal(await evaluate(`document.querySelector(".import-overwrite input").checked`), false);
+    await click(".import-dialog .dialog-foot .primary");
+    await waitFor(`!!document.querySelector('[data-status="installed"]')`);
+    assert.equal((await evaluate(`JSON.parse(localStorage.getItem("ual:test-request"))`)).overwrite, false);
+    await click(".import-dialog .dialog-foot .primary");
+    await waitFor(`!document.querySelector('.import-dialog')`);
+    await click('[aria-label="Import 1 selected package"]');
+    await waitFor(`!!document.querySelector('.import-overwrite input')`);
+    assert.equal(await evaluate(`document.querySelector('.import-overwrite input').checked`), false);
+    await click('.import-dialog .dialog-foot .quiet');
+    await waitFor(`!document.querySelector('.import-dialog')`);
+    console.log("PASS: explicit archive selection and safe-default direct installation without Editor readiness");
+    await evaluate(`localStorage.setItem("ual:test-import", JSON.stringify({ id: "preparation", kind: "import", status: "running", project: "/fixture/project", completed: 0, total: 1, results: [{ file: "Cloud.unitypackage", status: "downloading", bytes_completed: 50, bytes_total: 100 }] }))`);
     await win.reload();
     await waitFor(`!!document.querySelector('[aria-label="Open import progress"]')`);
     assert.equal(await evaluate(`document.querySelector(".task-details").hidden`), true);
@@ -200,6 +212,14 @@ app.whenReady().then(async () => {
       assert(await evaluate(`document.querySelector(".import-dialog .dialog-foot").getBoundingClientRect().bottom <= innerHeight`));
     }
     console.log("PASS: 14-package reorder, project selection, fixed import actions at desktop and mobile sizes");
+    win.setContentSize(1200, 800);
+    await evaluate(`document.querySelector(".import-body").scrollTop = 0`);
+    await click(".import-overwrite input");
+    await click(".import-dialog .dialog-foot .primary");
+    await waitFor(`document.querySelectorAll('[data-status="installed"]').length === 14`);
+    assert.equal((await evaluate(`JSON.parse(localStorage.getItem("ual:test-request"))`)).overwrite, true);
+    assert.equal(await evaluate(`document.querySelectorAll(".import-backup").length`), 14);
+    console.log("PASS: explicit replacement consent and backup locations in installed results");
   } catch (error) {
     console.error(error);
     exitCode = 1;

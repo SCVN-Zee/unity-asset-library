@@ -74,9 +74,8 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
   const [projectInfo, setProjectInfo] = useState<ImportProject | null>(null);
   const [inspecting, setInspecting] = useState(false);
   const [inspectError, setInspectError] = useState("");
-  const [mode, setMode] = useState<"closed" | "live">("closed");
+  const [overwrite, setOverwrite] = useState(false);
   const inspectEpochRef = useRef(0);
-  const [installing, setInstalling] = useState(false);
   const [startError, setStartError] = useState("");
   const [starting, setStarting] = useState(false);
   const firstButtonRef = useRef<HTMLButtonElement>(null);
@@ -140,7 +139,7 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
     setProjectInfo(null);
     setInspecting(false);
     setInspectError("");
-    setMode("closed");
+    setOverwrite(false);
     if (nextPath) await inspect(nextPath);
   }
 
@@ -153,35 +152,16 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
     }
   }
 
-  async function installBridge() {
-    if (!projectPath) return;
-    const epoch = ++inspectEpochRef.current;
-    setInstalling(true);
-    setInspectError("");
-    try {
-      const info = await api.installImportBridge(projectPath);
-      if (epoch !== inspectEpochRef.current) return;
-      setProjectInfo(info);
-    } catch (cause) {
-      if (epoch !== inspectEpochRef.current) return;
-      setInspectError(cause instanceof Error ? cause.message : "Could not install the bridge.");
-    } finally {
-      if (epoch === inspectEpochRef.current) setInstalling(false);
-    }
-  }
 
   const allChosen = order.length > 0 && order.every((asset) => unityPackages(asset).some((version) => version.file === chosen[asset.asset_key]));
-  const closedModeBlocked = Boolean(projectInfo?.open);
-  const liveModeBlocked = Boolean(projectInfo && !projectInfo.open);
-  const liveStartBlocked = Boolean(projectInfo && !projectInfo.bridge_ready);
-  const canStart = Boolean(projectPath && projectInfo && projectInfo.path === projectPath && allChosen && !inspecting && !installing && !running && !starting && (mode === "closed" ? !closedModeBlocked : !liveStartBlocked));
+  const canStart = Boolean(projectPath && projectInfo && projectInfo.path === projectPath && allChosen && !inspecting && !running && !starting);
 
   async function start() {
     if (!canStart) return;
     setStarting(true);
     setStartError("");
     try {
-      await onStart({ project: projectPath, mode, packages: order.map((asset) => ({ asset_key: asset.asset_key, file: chosen[asset.asset_key] })) });
+      await onStart({ project: projectPath, overwrite, packages: order.map((asset) => ({ asset_key: asset.asset_key, file: chosen[asset.asset_key] })) });
     } catch (cause) {
       setStartError(cause instanceof Error ? cause.message : "Could not start the import.");
     } finally {
@@ -199,7 +179,6 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
     });
   }
 
-  const installingBridge = installing;
   const showSetup = !job;
   const showRunning = Boolean(job && !["completed", "failed", "cancelled"].includes(job.status));
   const showFinished = Boolean(job && ["completed", "failed", "cancelled"].includes(job.status));
@@ -208,10 +187,10 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
   return (
     <AlertDialog
       isOpen
-      onClose={() => { if (!running && !starting && !installing) onClose(); }}
+      onClose={() => { if (!running && !starting) onClose(); }}
       finalFocusRef={finalFocusRef}
       initialFocusRef={firstButtonRef}
-      isKeyboardDismissable={!running && !starting && !installing}
+      isKeyboardDismissable={!running && !starting}
       closeOnOverlayClick={false}
       className="dialog-overlay"
     >
@@ -222,7 +201,7 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
             <div className="eyebrow">UNITY PROJECT</div>
             <h2 id="import-title">{title}</h2>
           </div>
-          <Button type="button" className="icon-button" onPress={() => { if (!running && !starting && !installing) onClose(); }} isDisabled={running || starting || installing} aria-label="Close dialog">
+          <Button type="button" className="icon-button" onPress={() => { if (!running && !starting) onClose(); }} isDisabled={running || starting} aria-label="Close dialog">
             <Icon as={X} className="icon" aria-hidden="true" focusable={false} />
           </Button>
         </AlertDialogHeader>
@@ -234,7 +213,7 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
               <section className="import-section import-queue" aria-label="Packages">
                 {refreshing && <p className="muted" role="status">Refreshing availability…</p>}
                 <h3>Packages <span>{order.length}</span></h3>
-                <p className="import-section-hint">Imported from top to bottom. Use the arrows to reorder.</p>
+                <p className="import-section-hint">Installed from top to bottom. Use the arrows to reorder.</p>
                 <ol className="import-packages">
                   {order.map((asset, index) => {
                     const packages = unityPackages(asset);
@@ -283,7 +262,6 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
                     value={projectPath}
                     onChange={(event) => void handleProject(event.target.value)}
                     aria-label="Unity Hub project"
-                    disabled={installingBridge}
                   >
                     <option value="">{projects === null ? "Loading Hub projects…" : "Choose a Hub project…"}</option>
                     {projectPath && !(projects || []).some((project) => project.path === projectPath) && <option value={projectPath}>{projectInfo?.title || projectPath}</option>}
@@ -291,45 +269,25 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
                       <option key={project.path} value={project.path}>{project.title} · Unity {project.version}</option>
                     ))}
                   </select>
-                  <Button type="button" className="button quiet" onPress={() => void browseProject()} isDisabled={installingBridge}>Browse…</Button>
+                  <Button type="button" className="button quiet" onPress={() => void browseProject()}>Browse…</Button>
                 </div>
                   {projectsError && <p className="import-warning-text" role="alert">{projectsError} <Button type="button" className="button quiet" onPress={() => void loadProjects()}>Retry</Button></p>}
                 {inspecting && <p className="muted" role="status">Checking project…</p>}
-                {inspectError && <p className="import-warning-text" role="alert">{inspectError} <Button type="button" className="button quiet" onPress={() => void inspect(projectPath)} isDisabled={installing}>Retry</Button></p>}
+                {inspectError && <p className="import-warning-text" role="alert">{inspectError} <Button type="button" className="button quiet" onPress={() => void inspect(projectPath)}>Retry</Button></p>}
                 {projectInfo && (
                   <dl className="import-project-info">
                     <div><dt>Project</dt><dd title={projectInfo.path}>{projectInfo.title}<code className="import-project-path">{projectInfo.path}</code></dd></div>
                     <div><dt>Unity</dt><dd>{projectInfo.version}</dd></div>
-                    <div><dt>State</dt><dd>{projectInfo.open ? "Open in Unity" : "Closed"} <Button type="button" className="button quiet" aria-label="Refresh project status" onPress={() => void inspect(projectPath)} isDisabled={inspecting || installing}>Refresh</Button></dd></div>
-                    <div><dt>Bridge</dt><dd>{projectInfo.bridge_ready ? "Installed and ready" : projectInfo.bridge_installed ? "Installed, not ready yet" : "Not installed"}</dd></div>
                   </dl>
                 )}
-                {projectInfo && (
-                  <fieldset className="import-mode">
-                    <legend>Import mode</legend>
-                    <label className="import-mode-option">
-                      <input type="radio" name="import-mode" value="closed" checked={mode === "closed"} onChange={() => setMode("closed")} disabled={closedModeBlocked || installingBridge} />
-                      <span><strong>Closed project</strong><small>Imports in one headless Unity session, then quits. A temporary Editor runner is added and removed.</small></span>
-                      {closedModeBlocked && <span className="import-warning-text">The project is currently open in Unity. Close it or use live mode.</span>}
-                    </label>
-                    <label className="import-mode-option">
-                      <input type="radio" name="import-mode" value="live" checked={mode === "live"} onChange={() => setMode("live")} disabled={liveModeBlocked || installingBridge} />
-                      <span><strong>Live Editor</strong><small>Imports into the running Unity Editor.</small></span>
-                      {projectInfo && !projectInfo.open && <span className="import-warning-text">Open the project in Unity to use live mode.</span>}
-                      {projectInfo.open && !projectInfo.bridge_ready && <span className="import-warning-text">The bridge is not ready in this Editor.</span>}
-                    </label>
-                  </fieldset>
-                )}
-                {projectInfo && mode === "live" && !projectInfo.bridge_ready && (
-                  <div className="install-bridge">
-                    {projectInfo.bridge_installed ? <p>Bridge installed. Let Unity finish compiling (use Assets → Refresh if auto-refresh is off), then refresh the project status above.</p> : <>
-                      <p>Live import needs a small Editor-only bridge. Installing adds <code>Assets/UnityAssetLibraryImport/UnityAssetLibraryImport.cs</code> and <code>UnityAssetLibraryImport.asmdef</code> to <code title={projectPath}>{projectPath}</code>. Unity generates .meta files and compiles the bridge. A system dialog asks for confirmation before any files are written.</p>
-                      <Button type="button" className="button" onPress={() => void installBridge()} isDisabled={installing || inspecting}>{installing ? "Installing…" : "Install bridge"}</Button>
-                    </>}
-                  </div>
-                )}
-                <p className="import-section-hint">Stages up to 3 packages locally at a time. Imports run in order and stop at the first failure.</p>
-                <p className="import-warning"><strong>Existing files will be overwritten.</strong> There is no rollback. Back up your project before importing.</p>
+                <p className="import-section-hint">Works with Unity open or closed. No bridge or Editor launch is needed.</p>
+                <label className="import-overwrite">
+                  <input type="checkbox" checked={overwrite} onChange={(event) => setOverwrite(event.target.checked)} />
+                  <span>Replace changed existing assets, keeping backups</span>
+                </label>
+                <p className="import-section-hint">Identical files are skipped. Conflicting asset identities are never overwritten. Replaced files are backed up outside Assets; the result shows their location.</p>
+                <p className="import-warning"><strong>Save your Unity changes before importing.</strong> Files are installed directly. Unity processes them on refresh or next project open. With Auto Refresh disabled, use Assets → Refresh.</p>
+                <p className="import-section-hint">Stages up to 3 packages locally. Installation runs in order and stops at the first failure.</p>
               </section>
               </div>
               {startError && <p className="import-warning-text" role="alert">{startError}</p>}
@@ -340,8 +298,8 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
               <h3>Progress</h3>
               <p className="muted" role="status">
                 {job.status === "queued" && "Waiting to start…"}
-                {showRunning && <>Importing into <code title={job.project}>{job.project}</code>{job.mode === "live" ? " (live Editor)" : ""} — {job.completed ?? 0} of {job.total ?? order.length} packages.</>}
-                {showFinished && job.status === "completed" && "Import completed."}
+                {job.status === "running" && <>Installing into <code title={job.project}>{job.project}</code> — {job.completed ?? 0} of {job.total ?? order.length} packages.</>}
+                {showFinished && job.status === "completed" && "Files installed. Unity will process them on refresh or next project open."}
                 {showFinished && job.status === "cancelled" && "Import cancelled."}
                 {showFinished && job.status === "failed" && "Import failed."}
               </p>
@@ -351,9 +309,9 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
               <table className="import-results">
                 <thead><tr><th scope="col">Package</th><th scope="col">Status</th></tr></thead>
                 <tbody>
-                  {(job.results || order.map((asset) => ({ file: chosen[asset.asset_key] || "", status: "pending" as const }))).map((row) => (
+                  {(job.results || (showRunning ? order.map((asset) => ({ file: chosen[asset.asset_key] || "", status: "pending" as const })) : [])).map((row) => (
                     <tr key={row.file} data-status={row.status}>
-                      <td title={row.file}>{row.file.split(/[\\/]/).pop() || "—"}</td>
+                      <td title={row.file}>{row.file.split(/[\\/]/).pop() || "—"}{row.backup_path && <small className="import-backup">Backup: <code>{row.backup_path}</code></small>}</td>
                       <td>
                         {row.status === "pending" && "Pending"}
                         {(row.status === "preparing" || row.status === "downloading") && (
@@ -365,8 +323,8 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
                           </>
                         )}
                         {row.status === "ready" && "Staged locally"}
-                        {row.status === "importing" && <><Spinner className="spinner" aria-label="Importing" /> Importing…</>}
-                        {row.status === "imported" && "Imported"}
+                        {row.status === "installing" && <><Spinner className="spinner" aria-label="Installing" /> Installing…</>}
+                        {row.status === "installed" && "Installed"}
                         {row.status === "failed" && <span className="danger-text">Failed{row.error ? ` — ${row.error}` : ""}</span>}
                         {row.status === "cancelled" && "Cancelled"}
                       </td>
@@ -378,8 +336,8 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
           )}
         </AlertDialogBody>
         <AlertDialogFooter className="dialog-foot">
-          {showSetup && <Button ref={firstButtonRef} type="button" className="button quiet" onPress={onClose} isDisabled={running || starting || installing}>Cancel</Button>}
-          {showRunning && <Button ref={firstButtonRef} type="button" className="button quiet" onPress={onClose} isDisabled={starting || installing}>Hide</Button>}
+          {showSetup && <Button ref={firstButtonRef} type="button" className="button quiet" onPress={onClose} isDisabled={running || starting}>Cancel</Button>}
+          {showRunning && <Button ref={firstButtonRef} type="button" className="button quiet" onPress={onClose} isDisabled={starting}>Hide</Button>}
           {showRunning && <Button type="button" className="button danger" onPress={onStop} isDisabled={Boolean(job?.stop_requested)}>{job?.stop_requested ? "Stopping…" : "Stop after current package"}</Button>}
           {showFinished && <Button type="button" className="button primary" onPress={onClose} autoFocus>Done</Button>}
           {showSetup && <Button type="button" className="button primary" onPress={() => void start()} isDisabled={!canStart}>{starting ? "Starting…" : `Import ${order.length} package${order.length === 1 ? "" : "s"}`}</Button>}

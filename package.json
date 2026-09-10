@@ -73,11 +73,7 @@
         "from": "bin",
         "to": "ual-backend/bin",
         "filter": [
-          "**/*.py",
-          "UnityAssetLibraryImport.cs",
-          "UnityAssetLibraryImport.asmdef",
-          "UnityAssetLibraryBatchRunner.cs",
-          "UnityAssetLibraryBatchRunner.asmdef"
+          "**/*.py"
         ]
       },
       {

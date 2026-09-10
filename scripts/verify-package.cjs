@@ -20,14 +20,15 @@ try {
   const entry = path.join(unpacked, "electron", "main.cjs");
   const packagedRequire = createRequire(entry);
   // Evaluate the shipped entry point without opening a window or touching user data.
+  const handlers = {};
   const app = {
     isPackaged: true, getPath: () => temp, setPath() {},
     whenReady: () => ({ then() {} }), on() {},
   };
   const context = vm.createContext({
-    require: (name) => name === "electron" ? { app } : packagedRequire(name),
-    process: { ...process, env: { PATH: "/nonexistent", HOME: temp }, resourcesPath: resources },
+    require: (name) => name === "electron" ? { app, ipcMain: { handle: (name, fn) => { handlers[name] = fn; } } } : packagedRequire(name),
     __dirname: path.dirname(entry),
+    process: { ...process, resourcesPath: resources, env: { ...process.env, UAL_PYTHON: undefined } },
   });
   vm.runInContext(fs.readFileSync(entry, "utf8"), context);
   const python = vm.runInContext("pythonCommand()", context);
@@ -37,13 +38,10 @@ try {
   assert.equal(storage.needsSetup, true);
   const importWorker = path.join(resources, "ual-backend", "bin", "import_packages.py");
   execFileSync(python, [importWorker, "--help"], { env: { PATH: "/nonexistent", HOME: temp, PYTHONDONTWRITEBYTECODE: "1", PYTHONNOUSERSITE: "1" } });
-  for (const template of ["UnityAssetLibraryImport.cs", "UnityAssetLibraryImport.asmdef", "UnityAssetLibraryBatchRunner.cs", "UnityAssetLibraryBatchRunner.asmdef"]) {
-    assert(fs.readFileSync(path.join(path.dirname(importWorker), template)).equals(fs.readFileSync(path.join(__dirname, "..", "bin", template))), "Shipped import template differs from the verified source");
-  }
   assert(!fs.readdirSync(path.join(resources, "python"), { recursive: true })
     .some((name) => name.endsWith(".pyc")), "Launcher must not write bytecode into the signed runtime");
   const result = execFileSync(python, ["-c", `
-import json, os, pathlib, subprocess, sys, threading
+import io, json, os, pathlib, subprocess, sys, tarfile, threading
 sys.path.insert(0, sys.argv[1])
 import requests, storage, server
 repo = pathlib.Path(sys.argv[2]) / "workspace"
@@ -53,6 +51,30 @@ configured = storage.configure(str(repo), str(vault), "package-smoke")
 assert configured["ready"], configured
 # Enrichment subprocesses must inherit the relocated interpreter and dependencies.
 subprocess.run([sys.executable, "-c", "import requests, ssl, fcntl"], check=True)
+# Exercise the shipped importer, not just its help/parser, without any Unity CLI.
+project = pathlib.Path(sys.argv[2]) / "unity-project"
+(project / "Assets").mkdir(parents=True)
+(project / "ProjectSettings").mkdir()
+(project / "ProjectSettings/ProjectVersion.txt").write_text("m_EditorVersion: 6000.3.15f1\\n")
+guid = "0123456789abcdef0123456789abcdef"
+file = "Native v1.2.unitypackage"
+meta = "fileFormatVersion: 2\\nguid: " + guid + "\\n"
+with tarfile.open(vault / file, "w:gz") as archive:
+    for leaf, text in (("pathname", "Assets/Proof.txt\\n00"), ("asset", "installed bytes"), ("asset.meta", meta)):
+        data = text.encode()
+        entry = tarfile.TarInfo(guid + "/" + leaf)
+        entry.size = len(data)
+        archive.addfile(entry, io.BytesIO(data))
+(vault / ".data/assets.json").write_text(json.dumps({"assets": [{"asset_key": "proof", "versions": [{"file": file}]}]}))
+request = pathlib.Path(sys.argv[2]) / "import.json"
+request.write_text(json.dumps({"id": "bundle-smoke", "repo": str(repo), "root": str(vault), "project": str(project), "packages": [{"asset_key": "proof", "file": file}]}))
+result = subprocess.run([sys.executable, str(pathlib.Path(sys.argv[1]) / "import_packages.py"), "run", "--request", str(request)], capture_output=True, text=True, timeout=30)
+assert result.returncode == 0, result.stdout + result.stderr
+assert json.loads(result.stdout.splitlines()[-1])["results"][0]["status"] == "installed"
+assert (project / "Assets/Proof.txt").read_text() == "installed bytes"
+assert (project / "Assets/Proof.txt.meta").read_text() == meta
+assert not (project / "Library").exists()
+print("PASS: shipped direct installer, native pathname trailer, content and GUID preservation without Editor")
 service = server.ViewerService(repo=str(repo), instance_id="package-smoke")
 service.acquire_instance_lock()
 httpd = server._Server(("127.0.0.1", 0), server.Handler, service)

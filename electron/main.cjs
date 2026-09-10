@@ -26,7 +26,6 @@ let transitionPromise = null;
 const backendOutput = [];
 let pendingPortChoice = null;
 let importJob = null;
-let importAdmission = false;
 let importPromise = Promise.resolve();
 let importCancelFile = null;
 const storageState = {
@@ -547,7 +546,7 @@ async function postJson(endpoint, body = {}, options = {}) {
 }
 
 function importActive() {
-  return importAdmission || Boolean(importJob && ["queued", "running"].includes(importJob.status));
+  return Boolean(importJob && ["queued", "running"].includes(importJob.status));
 }
 
 function assertImportIdle() {
@@ -599,23 +598,6 @@ function importProjectPath(value) {
   return fs.realpathSync(value);
 }
 
-async function installImportBridge(projectPath) {
-  assertImportIdle();
-  assertBackendRequestAllowed();
-  const project = importProjectPath(projectPath);
-  importAdmission = true;
-  try {
-    const choice = await dialog.showMessageBox({
-      type: "warning", title: "Install Unity import bridge?",
-      message: "Install the Editor-only import bridge in this project?",
-      detail: project + "\n\nAdds an Editor-only script and assembly definition under Assets/UnityAssetLibraryImport. Unity will compile and reload scripts. No packages are imported yet.",
-      buttons: ["Cancel", "Install bridge"], defaultId: 0, cancelId: 0, noLink: true,
-    });
-    return await importCli(choice.response === 1 ? "install" : "inspect", ["--project", project]);
-  } finally {
-    importAdmission = false;
-  }
-}
 
 function updateImportProgress(event) {
   if (!event || typeof event !== "object" || !importJob) return;
@@ -657,16 +639,18 @@ function startImport(request) {
   assertImportIdle();
   if (quitting) throw new Error("The application is quitting.");
   const guard = assertBackendRequestAllowed();
-  if (!request || !["closed", "live"].includes(request.mode) || !Array.isArray(request.packages) || !request.packages.length || request.packages.length > 1000 ||
-      Object.keys(request).some((key) => !["project", "mode", "packages"].includes(key)) ||
+  if (!request || !Array.isArray(request.packages) || !request.packages.length || request.packages.length > 1000 ||
+      Object.keys(request).some((key) => !["project", "packages", "overwrite"].includes(key)) ||
+      (Object.hasOwn(request, "overwrite") && typeof request.overwrite !== "boolean") ||
       request.packages.some((item) => !item || typeof item.asset_key !== "string" || !item.asset_key.trim() || typeof item.file !== "string" || !item.file.trim() || Object.keys(item).some((key) => !["asset_key", "file"].includes(key)))) throw new Error("Choose packages, exact archive versions and a target project before importing.");
   const project = importProjectPath(request.project);
   // Freeze the reviewed selection; the worker validates it against the index under lock.
   const packages = request.packages.map(({ asset_key, file }) => ({ asset_key, file }));
-  importJob = { id: crypto.randomUUID(), kind: "import", status: "queued", stage: "queued", project, mode: request.mode,
+  const overwrite = request.overwrite === true;
+  importJob = { id: crypto.randomUUID(), kind: "import", status: "queued", stage: "queued", project, overwrite,
     completed: 0, total: packages.length, current_item: null, counts: {}, started_at: Date.now() / 1000,
     results: packages.map(({ file }) => ({ file, status: "pending" })), error: null, stop_requested: false };
-  importPromise = executeImport({ project, mode: request.mode, packages }, guard);
+  importPromise = executeImport({ project, packages, overwrite }, guard);
   return importSnapshot();
 }
 
@@ -688,7 +672,6 @@ function registerIpc() {
     return result.canceled ? null : result.filePaths[0] || null;
   });
   ipcMain.handle("import:inspect", (_event, project) => importCli("inspect", ["--project", importProjectPath(project)]));
-  ipcMain.handle("import:install-bridge", (_event, project) => installImportBridge(project));
   ipcMain.handle("import:start", (_event, request) => startImport(request));
   ipcMain.handle("import:status", () => importSnapshot());
   ipcMain.handle("import:stop", (_event, id) => stopImport(id));
@@ -794,11 +777,11 @@ app.whenReady().then(() => {
 app.on("before-quit", (event) => {
   if (quitReady) return;
   event.preventDefault();
-  if (quitting || importAdmission) return;
+  if (quitting) return;
   if (importActive()) {
     const choice = dialog.showMessageBoxSync({ type: "warning", title: "Import in progress",
       message: "Stop the queue and quit after the current package finishes?",
-      detail: "Unity will not be interrupted mid-import. Already imported assets remain in the project.",
+      detail: "Already installed packages remain in the project.",
       buttons: ["Keep importing", "Stop after current and quit"], defaultId: 0, cancelId: 0, noLink: true });
     if (choice !== 1) return;
     stopImport(importJob.id);

@@ -282,11 +282,11 @@ const PROGRESS_STAGE_LABELS: Record<string, string> = {
   resolve: "Looking up store details", enrich: "Merging store details", merge: "Merging store details",
   "refreshing index": "Refreshing index", "index refreshed": "Index refreshed",
   "index refresh failed": "Index refresh failed",
-  import: "Importing packages", install: "Installing import bridge", stopping: "Stopping after current package",
+  import: "Installing packages", installing: "Installing packages", stopping: "Stopping after current package",
   unknown: "Outcome unknown", "outcome unknown": "Outcome unknown",
 };
 
-const PROGRESS_COUNT_LABELS: Record<string, string> = { no_result: "no search match", unverified: "unverified matches", remaining: "still need enrichment", moved: "files moved", skipped: "files skipped", staged: "files staged", removed: "files deleted", rolled_back: "files rolled back", rollback_failed: "rollback failures", resolved: "resolved", failed: "failed", blocked: "blocked", imported: "packages imported", cancelled: "packages cancelled", index_added: "index entries added", index_removed: "index entries removed", index_resized: "index entries resized", inventory_examined: "inventory examined", inventory_found: "inventory found" };
+const PROGRESS_COUNT_LABELS: Record<string, string> = { no_result: "no search match", unverified: "unverified matches", remaining: "still need enrichment", moved: "files moved", skipped: "files skipped", staged: "files staged", removed: "files deleted", rolled_back: "files rolled back", rollback_failed: "rollback failures", resolved: "resolved", failed: "failed", blocked: "blocked", installed: "packages installed", cancelled: "packages cancelled", index_added: "index entries added", index_removed: "index entries removed", index_resized: "index entries resized", inventory_examined: "inventory examined", inventory_found: "inventory found" };
 
 function ActionProgress({ job, onDismiss, announce = true, compact = false, onReview }: ProgressProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -778,6 +778,7 @@ function App() {
   }
   function dismissImportJob(id: string) {
     setDismissedIds((current) => new Set(current).add(id));
+    setImportJob((current) => current?.id === id && !["queued", "running"].includes(current.status) ? null : current);
   }
 
   async function saveStorageRoot() {
@@ -1800,7 +1801,7 @@ function App() {
           assets={importAssets}
           job={importJob}
           finalFocusRef={importTriggerRef}
-          onClose={() => setImportOpen(false)}
+          onClose={() => { setImportOpen(false); if (importJob && !importActive) dismissImportJob(importJob.id); }}
           onStart={startImport}
           onStop={stopImport}
           onRefreshAssets={refreshAssets}

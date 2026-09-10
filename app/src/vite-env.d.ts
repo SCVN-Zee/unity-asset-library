@@ -34,12 +34,12 @@ declare global {
   type TagChange = { action: "create" | "rename" | "delete" | "assign" | "remove"; tag: string; new_tag?: string; asset_key?: string };
   type UserTags = { tags: string[]; assignments: Record<string, string[]> };
   type UnityProject = { path: string; title: string; version: string };
-  type ImportProject = UnityProject & { open: boolean; bridge_installed: boolean; bridge_ready: boolean };
-  type ImportRequest = { project: string; mode: "closed" | "live"; packages: { asset_key: string; file: string }[] };
-  type ImportResultRow = { file: string; status: "pending" | "preparing" | "downloading" | "ready" | "importing" | "imported" | "failed" | "cancelled"; error?: string; bytes_completed?: number | null; bytes_total?: number | null };
+  type ImportProject = UnityProject;
+  type ImportRequest = { project: string; overwrite?: boolean; packages: { asset_key: string; file: string }[] };
+  type ImportResultRow = { file: string; status: "pending" | "preparing" | "downloading" | "ready" | "installing" | "installed" | "failed" | "cancelled"; error?: string; backup_path?: string; bytes_completed?: number | null; bytes_total?: number | null };
   type ActionIdentity = { id: string; kind: "resync" | "cleanup" | "organize"; phase: "plan" | "apply" };
   type Preferences = { theme?: string | null; sort?: string | null; view?: string | null; filters?: Record<string, unknown> | null; action?: ActionIdentity | null };
-  type ImportJob = ProgressSnapshot & { id: string; kind: "import"; status: "queued" | "running" | "completed" | "failed" | "cancelled"; project: string; mode: "closed" | "live"; results: ImportResultRow[]; error?: string | null; stop_requested?: boolean };
+  type ImportJob = ProgressSnapshot & { id: string; kind: "import"; status: "queued" | "running" | "completed" | "failed" | "cancelled"; project: string; overwrite?: boolean; results: ImportResultRow[]; error?: string | null; stop_requested?: boolean };
   type UalBridge = {
     getStorage: () => Promise<StorageState>;
     answerPortChoice: (id: string, choice: PortChoice) => Promise<void>;
@@ -70,7 +70,6 @@ declare global {
     importProjects: () => Promise<UnityProject[]>;
     chooseImportProject: () => Promise<string | null>;
     inspectImportProject: (path: string) => Promise<ImportProject>;
-    installImportBridge: (path: string) => Promise<ImportProject>;
     startImport: (request: ImportRequest) => Promise<ImportJob>;
     getImport: () => Promise<ImportJob | null>;
     stopImport: (id: string) => Promise<ImportJob>;

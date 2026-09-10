@@ -8,7 +8,6 @@ contextBridge.exposeInMainWorld("ual", {
   importProjects: () => ipcRenderer.invoke("import:projects"),
   chooseImportProject: () => ipcRenderer.invoke("import:choose-project"),
   inspectImportProject: (project) => ipcRenderer.invoke("import:inspect", project),
-  installImportBridge: (project) => ipcRenderer.invoke("import:install-bridge", project),
   startImport: (request) => ipcRenderer.invoke("import:start", request),
   getImport: () => ipcRenderer.invoke("import:status"),
   stopImport: (id) => ipcRenderer.invoke("import:stop", id),

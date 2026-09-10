@@ -1402,18 +1402,53 @@ button:focus-visible {
 .import-check { position: absolute; top: 12px; left: 12px; z-index: 2; display: grid; place-items: center; width: 26px; height: 26px; background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--line-soft); border-radius: 5px; cursor: pointer; }
 .import-check input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
 .asset-list .asset-cell .import-check { top: 50%; left: 6px; transform: translateY(-50%); }
-.import-dialog { max-width: 720px; width: min(720px, 92vw); }
-.import-dialog .dialog-top h2 { font-size: 1.1rem; }
-.import-section { margin-top: 14px; border-top: 1px solid var(--line-soft); padding-top: 12px; }
-.import-section h3 { font-size: 0.95rem; margin: 0 0 8px; }
-.import-section h3 span { color: var(--muted); font-weight: 400; margin-left: 4px; }
-.import-packages { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.import-packages li { display: flex; gap: 10px; align-items: flex-start; }
-.import-package-order { display: grid; gap: 2px; }
-.import-package-order .icon-button { width: 24px; height: 24px; }
-.import-package-main { display: grid; gap: 4px; min-width: 0; flex: 1; }
-.import-package-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.import-package-file { color: var(--muted); font-size: 0.85rem; }
+.import-dialog { max-width: 1040px; width: 100%; max-height: calc(100dvh - 60px); padding: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--panel); }
+.import-dialog .dialog-top { padding: 22px 24px 16px; flex-shrink: 0; }
+.import-dialog .dialog-top h2 { font-size: 22px; margin-bottom: 0; }
+.import-dialog .dialog-top .eyebrow { color: var(--muted); }
+.import-body { min-height: 0; overflow: auto; padding: 0 24px 20px; }
+.import-dialog .dialog-lead { margin: 0 0 20px; max-width: none; font-size: 13px; }
+.import-setup { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+.import-section { min-width: 0; margin-top: 14px; border-top: 1px solid var(--line-soft); padding-top: 12px; }
+.import-setup > .import-section { margin-top: 0; }
+.import-section h3 { font-size: 14px; margin: 0 0 8px; }
+.import-section h3 span { color: var(--muted); font-weight: 400; margin-left: 4px; font-variant-numeric: tabular-nums; }
+.import-section-hint { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 8px 0 12px; }
+.import-packages { list-style: none; margin: 0; padding: 0; max-height: min(52dvh, 480px); overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.import-packages li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 4px; border-bottom: 1px solid var(--line-soft); }
+.import-packages li:last-child { border-bottom: 0; }
+.import-package-number { color: var(--faint); font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
+.import-package-order { grid-column: 3; grid-row: 1; display: flex; gap: 2px; }
+.import-package-order .icon-button { width: 28px; height: 32px; }
+.import-package-main { grid-column: 2; grid-row: 1; display: grid; gap: 5px; min-width: 0; }
+.import-package-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
+.import-package-file { color: var(--muted); font-size: 11px; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.import-package-filename { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.import-package-file .availability-tag { flex-shrink: 0; margin: 0; }
+.import-package-main .native-select { width: 100%; font-size: 12px; }
+.import-dialog .dialog-foot { margin: 0; padding: 16px 24px; border-top: 1px solid var(--line); flex-shrink: 0; background: var(--panel); }
+.import-dialog .button { white-space: nowrap; }
+.import-project-path { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); }
+.import-mode-option { padding: 10px; border: 1px solid var(--line); border-radius: 6px; }
+.import-mode-option:has(input:checked) { border-color: var(--accent-border); background: var(--accent-soft); }
+.import-mode-option small { display: block; color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 4px; }
+.import-mode-option strong { font-size: 13px; }
+.import-mode-option input { accent-color: var(--accent); }
+.import-dialog .import-warning-text { color: var(--accent-text); }
+.import-dialog .import-warning { font-size: 12px; line-height: 1.5; color: var(--text); }
+.import-warning strong { display: block; }
+.import-dialog .import-project-info { font-size: 12px; line-height: 1.5; }
+.import-dialog .import-results { table-layout: fixed; overflow-wrap: anywhere; }
+@media (max-width: 767px) {
+  .import-dialog { max-height: calc(100dvh - 32px); }
+  .import-dialog .dialog-top { padding: 18px 16px 14px; }
+  .import-dialog .dialog-top h2 { font-size: 19px; }
+  .import-body { padding: 0 16px 16px; }
+  .import-setup { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .import-target { grid-row: 1; }
+  .import-packages { max-height: 320px; }
+  .import-dialog .dialog-foot { padding: 12px 16px; }
+}
 .native-select { background: var(--panel-2); color: var(--text); border: 1px solid var(--line-soft); border-radius: 6px; padding: 6px 8px; font: inherit; max-width: 100%; }
 .import-project-row { display: flex; gap: 8px; align-items: center; }
 .import-project-row .native-select { flex: 1; min-width: 0; }

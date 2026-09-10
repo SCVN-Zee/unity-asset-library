@@ -176,6 +176,26 @@ app.whenReady().then(async () => {
     await click('[aria-label="Dismiss Import result"]');
     await waitFor(`!document.querySelector(".task-indicator")`);
     console.log("PASS: task hover, focus, Escape, review import, failure details and dismissal");
+    const batch = Array.from({ length: 14 }, (_, i) => ({ asset_key: `batch-${i}`, name: `Editor package ${String(i + 1).padStart(2, "0")}`, versions: [{ file: `Editor package ${i + 1} v1.2.3.unitypackage`, availability: "local" }] }));
+    await evaluate(`localStorage.clear(); localStorage.setItem("ual:test-assets", ${JSON.stringify(JSON.stringify(batch))})`);
+    await win.reload();
+    await waitFor(`document.querySelectorAll(".asset-cell").length === 14`);
+    await click(`[aria-label="Select visible packages for import"]`);
+    await waitFor(`!!document.querySelector(".import-controls .primary")`);
+    await click(`.import-controls .primary`);
+    await waitFor(`document.querySelectorAll(".import-packages li").length === 14`);
+    await click(`[aria-label="Move Editor package 01 down"]`);
+    await waitFor(`document.querySelector(".import-package-main strong").textContent === "Editor package 02"`);
+    await evaluate(`(() => { const select = document.querySelector('select[aria-label="Unity Hub project"]'); select.value = "/fixture/project"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    await waitFor(`!document.querySelector(".import-dialog .primary").disabled`);
+    for (const [width, height] of [[1200, 800], [983, 700], [390, 700]]) {
+      win.setContentSize(width, height);
+      await waitFor(`innerWidth === ${width}`);
+      assert(await evaluate(`(() => { const dialog = document.querySelector(".import-dialog"); const footer = dialog.querySelector(".dialog-foot").getBoundingClientRect(); return footer.top >= 0 && footer.bottom <= innerHeight && dialog.scrollWidth <= dialog.clientWidth; })()`), "Import actions stay visible without horizontal overflow");
+      await evaluate(`document.querySelector(".import-packages").scrollTop = 10000`);
+      assert(await evaluate(`document.querySelector(".import-dialog .dialog-foot").getBoundingClientRect().bottom <= innerHeight`));
+    }
+    console.log("PASS: 14-package reorder, project selection, fixed import actions at desktop and mobile sizes");
   } catch (error) {
     console.error(error);
     exitCode = 1;

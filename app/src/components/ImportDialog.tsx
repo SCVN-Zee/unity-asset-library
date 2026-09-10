@@ -226,19 +226,22 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
             <Icon as={X} className="icon" aria-hidden="true" focusable={false} />
           </Button>
         </AlertDialogHeader>
-        <AlertDialogBody>
+        <AlertDialogBody className="import-body">
           {showSetup && (
             <>
-              <p className="dialog-lead">Pick an archive version and order for each package, then choose a Unity project. Packages are staged locally (up to 3 at a time), imported in order, and the batch stops at the first failure. Packages overwrite existing files — there is no rollback.</p>
-              <section className="import-section" aria-label="Packages">
+              <p className="dialog-lead">Choose archive versions, arrange the import order, and select a Unity project.</p>
+              <div className="import-setup">
+              <section className="import-section import-queue" aria-label="Packages">
                 {refreshing && <p className="muted" role="status">Refreshing availability…</p>}
                 <h3>Packages <span>{order.length}</span></h3>
+                <p className="import-section-hint">Imported from top to bottom. Use the arrows to reorder.</p>
                 <ol className="import-packages">
                   {order.map((asset, index) => {
                     const packages = unityPackages(asset);
                     const availability = availabilityLabel(packages[0]?.availability);
                     return (
                       <li key={asset.asset_key}>
+                        <span className="import-package-number" aria-hidden="true">{index + 1}</span>
                         <div className="import-package-order">
                           <Button type="button" className="icon-button" onPress={() => move(index, -1)} isDisabled={index === 0 || running} aria-label={`Move ${asset.name} up`}><Icon as={ArrowUp} className="icon" aria-hidden="true" focusable={false} /></Button>
                           <Button type="button" className="icon-button" onPress={() => move(index, +1)} isDisabled={index === order.length - 1 || running} aria-label={`Move ${asset.name} down`}><Icon as={ArrowDown} className="icon" aria-hidden="true" focusable={false} /></Button>
@@ -263,7 +266,7 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
                               })}
                             </select>
                           ) : (
-                            <span className="import-package-file" title={packages[0]?.file}>{(packages[0]?.file || "").split(/[\\/]/).pop()}{availability && <span className="availability-tag" data-availability={packages[0]?.availability}>{availability}</span>}</span>
+                            <span className="import-package-file"><span className="import-package-filename" title={packages[0]?.file}>{(packages[0]?.file || "").split(/[\\/]/).pop()}</span>{availability && <span className="availability-tag" data-availability={packages[0]?.availability}>{availability}</span>}</span>
                           )}
                           {!chosen[asset.asset_key] && <span className="import-warning-text" role="alert">Choose the exact archive version to import.</span>}
                         </div>
@@ -272,7 +275,7 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
                   })}
                 </ol>
               </section>
-              <section className="import-section" aria-label="Target project">
+              <section className="import-section import-target" aria-label="Target project">
                 <h3>Target project</h3>
                 <div className="import-project-row">
                   <select
@@ -295,7 +298,7 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
                 {inspectError && <p className="import-warning-text" role="alert">{inspectError} <Button type="button" className="button quiet" onPress={() => void inspect(projectPath)} isDisabled={installing}>Retry</Button></p>}
                 {projectInfo && (
                   <dl className="import-project-info">
-                    <div><dt>Project</dt><dd title={projectInfo.path}>{projectInfo.title} — <code>{projectInfo.path}</code></dd></div>
+                    <div><dt>Project</dt><dd title={projectInfo.path}>{projectInfo.title}<code className="import-project-path">{projectInfo.path}</code></dd></div>
                     <div><dt>Unity</dt><dd>{projectInfo.version}</dd></div>
                     <div><dt>State</dt><dd>{projectInfo.open ? "Open in Unity" : "Closed"} <Button type="button" className="button quiet" aria-label="Refresh project status" onPress={() => void inspect(projectPath)} isDisabled={inspecting || installing}>Refresh</Button></dd></div>
                     <div><dt>Bridge</dt><dd>{projectInfo.bridge_ready ? "Installed and ready" : projectInfo.bridge_installed ? "Installed, not ready yet" : "Not installed"}</dd></div>
@@ -306,12 +309,12 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
                     <legend>Import mode</legend>
                     <label className="import-mode-option">
                       <input type="radio" name="import-mode" value="closed" checked={mode === "closed"} onChange={() => setMode("closed")} disabled={closedModeBlocked || installingBridge} />
-                      Closed project — imports the batch in one headless Unity session, then quits. A temporary Editor runner is added and removed for this batch.
+                      <span><strong>Closed project</strong><small>Imports in one headless Unity session, then quits. A temporary Editor runner is added and removed.</small></span>
                       {closedModeBlocked && <span className="import-warning-text">The project is currently open in Unity. Close it or use live mode.</span>}
                     </label>
                     <label className="import-mode-option">
                       <input type="radio" name="import-mode" value="live" checked={mode === "live"} onChange={() => setMode("live")} disabled={liveModeBlocked || installingBridge} />
-                      Live Editor — imports into the running Editor
+                      <span><strong>Live Editor</strong><small>Imports into the running Unity Editor.</small></span>
                       {projectInfo && !projectInfo.open && <span className="import-warning-text">Open the project in Unity to use live mode.</span>}
                       {projectInfo.open && !projectInfo.bridge_ready && <span className="import-warning-text">The bridge is not ready in this Editor.</span>}
                     </label>
@@ -325,8 +328,11 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
                     </>}
                   </div>
                 )}
-                <p className="import-warning">Packages overwrite files already in the target project. There is no rollback — check the project before importing.</p>
+                <p className="import-section-hint">Stages up to 3 packages locally at a time. Imports run in order and stop at the first failure.</p>
+                <p className="import-warning"><strong>Existing files will be overwritten.</strong> There is no rollback. Back up your project before importing.</p>
               </section>
+              </div>
+              {startError && <p className="import-warning-text" role="alert">{startError}</p>}
             </>
           )}
           {job && (

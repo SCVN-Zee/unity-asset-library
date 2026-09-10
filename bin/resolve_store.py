@@ -1125,6 +1125,10 @@ def _main_unlocked(argv=None):
                       resolved=stats["resolved"], failed=stats["failed"],
                       blocked=stats["blocked"], skipped=stats["skipped"])
             pacer.wait()
+        _progress(args.progress_json, args.command, processed, total,
+                  resolved=stats["resolved"], no_result=stats["no-result"],
+                  unverified=stats["unverified"], failed=stats["failed"],
+                  blocked=stats["blocked"], skipped=stats["skipped"])
         attempted = processed
         print(f"\n{args.command} done: {stats} of {attempted} attempted")
         print("transport health:")

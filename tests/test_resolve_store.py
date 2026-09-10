@@ -1146,6 +1146,29 @@ class TestPendingResolveScope(unittest.TestCase):
         self.assertEqual(attempted, [])
 
 class TestStructuredProgress(unittest.TestCase):
+    def test_completed_resolve_reports_unmatched_outcomes(self):
+        import contextlib
+        import io
+        import shutil
+        harness = TestPendingResolveScope()
+        harness.setUp()
+        self.addCleanup(shutil.rmtree, harness.state)
+        self.addCleanup(harness.tearDown)
+        stream = io.StringIO()
+        with contextlib.redirect_stdout(stream):
+            code, _ = harness._run(
+                ["--progress-json"],
+                [harness._asset("a"), harness._asset("b")],
+                cache={"resolved": {}},
+                resolve_fn=lambda asset, *args, **kwargs: {
+                    "status": "no-result" if asset["asset_key"] == "a" else "unverified"})
+        events = [json.loads(line[len("UL_PROGRESS "):])
+                  for line in stream.getvalue().splitlines() if line.startswith("UL_PROGRESS ")]
+        self.assertEqual(code, 0)
+        self.assertEqual(events[-1]["counts"]["no_result"], 1)
+        self.assertEqual(events[-1]["counts"]["unverified"], 1)
+        self.assertEqual(events[-1]["counts"]["resolved"], 0)
+
     def test_progress_json_is_prefixed_machine_data_and_disabled_by_default(self):
         import contextlib
         import io

@@ -265,7 +265,7 @@ function CategoryBranch({
   );
 }
 type ProgressProps = {
-  job: ProgressSnapshot & { id: string; status: string; kind?: string; phase?: string; error?: string | null; error_code?: string | null; result?: ActionResult | null };
+  job: ProgressSnapshot & { id: string; status: string; kind?: string; phase?: string; remaining?: number | null; error?: string | null; error_code?: string | null; result?: ActionResult | null };
   onDismiss?: (id: string) => void;
   announce?: boolean;
   compact?: boolean;
@@ -286,7 +286,7 @@ const PROGRESS_STAGE_LABELS: Record<string, string> = {
   unknown: "Outcome unknown", "outcome unknown": "Outcome unknown",
 };
 
-const PROGRESS_COUNT_LABELS: Record<string, string> = { moved: "files moved", skipped: "files skipped", staged: "files staged", removed: "files deleted", rolled_back: "files rolled back", rollback_failed: "rollback failures", resolved: "resolved", failed: "failed", blocked: "blocked", imported: "packages imported", cancelled: "packages cancelled", index_added: "index entries added", index_removed: "index entries removed", index_resized: "index entries resized", inventory_examined: "inventory examined", inventory_found: "inventory found" };
+const PROGRESS_COUNT_LABELS: Record<string, string> = { no_result: "no search match", unverified: "unverified matches", remaining: "still need enrichment", moved: "files moved", skipped: "files skipped", staged: "files staged", removed: "files deleted", rolled_back: "files rolled back", rollback_failed: "rollback failures", resolved: "resolved", failed: "failed", blocked: "blocked", imported: "packages imported", cancelled: "packages cancelled", index_added: "index entries added", index_removed: "index entries removed", index_resized: "index entries resized", inventory_examined: "inventory examined", inventory_found: "inventory found" };
 
 function ActionProgress({ job, onDismiss, announce = true, compact = false, onReview }: ProgressProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -306,14 +306,16 @@ function ActionProgress({ job, onDismiss, announce = true, compact = false, onRe
   const phaseLabel = job.kind === "enrich" || job.kind === "import" ? "" : " · " + (job.phase === "apply" ? "Apply" : "Preview");
   const title = actionLabel + phaseLabel;
   const rawStage = (job.stage || (job.status === "queued" ? "waiting" : "working")).toLowerCase();
-  const outcome = job.status === "completed" ? "Completed" : job.status === "cancelled" ? "Cancelled" : job.status === "failed" ? "Failed" : job.status === "queued" ? "Queued" : "In progress";
+  const remaining = job.kind === "enrich" ? job.remaining ?? counts.remaining ?? 0 : 0;
+  const incompleteEnrichment = job.status === "completed" && remaining > 0;
+  const outcome = incompleteEnrichment ? "Finished with unresolved assets" : job.status === "completed" ? "Completed" : job.status === "cancelled" ? "Cancelled" : job.status === "failed" ? "Failed" : job.status === "queued" ? "Queued" : "In progress";
   const stage = PROGRESS_STAGE_LABELS[rawStage] ?? job.stage ?? "Working";
   const unknownProgress = rawStage.includes("scan") ? completed + " files found" : completed + " processed · total unknown";
   const result = job.result as ActionResult | null | undefined;
   const refreshFailed = result?.applied === true && result?.state_refreshed === false;
   const rollbackIncomplete = result?.rollback_incomplete === true;
   const displayCounts = Object.entries(counts).filter(([key]) => Boolean(PROGRESS_COUNT_LABELS[key]) || key.startsWith("index_") || key.startsWith("inventory_"));
-  const guidance = rollbackIncomplete ? "Residual files may need manual attention." : refreshFailed ? "Verify the library before trying again." : "";
+  const guidance = incompleteEnrichment ? `${remaining} assets still need enrichment. The lookup run finished, but not every asset could be matched to a verified store listing. Retry later for unavailable searches; unmatched listings may need manual review.` : rollbackIncomplete ? "Residual files may need manual attention." : refreshFailed ? "Verify the library before trying again." : "";
   const panel = (
     <section className={["progress-panel", terminal ? "terminal" : "", job.status === "failed" ? "failed" : ""].join(" ")} data-progress-id={job.id} aria-label={title + " progress"}>
       <div className="progress-heading">
@@ -332,7 +334,7 @@ function ActionProgress({ job, onDismiss, announce = true, compact = false, onRe
   return (
     <div className="header-task" onMouseEnter={() => setDetailsOpen(true)} onMouseLeave={() => setDetailsOpen(false)} onFocus={() => setDetailsOpen(true)} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setDetailsOpen(false); }} onKeyDown={(event) => { if (event.key === "Escape") { setDetailsOpen(false); event.stopPropagation(); } }}>
       <Button type="button" className="task-indicator" data-status={job.status} aria-label={`${title}: ${outcome}${!terminal && percent !== undefined ? `, ${percent}%` : ""}. Show details`} aria-expanded={detailsOpen} aria-controls={`task-details-${job.id}`} onPress={() => setDetailsOpen(true)}>
-        <Icon as={job.status === "failed" ? CircleAlert : job.status === "completed" ? CircleCheck : job.status === "cancelled" ? CircleSlash : job.kind === "enrich" ? Sparkles : job.kind === "import" ? Package : RefreshCw} className="icon" aria-hidden="true" />
+        <Icon as={job.status === "failed" || incompleteEnrichment ? CircleAlert : job.status === "completed" ? CircleCheck : job.status === "cancelled" ? CircleSlash : job.kind === "enrich" ? Sparkles : job.kind === "import" ? Package : RefreshCw} className="icon" aria-hidden="true" />
         <span className="task-label">{actionLabel}</span>
         {!terminal && (percent === undefined ? <Spinner className="spinner task-spinner" aria-hidden="true" /> : <span className="task-percent">{percent}%</span>)}
       </Button>

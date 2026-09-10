@@ -44,7 +44,6 @@ import {
   FolderOpen,
   LayoutGrid,
   List,
-  PanelRight,
   Menu,
   Sun,
   Moon,
@@ -498,12 +497,11 @@ function App() {
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [theme, setTheme] = useState<"system" | "light" | "dark">("system");
   const searchRef = useRef<HTMLInputElement>(null);
-  const detailsToggleRef = useRef<HTMLButtonElement>(null);
   const detailsCloseRef = useRef<HTMLButtonElement>(null);
   const inspectorWasOpen = useRef(inspectorOpen);
   useEffect(() => {
     if (inspectorOpen && window.innerWidth < 768) detailsCloseRef.current?.focus();
-    else if (!inspectorOpen && inspectorWasOpen.current) detailsToggleRef.current?.focus();
+    else if (!inspectorOpen && inspectorWasOpen.current) searchRef.current?.focus();
     inspectorWasOpen.current = inspectorOpen;
   }, [inspectorOpen]);
   useEffect(() => {
@@ -742,7 +740,7 @@ function App() {
   }
   function selectAsset(asset: Asset, { metaKey, shiftKey }: { metaKey: boolean; shiftKey: boolean }, checkbox = false) {
     setSelectedKey(asset.asset_key);
-    if (!checkbox && window.innerWidth < 768 && !metaKey && !shiftKey) setInspectorOpen(true);
+    if (!checkbox && !metaKey && !shiftKey) setInspectorOpen(true);
     if (importActive || unityPackages(asset).length === 0) return;
     const index = filtered.findIndex((item) => item.asset_key === asset.asset_key);
     const anchor = filtered.findIndex((item) => item.asset_key === selectionAnchor.current);
@@ -1234,6 +1232,24 @@ function App() {
           <img className="brand-mark" src={appIcon} alt="" draggable={false} />
           <h1>Unity Asset Library</h1>
         </div>
+            <Button type="button" className="icon-button navigation-toggle" aria-label="Toggle library navigation" aria-expanded={navigationOpen} aria-controls="library-navigation" onPress={() => setNavigationOpen(!navigationOpen)}><Icon as={Menu} className="icon" aria-hidden="true" /></Button>
+          <Input className="search-wrap" role="search">
+            <Icon
+              as={Search}
+              className="icon"
+              aria-hidden="true"
+              focusable={false}
+            />
+            <InputField
+              ref={searchRef}
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search assets, authors, tags…"
+              aria-label="Search library"
+            />
+            {!query && <kbd>⌘ K</kbd>}
+            {query && <Button className="search-clear" aria-label="Clear search" onPress={() => setQuery("")}><Icon as={X} className="icon" aria-hidden="true" /></Button>}
+          </Input>
         <div className="top-actions">
           <div className="header-tasks" role="group" aria-label="Background tasks">
             {actionStatus && !dismissedIds.has(actionStatus.id) && <ActionProgress compact job={actionStatus} onDismiss={dismissAction} announce={!(dialog && actionStatus.phase === "apply")} />}
@@ -1554,37 +1570,6 @@ function App() {
 
         </aside>
         <section className="content-column" aria-label="Asset browser">
-          <div className="library-toolbar">
-            <Button type="button" className="icon-button navigation-toggle" aria-label="Toggle library navigation" aria-expanded={navigationOpen} aria-controls="library-navigation" onPress={() => setNavigationOpen(!navigationOpen)}><Icon as={Menu} className="icon" aria-hidden="true" /></Button>
-          <Input className="search-wrap" role="search">
-            <Icon
-              as={Search}
-              className="icon"
-              aria-hidden="true"
-              focusable={false}
-            />
-            <InputField
-              ref={searchRef}
-              value={query}
-              onChangeText={setQuery}
-              placeholder="Search assets, authors, tags…"
-              aria-label="Search library"
-            />
-            {!query && <kbd>⌘ K</kbd>}
-            {query && <Button className="search-clear" aria-label="Clear search" onPress={() => setQuery("")}><Icon as={X} className="icon" aria-hidden="true" /></Button>}
-          </Input>
-          <div className="import-controls">
-            <Button type="button" className="button quiet" onPress={selectVisibleImport} isDisabled={loading || importActive} aria-label="Select visible packages for import">Select visible</Button>
-            {importSelection.size > 0 && (
-              <>
-                <Button type="button" className="button quiet" onPress={() => { selectionAnchor.current = null; setImportSelection(new Set()); }} isDisabled={importActive} aria-label="Clear import selection">Clear selection</Button>
-                <Button ref={importTriggerRef} type="button" className="button primary" onPress={() => setImportOpen(true)} isDisabled={importActive} aria-label={`Import ${importSelection.size} selected package${importSelection.size === 1 ? "" : "s"}`}>Import {importSelection.size}</Button>
-              </>
-            )}
-          </div>
-
-            <Button ref={detailsToggleRef} type="button" className={`icon-button ${inspectorOpen ? "selected" : ""}`} aria-label={inspectorOpen ? "Hide asset details" : "Show asset details"} title={inspectorOpen ? "Hide asset details" : "Show asset details"} aria-expanded={inspectorOpen} aria-controls="asset-inspector" onPress={() => setInspectorOpen(!inspectorOpen)}><Icon as={PanelRight} className="icon" aria-hidden="true" /></Button>
-          </div>
           <div className="content-head">
             <div>
               <h2>{quick === "all" ? category : { favorites: "Favorites", pending: "Needs enrichment", flagged: "Flagged", "non-store": "Local only" }[quick]}</h2>
@@ -1751,12 +1736,16 @@ function App() {
               <Button type="button" className="button quiet" onPress={clearFilters}>Clear filters</Button>
             </div>
           )}
+          <div className="import-controls" role="group" aria-label="Package selection">
+            <Button type="button" className="button quiet" onPress={() => { if (importSelection.size > 0) { selectionAnchor.current = null; setImportSelection(new Set()); } else selectVisibleImport(); }} isDisabled={loading || importActive || (importSelection.size === 0 && !filtered.some((asset) => unityPackages(asset).length > 0))} aria-label={importSelection.size > 0 ? "Deselect all packages" : "Select all packages in current results"}>{importSelection.size > 0 ? "Deselect all" : "Select all"}</Button>
+            {importSelection.size > 0 && <Button ref={importTriggerRef} type="button" className="button primary" onPress={() => setImportOpen(true)} isDisabled={importActive} aria-label={`Import ${importSelection.size} selected package${importSelection.size === 1 ? "" : "s"}`}>Import {importSelection.size}</Button>}
+          </div>
         </section>
 
         <aside className="inspector" id="asset-inspector" aria-label="Asset details" hidden={!inspectorOpen}>
           <div className="inspector-heading">
             <span>Asset details</span>
-            <Button ref={detailsCloseRef} type="button" className="icon-button" aria-label="Close asset details" onPress={() => setInspectorOpen(false)}>
+            <Button ref={detailsCloseRef} type="button" className="icon-button inspector-close" aria-label="Close asset details" onPress={() => setInspectorOpen(false)}>
               <Icon as={X} className="icon" aria-hidden="true" />
             </Button>
           </div>

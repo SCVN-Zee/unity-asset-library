@@ -62,6 +62,10 @@ app.whenReady().then(async () => {
     await win.loadFile(path.join(__dirname, '../dist/renderer/index.html'));
     await waitFor('document.querySelector("img.brand-mark")?.naturalWidth > 0');
     await waitFor('document.querySelectorAll(".asset-card").length === 4');
+    await click('[aria-label="Select all packages in current results"]');
+    await selection(['City Audio', 'Editor Tool', 'Forest Audio']);
+    await click('[aria-label="Deselect all packages"]');
+    await selection([]);
     assert.equal(await evaluate(`document.querySelector('[title="Forest Audio"] .availability').getAttribute("data-availability")`), "cloud_only");
     assert.equal(await evaluate(`document.querySelector('[title="City Audio"] .availability').getAttribute("data-availability")`), "local");
     await click('.side-section .nav-row:nth-of-type(2)');
@@ -73,9 +77,9 @@ app.whenReady().then(async () => {
     await waitFor('document.querySelectorAll(".asset-card").length === 2');
     await click('[aria-label="List view"]');
     await waitFor('document.querySelectorAll(".list-row").length === 2');
-    await click('[aria-label="Hide asset details"]');
+    await click('[aria-label="Close asset details"]');
     await waitFor('document.querySelector(".inspector").hidden');
-    await click('[aria-label="Show asset details"]');
+    await click('.list-row[title="Forest Audio"]');
     await waitFor('!document.querySelector(".inspector").hidden');
     assert.equal(await evaluate('document.querySelector(".inspector-title h2").textContent'), 'Forest Audio');
     await evaluate('document.activeElement.blur(); document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }))');
@@ -90,7 +94,7 @@ app.whenReady().then(async () => {
     await click('.list-row');
     await waitFor('document.activeElement.getAttribute("aria-label") === "Close asset details"');
     await click('[aria-label="Close asset details"]');
-    await waitFor('document.activeElement.getAttribute("aria-label") === "Show asset details"');
+    await waitFor('document.activeElement.getAttribute("aria-label") === "Search library"');
     assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
     console.log('PASS: combined filters, independent removal, list/detail coherence, search shortcut, compact detail focus, no horizontal overflow');
 
@@ -180,7 +184,7 @@ app.whenReady().then(async () => {
     await evaluate(`localStorage.clear(); localStorage.setItem("ual:test-assets", ${JSON.stringify(JSON.stringify(batch))})`);
     await win.reload();
     await waitFor(`document.querySelectorAll(".asset-cell").length === 14`);
-    await click(`[aria-label="Select visible packages for import"]`);
+    await click('[aria-label="Select all packages in current results"]');
     await waitFor(`!!document.querySelector(".import-controls .primary")`);
     await click(`.import-controls .primary`);
     await waitFor(`document.querySelectorAll(".import-packages li").length === 14`);

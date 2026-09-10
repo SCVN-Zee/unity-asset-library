@@ -127,6 +127,7 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 24px;
 }
 .brand {
   display: flex;
@@ -409,7 +410,11 @@ h1 {
   overflow-y: auto;
   padding: 0 24px 32px;
   scrollbar-gutter: stable;
+  display: flex;
+  flex-direction: column;
+  scroll-padding-bottom: 88px;
 }
+.content-column > * { flex-shrink: 0; }
 .content-head {
   display: flex; justify-content: space-between; align-items: center; gap: 16px;
   background: var(--bg);
@@ -1296,13 +1301,14 @@ button:focus-visible {
 }
 @media (hover: none) { .button:active { transform: none; } }
 
-/* Product layers: toolbar/inspector heading 3; popover 20; confirmation dialog 100.
+/* Product layers: floating actions/inspector heading 3; popover 20; confirmation dialog 100.
    Shape scale: controls and thumbnails 6px; cards and dialogs 8px. */
 .workspace.with-inspector { grid-template-columns: 212px minmax(0, 1fr) 336px; }
 .inspector[hidden] { display: none; }
-.library-toolbar { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 10px; padding: 18px 0; background: var(--bg); border-bottom: 1px solid var(--line-soft); }
-.library-toolbar .search-wrap { flex: 1; min-width: 0; height: 42px; }
-.library-toolbar .icon-button { flex: none; width: 38px; height: 38px; }
+.topbar .search-wrap { flex: 1; min-width: 0; max-width: 720px; height: 40px; -webkit-app-region: no-drag; }
+.topbar .brand, .top-actions { flex-shrink: 0; }
+.topbar h1 { white-space: nowrap; }
+.inspector-close { border: 0; background: transparent; }
 .search-wrap kbd { flex: none; color: var(--faint); font-family: inherit; font-size: 11px; white-space: nowrap; }
 .navigation-toggle { display: none; }
 .inspector-heading { position: sticky; top: 0; z-index: 3; display: flex; justify-content: space-between; align-items: center; padding: 18px 20px; background: var(--panel); color: var(--muted); font-size: 12px; }
@@ -1345,16 +1351,18 @@ button:focus-visible {
   .content-head { padding-top: 14px; gap: 12px; }
   .content-head h2 { font-size: 22px; }
   .asset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .topbar { height: 64px; padding: 0 16px; }
+  .topbar, .native-titlebar .topbar { height: auto; min-height: 64px; padding: 12px 16px; flex-wrap: wrap; gap: 10px; }
+  .topbar .brand { flex: 1; }
+  .topbar .search-wrap { order: 4; flex-basis: 100%; max-width: none; }
+  .native-titlebar .topbar .brand { padding-left: 80px; }
   .topbar .eyebrow { display: none; }
   .brand { gap: 8px; }
   .top-actions { gap: 8px; }
   h1 { font-size: 15px; }
   .top-actions .button { padding: 0 9px; font-size: 11px; }
   .brand-mark { width: 28px; height: 28px; }
-  .library-toolbar { padding: 12px 0; gap: 6px; }
   .search-wrap kbd { display: none; }
-  .library-toolbar input { font-size: 12px; }
+  .topbar input { font-size: 12px; }
   .dialog-overlay { padding: 16px; }
   .dialog-foot { flex-wrap: wrap; }
   .storage-topbar { padding: 0 16px; }
@@ -1372,6 +1380,7 @@ button:focus-visible {
 }
 .native-titlebar .topbar button, .native-titlebar .storage-topbar .button,
 .native-titlebar .top-actions { -webkit-app-region: no-drag; }
+@media (max-width: 767px) { .native-titlebar .topbar { height: auto; padding-left: 16px; } }
 
 .tag-editor { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .tag-add { flex: 1; min-width: 70px; }
@@ -1397,8 +1406,9 @@ button:focus-visible {
 .tag-manage-row .tag-add { grid-column: 1 / -1; }
 
 /* Batch import */
-.import-controls { display: flex; align-items: center; gap: 8px; }
+.import-controls { position: sticky; bottom: 0; z-index: 3; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: auto; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); }
 .import-controls .button { white-space: nowrap; }
+.content-column > .asset-grid, .content-column > .asset-list { margin-bottom: 24px; }
 .import-check { position: absolute; top: 12px; left: 12px; z-index: 2; display: grid; place-items: center; width: 26px; height: 26px; background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--line-soft); border-radius: 5px; cursor: pointer; }
 .import-check input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
 .asset-list .asset-cell .import-check { top: 50%; left: 6px; transform: translateY(-50%); }

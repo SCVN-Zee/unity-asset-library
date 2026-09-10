@@ -228,8 +228,16 @@ class ImportTests(unittest.TestCase):
                 return False
             def join(self, timeout=None):
                 pass
+        def await_failure():
+            # Unity consumes the staging receipt before exiting; an immediate
+            # fake exit races the scheduler and tests Editor death instead.
+            receipt = self.project / "Library/UALImport/batch-receipts/0.json"
+            deadline = time.monotonic() + 10
+            while not receipt.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(receipt.exists(), "dead worker did not produce a failure receipt")
         with patch.object(ip.multiprocessing, "Process", DeadProcess):
-            with self.fake_unity():
+            with self.fake_unity(await_failure):
                 result = self.run_queue()
         self.assertEqual(result["status"], "failed")
         self.assertIn("copy worker died", result["results"][0]["error"])

@@ -1,6 +1,6 @@
 {
   "name": "unity-asset-library",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "A focused desktop library for Unity assets",
   "main": "electron/main.cjs",

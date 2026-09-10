@@ -1677,6 +1677,7 @@ function App() {
               </Select>
             </div>
           </div>
+          <div className="browser-actions">
           {(query || category !== "All assets" || quick !== "all" || author || untagged || selectedTags.length > 0) && <div className="filter-context" aria-label="Active filters">
             {quick !== "all" && <Button className="filter-chip" aria-label="Remove library filter" onPress={() => setQuick("all")}>{ { favorites: "Favorites", pending: "Needs enrichment", flagged: "Flagged", "non-store": "Local only" }[quick]}<Icon as={X} className="icon" aria-hidden="true" /></Button>}
             {category !== "All assets" && <Button className="filter-chip" aria-label="Remove category filter" onPress={() => setCategory("All assets")}>{category}<Icon as={X} className="icon" aria-hidden="true" /></Button>}
@@ -1693,6 +1694,11 @@ function App() {
             {query && <Button className="filter-chip" aria-label="Remove search filter" onPress={() => setQuery("")}>Search: {query}<Icon as={X} className="icon" aria-hidden="true" /></Button>}
             <Button className="filter-reset" onPress={clearFilters}>Clear filters</Button>
           </div>}
+          <div className="import-controls" role="group" aria-label="Package selection">
+            <Button type="button" className="button quiet" onPress={() => { if (importSelection.size > 0) { selectionAnchor.current = null; setImportSelection(new Set()); } else selectVisibleImport(); }} isDisabled={loading || importActive || (importSelection.size === 0 && !filtered.some((asset) => unityPackages(asset).length > 0))} aria-label={importSelection.size > 0 ? "Deselect all packages" : "Select all packages in current results"}>{importSelection.size > 0 ? "Deselect all" : "Select all"}</Button>
+            {importSelection.size > 0 && <Button ref={importTriggerRef} type="button" className="button primary" onPress={() => setImportOpen(true)} isDisabled={importActive} aria-label={`Import ${importSelection.size} selected package${importSelection.size === 1 ? "" : "s"}`}>Import {importSelection.size}</Button>}
+          </div>
+          </div>
           {loading ? (
             <div className="library-loading" role="status" aria-label="Loading your library"><span>Loading your library…</span><div className="asset-grid" aria-hidden="true">{Array.from({ length: 8 }, (_, index) => <div className="asset-skeleton" key={index}><div /><span /><span /></div>)}</div></div>
           ) : assets.length === 0 ? (
@@ -1736,10 +1742,6 @@ function App() {
               <Button type="button" className="button quiet" onPress={clearFilters}>Clear filters</Button>
             </div>
           )}
-          <div className="import-controls" role="group" aria-label="Package selection">
-            <Button type="button" className="button quiet" onPress={() => { if (importSelection.size > 0) { selectionAnchor.current = null; setImportSelection(new Set()); } else selectVisibleImport(); }} isDisabled={loading || importActive || (importSelection.size === 0 && !filtered.some((asset) => unityPackages(asset).length > 0))} aria-label={importSelection.size > 0 ? "Deselect all packages" : "Select all packages in current results"}>{importSelection.size > 0 ? "Deselect all" : "Select all"}</Button>
-            {importSelection.size > 0 && <Button ref={importTriggerRef} type="button" className="button primary" onPress={() => setImportOpen(true)} isDisabled={importActive} aria-label={`Import ${importSelection.size} selected package${importSelection.size === 1 ? "" : "s"}`}>Import {importSelection.size}</Button>}
-          </div>
         </section>
 
         <aside className="inspector" id="asset-inspector" aria-label="Asset details" hidden={!inspectorOpen}>

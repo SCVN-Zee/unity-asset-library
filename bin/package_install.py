@@ -4,6 +4,9 @@ Preflight is read-only. Each file is committed atomically, but a package is not
 atomic to a running Editor. Save Editor changes first; Unity refreshes separately.
 Incomplete transactions retain originals and a journal outside Assets and block
 subsequent installs until inspected. No unconfirmed operation is replayed.
+Legacy parent folders may omit folderAsset metadata. A payloadless record is
+recognized as a folder only when validated package paths descend from it;
+metadata and GUIDs are preserved verbatim. Missing leaf payloads remain errors.
 """
 import contextlib
 import hashlib
@@ -96,7 +99,7 @@ def parse_package(package, staging):
                     if member.size > limit:
                         raise InstallError("Package metadata is too large: " + name)
                     record[leaf] = source.read(limit + 1)
-    paths = set()
+    paths, parents = set(), set()
     for record in records.values():
         if "pathname" not in record or "asset.meta" not in record:
             raise InstallError("Package asset lacks pathname or metadata: " + record["guid"])
@@ -111,7 +114,16 @@ def parse_package(package, staging):
         if folded in paths:
             raise InstallError("Duplicate or case-colliding package path: " + record["path"])
         paths.add(folded)
+        parent = record["path"].rpartition("/")[0]
+        while parent and parent not in parents:
+            parents.add(parent)
+            parent = parent.rpartition("/")[0]
+    # Some exports omit folderAsset on parent records. Infer only payloadless
+    # ancestors of validated paths, never a missing file or an empty file payload.
+    for record in records.values():
         record["folder"] = bool(FOLDER.search(record["asset.meta"].decode("utf-8")))
+        if not record["folder"] and "asset" not in record and record["path"] in parents:
+            record["folder"] = True
         if record["folder"]:
             if "asset" in record and os.path.getsize(record["asset"]):
                 raise InstallError("Folder asset unexpectedly contains file data: " + record["path"])

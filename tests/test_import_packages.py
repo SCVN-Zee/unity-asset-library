@@ -103,6 +103,41 @@ class ImportTests(unittest.TestCase):
             self.install([("c" * 32, "Assets/Unsafe\n../outside", b"bad")])
         self.assertFalse((self.project / "Assets/Unsafe").exists())
 
+    def test_unmarked_parent_folder_installs_preserving_metadata_and_moved_guid(self):
+        for folder_first, metadata in ((True, b'\xef\xbb\xbffileFormatVersion: 2\r\nguid: ' + b'a' * 32 + b'\r\ntimeCreated: 1655774182'),
+                                       (False, b'fileFormatVersion: 2\nguid: ' + b'a' * 32 + b'\n')):
+            with self.subTest(folder_first=folder_first), tempfile.TemporaryDirectory(dir=self.base) as target:
+                self.project = Path(target)
+                (self.project / "Assets").mkdir()
+                folder = [('a' * 32 + '/pathname', b'Assets/Legacy\n00', tarfile.REGTYPE),
+                          ('a' * 32 + '/asset.meta', metadata, tarfile.REGTYPE)]
+                child = [('b' * 32 + '/pathname', b'Assets/Legacy/Nested/File.txt\n00', tarfile.REGTYPE),
+                         ('b' * 32 + '/asset.meta', b'fileFormatVersion: 2\nguid: ' + b'b' * 32 + b'\n', tarfile.REGTYPE),
+                         ('b' * 32 + '/asset', b'payload', tarfile.REGTYPE)]
+                self.install([], extras=folder + child if folder_first else child + folder)
+                self.assertTrue((self.project / 'Assets/Legacy').is_dir())
+                self.assertEqual((self.project / 'Assets/Legacy.meta').read_bytes(), metadata)
+                self.assertEqual((self.project / 'Assets/Legacy/Nested/File.txt').read_bytes(), b'payload')
+                self.assertIn('b' * 32, (self.project / 'Assets/Legacy/Nested/File.txt.meta').read_text())
+                (self.project / 'Assets/Legacy').rename(self.project / 'Assets/Moved')
+                (self.project / 'Assets/Legacy.meta').rename(self.project / 'Assets/Moved.meta')
+                self.install([], extras=folder + child)
+                self.assertFalse((self.project / 'Assets/Legacy').exists())
+                self.assertEqual((self.project / 'Assets/Moved/Nested/File.txt').read_bytes(), b'payload')
+
+    def test_missing_file_payload_is_not_inferred_from_similar_prefix(self):
+        extras = [('a' * 32 + '/pathname', b'Assets/Missing', tarfile.REGTYPE),
+                  ('a' * 32 + '/asset.meta', b'fileFormatVersion: 2\nguid: ' + b'a' * 32 + b'\n', tarfile.REGTYPE)]
+        with self.assertRaises(pi.InstallError):
+            self.install([('b' * 32, 'Assets/MissingSibling/File.txt', b'payload')], extras=extras)
+        self.assertEqual(list((self.project / 'Assets').iterdir()), [])
+
+    def test_empty_file_payload_is_not_reclassified_as_parent_folder(self):
+        with self.assertRaises(pi.InstallError):
+            self.install([('a' * 32, 'Assets/File', b''), ('b' * 32, 'Assets/File/Child.txt', b'payload')])
+        self.assertEqual(list((self.project / 'Assets').iterdir()), [])
+
+
     def test_changed_assets_require_consent_and_preserve_original_backups(self):
         guid = "a" * 32
         self.install([(guid, "Assets/A.txt", b"old")])

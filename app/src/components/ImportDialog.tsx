@@ -287,7 +287,7 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
                 </label>
                 <p className="import-section-hint">Identical files are skipped. Conflicting asset identities are never overwritten. Replaced files are backed up outside Assets; the result shows their location.</p>
                 <p className="import-warning"><strong>Save your Unity changes before importing.</strong> Files are installed directly. Unity processes them on refresh or next project open. With Auto Refresh disabled, use Assets → Refresh.</p>
-                <p className="import-section-hint">Stages up to 3 packages locally. Installation runs in order and stops at the first failure.</p>
+                <p className="import-section-hint">Stages up to 3 packages locally. Installation runs in order and continues if a package fails.</p>
               </section>
               </div>
               {startError && <p className="import-warning-text" role="alert">{startError}</p>}
@@ -301,7 +301,9 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
                 {job.status === "running" && <>Installing into <code title={job.project}>{job.project}</code> — {job.completed ?? 0} of {job.total ?? order.length} packages.</>}
                 {showFinished && job.status === "completed" && "Files installed. Unity will process them on refresh or next project open."}
                 {showFinished && job.status === "cancelled" && "Import cancelled."}
-                {showFinished && job.status === "failed" && "Import failed."}
+                {showFinished && job.status === "failed" && (job.results?.some((row) => row.status === "failed")
+                  ? `Import finished with errors. ${job.results.filter((row) => row.status === "installed").length} installed; ${job.results.filter((row) => row.status === "failed").length} failed; ${job.results.filter((row) => row.status === "cancelled").length} cancelled.`
+                  : "Import failed.")}
               </p>
               {job.stop_requested && showRunning && <p className="import-warning-text" role="status">Stop requested — the current package finishes first.</p>}
               {job.error && <p className="import-warning-text" role="alert">{job.error}</p>}

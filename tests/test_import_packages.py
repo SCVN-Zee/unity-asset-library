@@ -242,11 +242,55 @@ class ImportTests(unittest.TestCase):
                 self.install([("a" * 32, "Assets/A", b"blocked")])
             self.assertEqual(list((self.project / "Assets").iterdir()), [])
 
-    def test_invalid_archive_stops_queue_at_package_boundary(self):
-        (self.root / self.rows[1]["file"]).write_bytes(b"invalid")
+    def test_invalid_archives_continue_beyond_staging_window(self):
+        self.rows += [{"asset_key": str(i), "file": f"Package {i}.unitypackage"} for i in range(3, 6)]
+        for i, row in enumerate(self.rows):
+            if i < 3:
+                (self.root / row["file"]).write_bytes(b"invalid")
+            else:
+                package(self.root / row["file"], [(str(i + 1) * 32, f"Assets/File{i}.txt", f"content {i}".encode())])
+        self.index()
         result = self.run_queue()
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["completed"], 3)
+        self.assertEqual([r["status"] for r in result["results"]], ["failed"] * 3 + ["installed"] * 3)
+        for i in range(3):
+            self.assertTrue(result["results"][i]["error"])
+            self.assertFalse((self.project / f"Assets/File{i}.txt").exists())
+        for i in range(3, 6):
+            self.assertEqual((self.project / f"Assets/File{i}.txt").read_bytes(), f"content {i}".encode())
+
+    def test_staging_failure_continues_to_later_packages(self):
+        self.rows.append({"asset_key": "3", "file": "Later.unitypackage"})
+        package(self.root / self.rows[3]["file"], [("4" * 32, "Assets/Later.txt", b"later")])
+        self.index()
+        fields = ip.validate_request(self.request)
+        (self.root / self.rows[1]["file"]).unlink()  # Disappears after request validation.
+        result = ip.run_import(fields)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["completed"], 3)
+        self.assertEqual([r["status"] for r in result["results"]], ["installed", "failed", "installed", "installed"])
+        self.assertTrue(result["results"][1]["error"])
+        self.assertEqual((self.project / "Assets/File2.txt").read_bytes(), b"content 2")
+        self.assertEqual((self.project / "Assets/Later.txt").read_bytes(), b"later")
+
+    def test_stop_after_failed_package_preserves_error_and_cancels_remaining(self):
+        (self.root / self.rows[1]["file"]).write_bytes(b"invalid")
+        original = ip.install_package
+        def stop_on_failure(*args):
+            try:
+                return original(*args)
+            except Exception:
+                Path(self.request["cancel_file"]).touch()
+                raise
+        with patch.object(ip, "install_package", side_effect=stop_on_failure):
+            result = self.run_queue()
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["completed"], 1)
         self.assertEqual([r["status"] for r in result["results"]], ["installed", "failed", "cancelled"])
+        self.assertTrue(result["results"][1]["error"])
         self.assertFalse((self.project / "Assets/File2.txt").exists())
+
 
     def test_stop_after_current_even_if_next_package_is_ready(self):
         original = ip.install_package

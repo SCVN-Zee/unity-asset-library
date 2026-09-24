@@ -11,6 +11,10 @@ Output: UL_PROGRESS JSON lines followed by one terminal JSON line. Exit 0 means
 completed/cancelled, 1 package failure, 2 preflight failure. Creating cancel_file
 or sending SIGINT/SIGTERM stops after the current package, never mid-import.
 Preparation copies at most three archives ahead into local OS temp storage.
+Package preparation or installation failures are recorded per package; later
+packages are still attempted in order. A mixed result exits 1 and preserves all
+package outcomes. Explicit cancellation stops the queue; project/index preflight
+and recovery safeguards remain fail-closed. completed counts installed packages.
 """
 import argparse
 import fcntl
@@ -265,7 +269,6 @@ class _Preparation:
         self.lock = threading.Lock()
         self.tick = threading.Event()
         self.stop_evt = threading.Event()
-        self.spawn_stopped = False
         self.procs = {}
         self.cursor = 0
         self.thread = None
@@ -281,7 +284,7 @@ class _Preparation:
         return self.rows[i].get("error")
 
     def consume(self, i):
-        """Advance the window past an installed package and drop its staged copy."""
+        """Advance past a processed package, successful or failed, and drop its copy."""
         with self.lock:
             self.cursor = max(self.cursor, i + 1)
             try:
@@ -299,7 +302,7 @@ class _Preparation:
                 row = dict(self.rows[i])
             if row["bytes_completed"] != last:
                 last = row["bytes_completed"]
-                _emit(self.fields, self.rows, sum(r["status"] in ("installed", "failed") for r in self.rows), None)
+                _emit(self.fields, self.rows, sum(r["status"] == "installed" for r in self.rows), None)
             if status in PREP_TERMINAL:
                 return status
             if _cancelled(self.fields):
@@ -333,7 +336,7 @@ class _Preparation:
                 if self.rows[j]["status"] in ("pending", "preparing", "downloading"):
                     self.rows[j]["status"] = "cancelled"
                     self.rows[j]["error"] = ("cancelled during preparation" if cancelled
-                                             else "stopped after an earlier failure")
+                                             else "preparation stopped")
             self.procs.clear()
         if self.thread is not None:
             self.thread.join()
@@ -364,18 +367,14 @@ class _Preparation:
             row.update(status="ready", bytes_completed=receipt.get("bytes_total"), bytes_total=receipt.get("bytes_total"), error=None)
         else:
             row.update(status="failed", error=receipt.get("error") or "staging failed")
-            self.spawn_stopped = True  # ordered imports stop on the first failure
 
     def _run(self):
         while not self.stop_evt.is_set():
             try:
                 with self.lock:
-                    if not self.spawn_stopped:
-                        for j in range(self.cursor, min(self.cursor + STAGE_WINDOW, len(self.rows))):
-                            if self.rows[j]["status"] == "pending" and j not in self.procs:
-                                self._spawn(j)
-                                if self.spawn_stopped:
-                                    break
+                    for j in range(self.cursor, min(self.cursor + STAGE_WINDOW, len(self.rows))):
+                        if self.rows[j]["status"] == "pending" and j not in self.procs:
+                            self._spawn(j)
                     for j, (proc, dest, result) in list(self.procs.items()):
                         receipt = _read_json(result)
                         if receipt is not None:
@@ -414,7 +413,7 @@ class _Preparation:
                                 pass
                             del self.procs[j]
                             self._adopt(j, {"ok": False, "error": "staging scheduler failed: %s" % exc})
-            _emit(self.fields, self.rows, sum(r["status"] in ("installed", "failed") for r in self.rows), None)
+            _emit(self.fields, self.rows, sum(r["status"] == "installed" for r in self.rows), None)
             self.tick.set()
             self.tick.clear()
             self.tick.wait(0.25)
@@ -442,9 +441,13 @@ def run_import(fields):
                 if _cancelled(fields):
                     break
                 status = prep.await_ready(i)
-                if status != "ready" or _cancelled(fields):
+                if status == "cancelled" or _cancelled(fields):
                     break
                 current = row["file"]
+                if status == "failed":
+                    prep.consume(i)
+                    _emit(fields, results, completed, current)
+                    continue
                 results[i]["status"] = "installing"
                 _emit(fields, results, completed, current)
                 parse_dir = tempfile.mkdtemp(prefix="ual-parse-", dir=staging)
@@ -455,7 +458,6 @@ def run_import(fields):
                     if backups:
                         results[i]["backup_path"] = backups
                     completed += 1
-                    prep.consume(i)  # installed: the staged copy may go
                 except Exception as error:
                     results[i]["status"] = "failed"
                     results[i]["error"] = str(error)
@@ -463,11 +465,10 @@ def run_import(fields):
                         results[i]["backup_path"] = error.backup_path
                 finally:
                     shutil.rmtree(parse_dir, ignore_errors=True)
+                    prep.consume(i)
                 _emit(fields, results, completed, current)
-                if results[i]["status"] == "failed":
-                    break
         finally:
-            prep.stop()
+            prep.stop(cancelled=_cancelled(fields))
             shutil.rmtree(staging, ignore_errors=True)
     failed = next((row for row in results if row["status"] == "failed"), None)
     cancelled = not failed and completed < len(results) and _cancelled(fields)

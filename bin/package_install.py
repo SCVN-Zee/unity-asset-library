@@ -4,11 +4,15 @@ Preflight is read-only. Each file is committed atomically, but a package is not
 atomic to a running Editor. Save Editor changes first; Unity refreshes separately.
 Incomplete transactions retain originals and a journal outside Assets and block
 subsequent installs until inspected. No unconfirmed operation is replayed.
+Successful installs delete their transaction backups and remove .ual-import-backups
+when empty. Failed transactions are retained; cleanup errors return the remaining
+backup path without rolling back an already completed install.
 Legacy parent folders may omit folderAsset metadata. A payloadless record is
 recognized as a folder only when validated package paths descend from it;
 metadata and GUIDs are preserved verbatim. Missing leaf payloads remain errors.
 """
 import contextlib
+import errno
 import hashlib
 import json
 import os
@@ -433,12 +437,21 @@ def _apply(root, project, operations, directories, checks):
         except OSError:
             pass  # The durable installing/preparing journal still blocks retries.
         raise InstallError(str(error) + ("; recovery required" if recovery else "; package changes rolled back") + ". Journal/backups: " + absolute, absolute) from error
-    if any(op["old"] for op in operations):
-        return absolute
     try:
         shutil.rmtree(absolute)
     except OSError:
+        # Partial removal may delete the journal before encountering a locked file.
+        # Restore the completed state so a later import is not mistaken for recovery.
+        with contextlib.suppress(OSError):
+            _journal(root, txn, journal)
         return absolute  # Committed files are successful even if journal cleanup fails.
+    try:
+        os.rmdir(BACKUPS, dir_fd=root)
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        if error.errno not in (errno.ENOTEMPTY, errno.EEXIST):
+            return os.path.join(project, BACKUPS)
     return None
 
 

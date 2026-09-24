@@ -82,7 +82,7 @@ class ImportTests(unittest.TestCase):
             self.assertEqual((self.project / f"Assets/File{i}.txt").read_bytes(), f"content {i}".encode())
             self.assertIn(str(i + 1) * 32, (self.project / f"Assets/File{i}.txt.meta").read_text())
         self.assertFalse((self.project / "Library").exists())
-        self.assertEqual(list((self.project / pi.BACKUPS).iterdir()), [])
+        self.assertFalse((self.project / pi.BACKUPS).exists())
 
     def test_unity_gzip_extra_header_is_supported(self):
         archive = self.root / self.rows[0]["file"]
@@ -138,21 +138,33 @@ class ImportTests(unittest.TestCase):
         self.assertEqual(list((self.project / 'Assets').iterdir()), [])
 
 
-    def test_changed_assets_require_consent_and_preserve_original_backups(self):
+    def test_changed_assets_require_consent_and_remove_completed_backups(self):
         guid = "a" * 32
         self.install([(guid, "Assets/A.txt", b"old")])
         before = (self.project / "Assets/A.txt.meta").read_bytes()
         with self.assertRaises(pi.InstallError):
             self.install([(guid, "Assets/A.txt", b"new")])
         self.assertEqual((self.project / "Assets/A.txt").read_bytes(), b"old")
-        backup = Path(self.install([(guid, "Assets/A.txt", b"new")], overwrite=True))
-        journal = json.loads((backup / "journal.json").read_text())
-        self.assertEqual(journal["status"], "complete")
-        item = next(op for op in journal["ops"] if op["rel"] == "Assets/A.txt")
-        self.assertEqual((backup / item["backup"]).read_bytes(), b"old")
+        backup = self.install([(guid, "Assets/A.txt", b"new")], overwrite=True)
+        self.assertIsNone(backup)
         self.assertEqual((self.project / "Assets/A.txt").read_bytes(), b"new")
         self.assertEqual((self.project / "Assets/A.txt.meta").read_bytes(), before)
-        self.assertEqual(backup.parent, self.project / pi.BACKUPS)
+        self.assertFalse((self.project / pi.BACKUPS).exists())
+
+    def test_partial_backup_cleanup_does_not_block_next_import(self):
+        self.install([("a" * 32, "Assets/A", b"old")])
+        remove = pi.shutil.rmtree
+        def partial_cleanup(path, *args, **kwargs):
+            if Path(path).parent == self.project / pi.BACKUPS:
+                (Path(path) / "journal.json").unlink()
+                raise PermissionError("backup cleanup interrupted")
+            return remove(path, *args, **kwargs)
+        with patch.object(pi.shutil, "rmtree", side_effect=partial_cleanup):
+            backup = self.install([("a" * 32, "Assets/A", b"new")], True)
+        self.assertEqual((self.project / "Assets/A").read_bytes(), b"new")
+        self.install([("b" * 32, "Assets/B", b"next")])
+        self.assertEqual((self.project / "Assets/B").read_bytes(), b"next")
+        self.assertEqual(json.loads((Path(backup) / "journal.json").read_text())["status"], "complete")
 
     def test_unrelated_guid_conflicts_even_with_overwrite_and_preflight_is_read_only(self):
         self.install([("a" * 32, "Assets/Taken.txt", b"mine")])
@@ -221,8 +233,12 @@ class ImportTests(unittest.TestCase):
         self.assertFalse((self.project / "Assets/New").exists())
         journal = json.loads((Path(failure.exception.backup_path) / "journal.json").read_text())
         self.assertEqual(journal["status"], "rolled_back")
+        backup = Path(failure.exception.backup_path)
+        retained = {p.name: p.read_bytes() for p in backup.iterdir()}
         self.install([("c" * 32, "Assets/After", b"allowed")])
         self.assertEqual((self.project / "Assets/After").read_bytes(), b"allowed")
+        self.assertEqual({p.name: p.read_bytes() for p in backup.iterdir()}, retained)
+        self.assertEqual(list(backup.parent.iterdir()), [backup])
 
     def test_concurrent_edit_is_not_rolled_back_and_unresolved_journal_blocks_retry(self):
         self.install([("a" * 32, "Assets/A", b"old")])

@@ -770,11 +770,7 @@ function App() {
   }
   async function stopImport() {
     if (!importJob) return;
-    try {
-      setImportJob(await api.stopImport(importJob.id));
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not stop the import.");
-    }
+    setImportJob(await api.stopImport(importJob.id));
   }
   function dismissImportJob(id: string) {
     setDismissedIds((current) => new Set(current).add(id));
@@ -953,7 +949,7 @@ function App() {
     [importSelection, assets],
   );
   const refreshEpochRef = useRef(0);
-  const refreshAssets = useCallback(async () => {
+  const refreshAssets = useCallback(async (required = false) => {
     const epoch = ++refreshEpochRef.current;
     const storageEpoch = storageEpochRef.current;
     try {
@@ -961,8 +957,9 @@ function App() {
       if (epoch !== refreshEpochRef.current || storageEpoch !== storageEpochRef.current) return;
       setAssets(index.assets || []);
       setSelectedKey((current) => current && index.assets.some((asset) => asset.asset_key === current) ? current : index.assets[0]?.asset_key || null);
-    } catch {
-      // Availability refresh is best-effort browsing metadata; keep the current view.
+    } catch (cause) {
+      // Background browsing keeps its snapshot; import review must surface stale availability.
+      if (required) throw cause;
     }
   }, []);
   useEffect(() => {
@@ -1257,7 +1254,7 @@ function App() {
           <div className="header-tasks" role="group" aria-label="Background tasks">
             {actionStatus && !dismissedIds.has(actionStatus.id) && <ActionProgress compact job={actionStatus} onDismiss={dismissAction} announce={!(dialog && actionStatus.phase === "apply")} />}
             {state?.job && !dismissedIds.has(state.job.id) && <ActionProgress compact job={state.job} onDismiss={dismissEnrich} />}
-            {importJob && !dismissedIds.has(importJob.id) && <ActionProgress compact job={importJob} onDismiss={dismissImportJob} onReview={importActive ? () => setImportOpen(true) : undefined} />}
+            {importJob && !dismissedIds.has(importJob.id) && <ActionProgress compact job={importJob} onDismiss={dismissImportJob} onReview={() => { if (document.activeElement instanceof HTMLButtonElement) importTriggerRef.current = document.activeElement; setImportOpen(true); }} />}
           </div>
           <Button type="button" className="icon-button theme-toggle" title={`Theme: ${theme}. Switch to ${theme === "system" ? "light" : theme === "light" ? "dark" : "system"}`} aria-label={`Theme: ${theme}. Switch to ${theme === "system" ? "light" : theme === "light" ? "dark" : "system"}`} onPress={() => setTheme(theme === "system" ? "light" : theme === "light" ? "dark" : "system")}>
             <Icon as={theme === "system" ? Monitor : theme === "light" ? Sun : Moon} className="icon" aria-hidden="true" />
@@ -1697,9 +1694,10 @@ function App() {
             {query && <Button className="filter-chip" aria-label="Remove search filter" onPress={() => setQuery("")}>Search: {query}<Icon as={X} className="icon" aria-hidden="true" /></Button>}
             <Button className="filter-reset" onPress={clearFilters}>Clear filters</Button>
           </div>}
-          <div className="import-controls" role="group" aria-label="Package selection">
+          <div className="import-controls" data-selected={importSelection.size > 0} role="group" aria-label="Package selection">
+            {importSelection.size > 0 && <span className="import-selection-count" role="status">{importSelection.size} selected</span>}
             <Button type="button" className="button quiet" onPress={() => { if (importSelection.size > 0) { selectionAnchor.current = null; setImportSelection(new Set()); } else selectVisibleImport(); }} isDisabled={loading || importActive || (importSelection.size === 0 && !filtered.some((asset) => unityPackages(asset).length > 0))} aria-label={importSelection.size > 0 ? "Deselect all packages" : "Select all packages in current results"}>{importSelection.size > 0 ? "Deselect all" : "Select all"}</Button>
-            {importSelection.size > 0 && <Button ref={importTriggerRef} type="button" className="button primary" onPress={() => setImportOpen(true)} isDisabled={importActive} aria-label={`Import ${importSelection.size} selected package${importSelection.size === 1 ? "" : "s"}`}>Import {importSelection.size}</Button>}
+            {importSelection.size > 0 && <Button ref={importTriggerRef} type="button" className="button primary" onPress={() => setImportOpen(true)} isDisabled={importActive} aria-label={`Import ${importSelection.size} selected package${importSelection.size === 1 ? "" : "s"}`}>Review import</Button>}
           </div>
           </div>
           {loading ? (
@@ -1799,12 +1797,15 @@ function App() {
       {importOpen && (
         <ImportDialog
           assets={importAssets}
+          catalog={assets}
           job={importJob}
           finalFocusRef={importTriggerRef}
           onClose={() => { setImportOpen(false); if (importJob && !importActive) dismissImportJob(importJob.id); }}
           onStart={startImport}
           onStop={stopImport}
-          onRefreshAssets={refreshAssets}
+          onRemove={(key) => setImportSelection((current) => { const next = new Set(current); next.delete(key); return next; })}
+          onReview={(keys) => { if (importJob) dismissImportJob(importJob.id); setImportSelection(new Set(keys)); }}
+          onRefreshAssets={() => refreshAssets(true)}
         />
       )}
     </div>

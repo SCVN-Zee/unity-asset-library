@@ -56,7 +56,6 @@ async function selection(names) {
   const expected = JSON.stringify([...names].sort());
   await waitFor(`JSON.stringify([...document.querySelectorAll('.import-check input:checked')].map(e => e.closest('.asset-cell').querySelector('.asset-card,.list-row').title).sort()) === ${JSON.stringify(expected)}`);
   assert.deepEqual(await evaluate("[...document.querySelectorAll('.asset-card.selected,.list-row.selected')].map(e => e.title).sort()"), [...names].sort());
-  assert.equal(await evaluate("Number(document.querySelector('.import-controls .primary')?.textContent.match(/\\d+/)?.[0] || 0)"), names.length);
 }
 app.whenReady().then(async () => {
   try {
@@ -147,7 +146,7 @@ app.whenReady().then(async () => {
     assert.equal(await evaluate(`document.querySelector('.import-dialog .dialog-foot .primary').disabled`), true);
     await evaluate(`(() => { const select = document.querySelector('select[aria-label="Archive version for Forest Audio"]'); select.value = "Audio/Forest v2.unitypackage"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
     await waitFor(`!document.querySelector('.import-dialog .dialog-foot .primary').disabled`);
-    assert.equal(await evaluate(`document.querySelector(".import-overwrite input").checked`), false);
+    await click(".import-overwrite input");
     await click(".import-dialog .dialog-foot .primary");
     await waitFor(`!!document.querySelector('[data-status="installed"]')`);
     assert.equal((await evaluate(`JSON.parse(localStorage.getItem("ual:test-request"))`)).overwrite, false);
@@ -155,10 +154,9 @@ app.whenReady().then(async () => {
     await waitFor(`!document.querySelector('.import-dialog')`);
     await click('[aria-label="Import 1 selected package"]');
     await waitFor(`!!document.querySelector('.import-overwrite input')`);
-    assert.equal(await evaluate(`document.querySelector('.import-overwrite input').checked`), false);
     await click('.import-dialog .dialog-foot .quiet');
     await waitFor(`!document.querySelector('.import-dialog')`);
-    console.log("PASS: explicit archive selection and safe-default direct installation without Editor readiness");
+    console.log("PASS: explicit archive selection and replacement opt-out without Editor readiness");
     await evaluate(`localStorage.setItem("ual:test-import", JSON.stringify({ id: "preparation", kind: "import", status: "running", project: "/fixture/project", completed: 0, total: 1, results: [{ file: "Cloud.unitypackage", status: "downloading", bytes_completed: 50, bytes_total: 100 }] }))`);
     await win.reload();
     await waitFor(`!!document.querySelector('[aria-label="Open import progress"]')`);
@@ -200,6 +198,8 @@ app.whenReady().then(async () => {
     await waitFor(`!!document.querySelector(".import-controls .primary")`);
     await click(`.import-controls .primary`);
     await waitFor(`document.querySelectorAll(".import-packages li").length === 14`);
+    await click(".import-section-heading button[aria-pressed]");
+    await waitFor(`!!document.querySelector('[aria-label="Move Editor package 01 down"]')`);
     await click(`[aria-label="Move Editor package 01 down"]`);
     await waitFor(`document.querySelector(".import-package-main strong").textContent === "Editor package 02"`);
     await evaluate(`(() => { const select = document.querySelector('select[aria-label="Unity Hub project"]'); select.value = "/fixture/project"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
@@ -207,19 +207,56 @@ app.whenReady().then(async () => {
     for (const [width, height] of [[1200, 800], [983, 700], [390, 700]]) {
       win.setContentSize(width, height);
       await waitFor(`innerWidth === ${width}`);
-      assert(await evaluate(`(() => { const dialog = document.querySelector(".import-dialog"); const footer = dialog.querySelector(".dialog-foot").getBoundingClientRect(); return footer.top >= 0 && footer.bottom <= innerHeight && dialog.scrollWidth <= dialog.clientWidth; })()`), "Import actions stay visible without horizontal overflow");
-      await evaluate(`document.querySelector(".import-packages").scrollTop = 10000`);
+      assert(await evaluate(`(() => { const dialog = document.querySelector(".import-dialog"); const header = dialog.querySelector(".dialog-top").getBoundingClientRect(); const footer = dialog.querySelector(".dialog-foot").getBoundingClientRect(); const warning = dialog.querySelector(".import-warning").getBoundingClientRect(); return header.top >= 0 && footer.top >= 0 && footer.bottom <= innerHeight && warning.top >= 0 && warning.bottom <= innerHeight && dialog.scrollWidth <= dialog.clientWidth && dialog.scrollHeight <= dialog.clientHeight; })()`), "Header, replacement warning and actions stay visible with only the body scrolling");
+      await evaluate(`document.querySelector(".import-body").scrollTop = 10000`);
       assert(await evaluate(`document.querySelector(".import-dialog .dialog-foot").getBoundingClientRect().bottom <= innerHeight`));
     }
     console.log("PASS: 14-package reorder, project selection, fixed import actions at desktop and mobile sizes");
     win.setContentSize(1200, 800);
     await evaluate(`document.querySelector(".import-body").scrollTop = 0`);
-    await click(".import-overwrite input");
     await click(".import-dialog .dialog-foot .primary");
     await waitFor(`document.querySelectorAll('[data-status="installed"]').length === 14`);
     assert.equal((await evaluate(`JSON.parse(localStorage.getItem("ual:test-request"))`)).overwrite, true);
     assert.equal(await evaluate(`document.querySelectorAll(".import-backup").length`), 14);
-    console.log("PASS: explicit replacement consent and backup locations in installed results");
+    console.log("PASS: replacement with backups and installed results");
+
+    // A job-level preflight error retains pending rows; recovery must not filter them away.
+    const preflight = { id: "preflight-review", kind: "import", status: "failed", project: "/fixture/project", overwrite: false, error: "Archive no longer indexed", completed: 0, total: 2, results: [batch[1], batch[0]].map(asset => ({ file: asset.versions[0].file, status: "pending" })) };
+    await evaluate(`localStorage.setItem("ual:test-import", ${JSON.stringify(JSON.stringify(preflight))})`);
+    await win.reload();
+    await waitFor(`!!document.querySelector('.task-indicator[data-status="failed"]')`);
+    await click(".task-indicator");
+    await waitFor(`!document.querySelector('.task-details').hidden`);
+    await click('[aria-label="Open import progress"]');
+    await waitFor(`!!document.querySelector('.import-dialog .import-inline-error')`);
+    await click(".import-dialog .dialog-foot .primary");
+    await waitFor(`document.querySelectorAll('.import-packages > li').length === 2 && !document.querySelector('.import-dialog .primary').disabled`);
+    assert.deepEqual(await evaluate(`[...document.querySelectorAll('.import-packages .import-package-main > strong')].map(e => e.textContent)`), [batch[1].name, batch[0].name]);
+    assert.equal(await evaluate(`document.querySelector('.import-overwrite input').checked`), false, "Review retains the original replacement choice");
+    await click(".import-dialog .dialog-foot .primary");
+    await waitFor(`!!document.querySelector('.import-successes')`);
+    const reviewed = await evaluate(`JSON.parse(localStorage.getItem('ual:test-request'))`);
+    assert.deepEqual(reviewed.packages.map(row => row.file), preflight.results.map(row => row.file));
+    assert.equal(reviewed.project, preflight.project);
+    console.log("PASS: preflight recovery preserves ordered selection, target and replacement policy");
+
+    const partial = { ...preflight, id: "partial-review", total: 3, completed: 1, results: [
+      { file: batch[0].versions[0].file, status: "installed" },
+      { file: batch[1].versions[0].file, status: "failed", error: "Existing asset differs" },
+      { file: batch[2].versions[0].file, status: "cancelled" },
+    ] };
+    await evaluate(`localStorage.setItem("ual:test-import", ${JSON.stringify(JSON.stringify(partial))})`);
+    await win.reload();
+    await waitFor(`!!document.querySelector('.task-indicator[data-status="failed"]')`);
+    await click(".task-indicator");
+    await waitFor(`!document.querySelector('.task-details').hidden`);
+    await click('[aria-label="Open import progress"]');
+    await waitFor(`!!document.querySelector('.import-successes')`);
+    assert.equal(await evaluate(`document.querySelector('.import-successes').open`), false);
+    await click(".import-dialog .dialog-foot .primary");
+    await waitFor(`document.querySelectorAll('.import-packages > li').length === 2`);
+    assert.deepEqual(await evaluate(`[...document.querySelectorAll('.import-packages .import-package-main > strong')].map(e => e.textContent)`), [batch[1].name, batch[2].name]);
+    console.log("PASS: partial recovery excludes installed packages and retains cancelled packages");
   } catch (error) {
     console.error(error);
     exitCode = 1;

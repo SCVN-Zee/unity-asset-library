@@ -1,18 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import {
-  AlertDialog,
-  AlertDialogBackdrop,
-  AlertDialogBody,
-  AlertDialogContent,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  Button,
-  Icon,
-  Spinner,
-} from "./ui";
-import { ArrowDown, ArrowUp, X } from "lucide-react";
+import { AlertDialog, AlertDialogBackdrop, AlertDialogBody, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, Button, Icon, Spinner } from "./ui";
+import { ArrowDown, ArrowUp, ArrowDownUp, Check, ChevronDown, CircleAlert, Cloud, Folder, Package, ShieldCheck, X } from "lucide-react";
 
 const api = window.ual;
+const filename = (file: string) => file.split(/[\\/]/).pop() || file;
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -27,12 +18,8 @@ export function unityPackages(asset: Asset) {
   return (asset.versions || []).filter((version) => (version.file || "").toLowerCase().endsWith(".unitypackage"));
 }
 const AVAILABILITY_LABELS: Record<NonNullable<AssetVersion["availability"]>, string> = {
-  cloud_only: "Cloud only",
-  local: "Local",
-  unknown: "Availability unknown",
-  missing: "Missing",
+  cloud_only: "Cloud only", local: "Local", unknown: "Availability unknown", missing: "Missing",
 };
-
 export function availabilityLabel(availability?: AssetVersion["availability"]) {
   return availability ? AVAILABILITY_LABELS[availability] : null;
 }
@@ -46,74 +33,100 @@ export function availabilitySummary(versions: AssetVersion[]) {
   return { label: "Mixed availability", short: "MIXED", kind: "mixed" };
 }
 
+// Archive labels come from the selected filename, never the store's latest version.
+function archiveLabel(file: string) {
+  return filename(file).match(/(?:^|[\s_-])(v?\d+(?:\.\d+)+(?:[a-z]\d*)?)(?=[\s_.(-]|$)/i)?.[1] || "Archive details";
+}
 
+type ReviewRow = { id: string; assetKey: string | null; name: string; file: string };
 type ImportDialogProps = {
   assets: Asset[];
+  catalog: Asset[];
   job: ImportJob | null;
   finalFocusRef: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
   onStart: (request: ImportRequest) => Promise<void>;
-  onStop: () => void;
+  onStop: () => Promise<void>;
+  onReview: (keys: string[]) => void;
+  onRemove: (key: string) => void;
   onRefreshAssets: () => Promise<void>;
 };
 
-export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onStop, onRefreshAssets }: ImportDialogProps) {
+function ArchiveDetails({ file, version }: { file: string; version?: AssetVersion }) {
+  return <details className="import-archive-details">
+    <summary>{archiveLabel(file)}</summary>
+    <div><code>{file}</code>{version?.size_bytes != null && <span>{formatBytes(version.size_bytes)}</span>}{version?.editor_version && <span>Archive editor: {version.editor_version}</span>}</div>
+  </details>;
+}
+
+function ResultRow({ row, name, finished, onReveal }: { row: ImportResultRow; name: string; finished: boolean; onReveal: (path: string) => void }) {
+  const active = ["preparing", "downloading", "installing"].includes(row.status);
+  const labels: Record<ImportResultRow["status"], string> = {
+    pending: finished ? "Not imported" : "Waiting", preparing: "Preparing", downloading: "Downloading", ready: finished ? "Not imported" : "Ready", installing: "Installing", installed: "Installed", failed: "Failed", cancelled: "Not imported",
+  };
+  return <li className="import-result-row" data-status={row.status}>
+    <span className="import-row-symbol" aria-hidden="true">{active ? <Spinner className="spinner" /> : <Icon as={row.status === "installed" ? Check : row.status === "failed" ? CircleAlert : Package} className="icon" />}</span>
+    <div className="import-package-main">
+      <strong>{name}</strong>
+      <ArchiveDetails file={row.file} />
+      {row.status === "failed" && <details className="import-error-details"><summary><span>{row.error || "The package could not be imported."}</span><small>Details</small></summary><p>{row.error || "The package could not be imported."}</p></details>}
+      {row.backup_path && <Button type="button" className="import-backup import-text-button" onPress={() => onReveal(row.backup_path!)}>Show backups</Button>}
+      {(row.status === "preparing" || row.status === "downloading") && Boolean(row.bytes_total && row.bytes_total > 0) && <div className="import-download">
+        <span>{formatBytes(row.bytes_completed ?? 0)} / {formatBytes(row.bytes_total!)}</span>
+        <span className="prep-progress" role="progressbar" aria-label={`Download progress for ${name}`} aria-valuemin={0} aria-valuemax={row.bytes_total!} aria-valuenow={Math.min(row.bytes_total!, row.bytes_completed ?? 0)}><span style={{ width: `${Math.min(100, Math.max(0, (row.bytes_completed ?? 0) / row.bytes_total! * 100))}%` }} /></span>
+      </div>}
+    </div>
+    <span className="import-status" data-kind={row.status}>{labels[row.status]}</span>
+  </li>;
+}
+
+export function ImportDialog({ assets, catalog, job, finalFocusRef, onClose, onStart, onStop, onReview, onRemove, onRefreshAssets }: ImportDialogProps) {
   const running = Boolean(job && ["queued", "running"].includes(job.status));
-  const [order, setOrder] = useState<Asset[]>(assets);
-  const [chosen, setChosen] = useState<Record<string, string>>(() => {
-    const initial: Record<string, string> = {};
-    for (const asset of assets) {
-      const packages = unityPackages(asset);
-      if (packages.length === 1 && packages[0].file) initial[asset.asset_key] = packages[0].file;
-    }
-    return initial;
-  });
+  const finished = Boolean(job && !running);
+  const [order, setOrder] = useState<ReviewRow[]>(() => assets.map((asset) => {
+    const versions = unityPackages(asset);
+    return { id: asset.asset_key, assetKey: asset.asset_key, name: asset.name, file: versions.length === 1 ? versions[0].file || "" : "" };
+  }));
+  const byKey = useMemo(() => new Map(catalog.map((asset) => [asset.asset_key, asset])), [catalog]);
+  const byFile = useMemo(() => new Map(catalog.flatMap((asset) => unityPackages(asset).map((version) => [version.file, asset] as const))), [catalog]);
   const [projects, setProjects] = useState<UnityProject[] | null>(null);
   const [projectsError, setProjectsError] = useState("");
   const [projectPath, setProjectPath] = useState("");
   const [projectInfo, setProjectInfo] = useState<ImportProject | null>(null);
+  const [editingProject, setEditingProject] = useState(true);
   const [inspecting, setInspecting] = useState(false);
   const [inspectError, setInspectError] = useState("");
-  const [overwrite, setOverwrite] = useState(false);
-  const inspectEpochRef = useRef(0);
-  const [startError, setStartError] = useState("");
+  // Replacement is intentionally enabled; the warning stays visible before consent.
+  const [overwrite, setOverwrite] = useState(true);
+  const [reordering, setReordering] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [actionError, setActionError] = useState("");
   const [starting, setStarting] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState("");
+  const inspectEpochRef = useRef(0);
   const firstButtonRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => { firstButtonRef.current?.focus(); }, []);
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   async function loadProjects() {
     setProjects(null);
     setProjectsError("");
-    try {
-      setProjects(await api.importProjects());
-    } catch (cause) {
-      setProjects([]);
-      setProjectsError(cause instanceof Error ? cause.message : "Could not load Unity Hub projects.");
-    }
+    try { setProjects(await api.importProjects()); }
+    catch (cause) { setProjects([]); setProjectsError(cause instanceof Error ? cause.message : "Could not load Unity Hub projects."); }
   }
-  const [refreshing, setRefreshing] = useState(false);
-  useEffect(() => {
-    setOrder((current) => {
-      const byKey = new Map(assets.map((asset) => [asset.asset_key, asset]));
-      const kept = current.map((asset) => byKey.get(asset.asset_key)).filter((asset): asset is Asset => Boolean(asset));
-      const keptKeys = new Set(kept.map((asset) => asset.asset_key));
-      return [...kept, ...assets.filter((asset) => !keptKeys.has(asset.asset_key))];
-    });
-    setChosen((current) => Object.fromEntries(assets.map((asset) => [
-      asset.asset_key,
-      unityPackages(asset).some((version) => version.file === current[asset.asset_key]) ? current[asset.asset_key] : "",
-    ])));
-  }, [assets]);
   async function refreshAssets() {
     setRefreshing(true);
-    try {
-      await onRefreshAssets();
-    } finally {
-      setRefreshing(false);
-    }
+    setRefreshError("");
+    try { await onRefreshAssets(); }
+    catch (cause) { setRefreshError(cause instanceof Error ? cause.message : "Could not refresh package availability."); }
+    finally { setRefreshing(false); }
   }
-  useEffect(() => { void refreshAssets(); }, []);
-  useEffect(() => { void loadProjects(); }, []);
+  useEffect(() => { void loadProjects(); void refreshAssets(); }, []);
+  useEffect(() => {
+    bodyRef.current?.scrollTo(0, 0);
+    firstButtonRef.current?.focus();
+  }, [job?.id, finished]);
 
   async function inspect(path: string) {
     const epoch = ++inspectEpochRef.current;
@@ -124,227 +137,174 @@ export function ImportDialog({ assets, job, finalFocusRef, onClose, onStart, onS
       if (epoch !== inspectEpochRef.current) return;
       setProjectInfo(info);
       setProjectPath(info.path);
+      setEditingProject(false);
     } catch (cause) {
       if (epoch !== inspectEpochRef.current) return;
       setProjectInfo(null);
       setInspectError(cause instanceof Error ? cause.message : "Could not inspect the project.");
-    } finally {
-      if (epoch === inspectEpochRef.current) setInspecting(false);
-    }
+    } finally { if (epoch === inspectEpochRef.current) setInspecting(false); }
   }
-
-  async function handleProject(nextPath: string) {
+  async function handleProject(path: string) {
     inspectEpochRef.current += 1;
-    setProjectPath(nextPath);
+    setProjectPath(path);
     setProjectInfo(null);
     setInspecting(false);
     setInspectError("");
-    setOverwrite(false);
-    if (nextPath) await inspect(nextPath);
+    // Changing projects must not silently undo the user's replacement choice.
+    if (path) await inspect(path);
   }
-
   async function browseProject() {
-    try {
-      const path = await api.chooseImportProject();
-      if (path) await handleProject(path);
-    } catch (cause) {
-      setInspectError(cause instanceof Error ? cause.message : "Could not open the folder picker.");
-    }
+    try { const path = await api.chooseImportProject(); if (path) await handleProject(path); }
+    catch (cause) { setInspectError(cause instanceof Error ? cause.message : "Could not open the folder picker."); }
   }
-
-
-  const allChosen = order.length > 0 && order.every((asset) => unityPackages(asset).some((version) => version.file === chosen[asset.asset_key]));
-  const canStart = Boolean(projectPath && projectInfo && projectInfo.path === projectPath && allChosen && !inspecting && !running && !starting);
-
+  function versionsFor(row: ReviewRow) { return row.assetKey && byKey.has(row.assetKey) ? unityPackages(byKey.get(row.assetKey)!) : []; }
+  const unresolved = order.filter((row) => !versionsFor(row).some((version) => version.file === row.file));
+  const missing = order.filter((row) => versionsFor(row).find((version) => version.file === row.file)?.availability === "missing");
+  const blocker = !order.length ? "Select at least one package" : refreshing ? "Checking package availability…" : refreshError ? "Refresh package availability to continue" : !projectPath ? "Choose a project" : inspecting ? "Checking project…" : !projectInfo || projectInfo.path !== projectPath ? "Choose a valid Unity project" : unresolved.length ? `Choose ${unresolved.length} archive version${unresolved.length === 1 ? "" : "s"}` : missing.length ? `${missing.length} archive${missing.length === 1 ? " is" : "s are"} missing` : "";
+  const canStart = !blocker && !job && !starting;
   async function start() {
     if (!canStart) return;
     setStarting(true);
-    setStartError("");
-    try {
-      await onStart({ project: projectPath, overwrite, packages: order.map((asset) => ({ asset_key: asset.asset_key, file: chosen[asset.asset_key] })) });
-    } catch (cause) {
-      setStartError(cause instanceof Error ? cause.message : "Could not start the import.");
-    } finally {
-      setStarting(false);
-    }
+    setActionError("");
+    try { await onStart({ project: projectPath, overwrite, packages: order.map((row) => ({ asset_key: row.assetKey!, file: row.file })) }); }
+    catch (cause) { setActionError(cause instanceof Error ? cause.message : "Could not start the import."); }
+    finally { setStarting(false); }
   }
-
+  async function stop() {
+    setStopping(true);
+    setActionError("");
+    try { await onStop(); }
+    catch (cause) { setActionError(cause instanceof Error ? cause.message : "Could not stop the import. Try again."); }
+    finally { setStopping(false); }
+  }
+  async function reveal(path: string) {
+    try { await api.revealItem(path); }
+    catch (cause) { setActionError(cause instanceof Error ? cause.message : "Could not show backups."); }
+  }
   function move(index: number, delta: number) {
-    setOrder((current) => {
-      const next = [...current];
-      const target = index + delta;
-      if (target < 0 || target >= next.length) return current;
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
-    });
+    const next = [...order];
+    const target = index + delta;
+    if (target < 0 || target >= next.length) return;
+    [next[index], next[target]] = [next[target], next[index]];
+    setOrder(next);
+    setNotice(`${order[index].name} moved to position ${target + 1}`);
+  }
+  function remove(row: ReviewRow) {
+    setOrder((current) => current.filter((item) => item.id !== row.id));
+    if (row.assetKey) onRemove(row.assetKey);
+    setNotice(`${row.name} removed`);
   }
 
-  const showSetup = !job;
-  const showRunning = Boolean(job && !["completed", "failed", "cancelled"].includes(job.status));
-  const showFinished = Boolean(job && ["completed", "failed", "cancelled"].includes(job.status));
-  const title = running || showFinished ? "Import packages" : "Import selected packages";
+  const results = job?.results || [];
+  const installed = results.filter((row) => row.status === "installed");
+  const failed = results.filter((row) => row.status === "failed");
+  const remaining = results.filter((row) => row.status !== "installed");
+  const notImported = remaining.length - failed.length;
+  const preflight = job?.status === "failed" && !failed.length;
+  const recoveryLabel = preflight ? "Review selection" : failed.length && !notImported ? "Review failed packages" : "Review remaining packages";
+  function review() {
+    if (!job || running) return;
+    // Preflight errors leave rows pending. Preserve them, including archives no longer indexed.
+    const rows = remaining.map((result): ReviewRow => {
+      const asset = byFile.get(result.file);
+      const previous = order.find((row) => row.file === result.file);
+      return { id: result.file, assetKey: asset?.asset_key || previous?.assetKey || null, name: asset?.name || previous?.name || filename(result.file).replace(/\.unitypackage$/i, ""), file: result.file };
+    });
+    setOrder(rows);
+    setOverwrite(job.overwrite ?? true);
+    setReordering(false);
+    setActionError("");
+    onReview(rows.flatMap((row) => row.assetKey ? [row.assetKey] : []));
+    void handleProject(job.project);
+    void refreshAssets();
+  }
+  const title = !job ? `Import ${order.length} package${order.length === 1 ? "" : "s"}` : running ? "Importing packages" : preflight ? "Import couldn’t start" : job.status === "cancelled" ? "Import stopped" : failed.length ? "Import finished with issues" : "Import complete";
+  const shownProjectPath = job?.project || projectPath;
+  const shownProject = projectInfo?.path === shownProjectPath ? projectInfo : projects?.find((project) => project.path === shownProjectPath);
+  const renderResults = (rows: ImportResultRow[]) => <ul className="import-results">{rows.map((row) => <ResultRow key={row.file} row={row} name={byFile.get(row.file)?.name || order.find((item) => item.file === row.file)?.name || filename(row.file).replace(/\.unitypackage$/i, "")} finished={finished} onReveal={(path) => void reveal(path)} />)}</ul>;
 
-  return (
-    <AlertDialog
-      isOpen
-      onClose={() => { if (!running && !starting) onClose(); }}
-      finalFocusRef={finalFocusRef}
-      initialFocusRef={firstButtonRef}
-      isKeyboardDismissable={!running && !starting}
-      closeOnOverlayClick={false}
-      className="dialog-overlay"
-    >
-      <AlertDialogBackdrop className="dialog-backdrop" />
-      <AlertDialogContent className="action-dialog import-dialog" aria-labelledby="import-title">
-        <AlertDialogHeader className="dialog-top">
-          <div>
-            <div className="eyebrow">UNITY PROJECT</div>
-            <h2 id="import-title">{title}</h2>
-          </div>
-          <Button type="button" className="icon-button" onPress={() => { if (!running && !starting) onClose(); }} isDisabled={running || starting} aria-label="Close dialog">
-            <Icon as={X} className="icon" aria-hidden="true" focusable={false} />
-          </Button>
-        </AlertDialogHeader>
-        <AlertDialogBody className="import-body">
-          {showSetup && (
-            <>
-              <p className="dialog-lead">Choose archive versions, arrange the import order, and select a Unity project.</p>
-              <div className="import-setup">
-              <section className="import-section import-queue" aria-label="Packages">
-                {refreshing && <p className="muted" role="status">Refreshing availability…</p>}
-                <h3>Packages <span>{order.length}</span></h3>
-                <p className="import-section-hint">Installed from top to bottom. Use the arrows to reorder.</p>
-                <ol className="import-packages">
-                  {order.map((asset, index) => {
-                    const packages = unityPackages(asset);
-                    const availability = availabilityLabel(packages[0]?.availability);
-                    return (
-                      <li key={asset.asset_key}>
-                        <span className="import-package-number" aria-hidden="true">{index + 1}</span>
-                        <div className="import-package-order">
-                          <Button type="button" className="icon-button" onPress={() => move(index, -1)} isDisabled={index === 0 || running} aria-label={`Move ${asset.name} up`}><Icon as={ArrowUp} className="icon" aria-hidden="true" focusable={false} /></Button>
-                          <Button type="button" className="icon-button" onPress={() => move(index, +1)} isDisabled={index === order.length - 1 || running} aria-label={`Move ${asset.name} down`}><Icon as={ArrowDown} className="icon" aria-hidden="true" focusable={false} /></Button>
-                        </div>
-                        <div className="import-package-main">
-                          <strong title={asset.name}>{asset.name}</strong>
-                          {packages.length > 1 || !chosen[asset.asset_key] ? (
-                            <select
-                              className="native-select"
-                              value={chosen[asset.asset_key] || ""}
-                              onChange={(event) => { setChosen((current) => ({ ...current, [asset.asset_key]: event.target.value })); void refreshAssets(); }}
-                              aria-label={`Archive version for ${asset.name}`}
-                            >
-                              <option value="" disabled>Choose archive version…</option>
-                              {packages.map((version) => {
-                                const label = availabilityLabel(version.availability);
-                                return (
-                                  <option key={version.file} value={version.file || ""}>
-                                    {(version.file || "").split(/[\\/]/).pop()}{version.size_bytes != null ? ` · ${formatBytes(version.size_bytes)}` : ""}{version.editor_version ? ` · ${version.editor_version}` : ""}{label ? ` · ${label}` : ""}
-                                  </option>
-                                );
-                              })}
-                            </select>
-                          ) : (
-                            <span className="import-package-file"><span className="import-package-filename" title={packages[0]?.file}>{(packages[0]?.file || "").split(/[\\/]/).pop()}</span>{availability && <span className="availability-tag" data-availability={packages[0]?.availability}>{availability}</span>}</span>
-                          )}
-                          {!chosen[asset.asset_key] && <span className="import-warning-text" role="alert">Choose the exact archive version to import.</span>}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ol>
-              </section>
-              <section className="import-section import-target" aria-label="Target project">
-                <h3>Target project</h3>
-                <div className="import-project-row">
-                  <select
-                    className="native-select"
-                    value={projectPath}
-                    onChange={(event) => void handleProject(event.target.value)}
-                    aria-label="Unity Hub project"
-                  >
-                    <option value="">{projects === null ? "Loading Hub projects…" : "Choose a Hub project…"}</option>
-                    {projectPath && !(projects || []).some((project) => project.path === projectPath) && <option value={projectPath}>{projectInfo?.title || projectPath}</option>}
-                    {(projects || []).map((project) => (
-                      <option key={project.path} value={project.path}>{project.title} · Unity {project.version}</option>
-                    ))}
-                  </select>
-                  <Button type="button" className="button quiet" onPress={() => void browseProject()}>Browse…</Button>
+  return <AlertDialog isOpen onClose={() => { if (!starting) onClose(); }} finalFocusRef={finalFocusRef} initialFocusRef={firstButtonRef} isKeyboardDismissable={!starting} closeOnOverlayClick={false} className="dialog-overlay">
+    <AlertDialogBackdrop className="dialog-backdrop" />
+    <AlertDialogContent className="action-dialog import-dialog" aria-labelledby="import-title">
+      <AlertDialogHeader className="dialog-top">
+        <div className="import-heading"><span className="import-heading-icon"><Icon as={finished && !failed.length && !preflight && job?.status === "completed" ? Check : Package} className="icon" aria-hidden="true" /></span><div><div className="eyebrow">UNITY PACKAGES</div><h2 id="import-title">{title}</h2></div></div>
+        <Button type="button" className="icon-button" onPress={onClose} isDisabled={starting} aria-label={running ? "Hide import progress" : "Close dialog"}><Icon as={X} className="icon" aria-hidden="true" /></Button>
+      </AlertDialogHeader>
+      <AlertDialogBody className="import-body" ref={bodyRef}>
+        <section className="import-project-card" aria-label="Target project">
+          <div className="import-section-heading"><h3><Icon as={Folder} className="icon" aria-hidden="true" /> Target project</h3>{!job && projectInfo && <Button type="button" className="import-text-button" onPress={() => setEditingProject(!editingProject)} isDisabled={starting}>{editingProject ? "Keep project" : "Change"}</Button>}</div>
+          {!job && editingProject ? <div className="import-project-row">
+            <div className="import-project-select">
+            <select className="native-select" value={projectPath} disabled={starting} onChange={(event) => void handleProject(event.target.value)} aria-label="Unity Hub project">
+              <option value="">{projects === null ? "Loading projects…" : "Choose a Unity project…"}</option>
+              {projectPath && !projects?.some((project) => project.path === projectPath) && <option value={projectPath}>{projectInfo?.title || projectPath}</option>}
+              {(projects || []).map((project) => <option key={project.path} value={project.path}>{project.title} · Unity {project.version} · {project.path}</option>)}
+            </select>
+            <Icon as={ChevronDown} className="icon" aria-hidden="true" focusable={false} />
+            </div>
+            <Button type="button" className="button quiet" onPress={() => void browseProject()} isDisabled={starting}>Browse…</Button>
+          </div> : <div className="import-project-info"><strong>{shownProject?.title || filename(shownProjectPath)}</strong>{shownProject?.version && <span>Unity {shownProject.version}</span>}</div>}
+          {shownProjectPath && <details className="import-project-path"><summary title={shownProjectPath}>{shownProjectPath}</summary><code>{shownProjectPath}</code></details>}
+          {!job && <>
+            {inspecting && <p className="import-note" role="status">Checking project…</p>}
+            {projectsError && <p className="import-inline-error" role="alert">{projectsError} <Button className="import-text-button" onPress={() => void loadProjects()}>Retry</Button></p>}
+            {inspectError && <p className="import-inline-error" role="alert">{inspectError} {projectPath && <Button className="import-text-button" onPress={() => void inspect(projectPath)}>Retry</Button>}</p>}
+          </>}
+        </section>
+        {!job ? <>
+          <section className="import-section" aria-label="Packages">
+            <div className="import-section-heading"><h3>Packages <span className="import-count">{order.length}</span></h3><Button type="button" className="import-text-button" aria-pressed={reordering} onPress={() => setReordering(!reordering)} isDisabled={order.length < 2 || starting}><Icon as={ArrowDownUp} className="icon" aria-hidden="true" />{reordering ? "Done reordering" : "Reorder"}</Button></div>
+            {reordering && <p className="import-note">Imported from top to bottom.</p>}
+            {refreshing && <p className="import-note" role="status">Checking availability…</p>}
+            {refreshError && <p className="import-inline-error" role="alert">{refreshError} <Button className="import-text-button" onPress={() => void refreshAssets()}>Retry</Button></p>}
+            <ol className="import-packages">{order.map((row, index) => {
+              const versions = versionsFor(row);
+              const selected = versions.find((version) => version.file === row.file);
+              const availability = selected?.availability;
+              return <li key={row.id}>
+                <span className="import-package-number" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+                <div className="import-package-main"><strong>{row.name}</strong>
+                  {versions.length > 1 || !selected ? <select className="native-select import-version-select" value={selected ? row.file : ""} disabled={starting || !versions.length} aria-label={`Archive version for ${row.name}`} onChange={(event) => { const file = event.target.value; setOrder((current) => current.map((item) => item.id === row.id ? { ...item, file } : item)); }}>
+                    <option value="" disabled>{versions.length ? "Choose version…" : "Archive no longer in library"}</option>
+                    {versions.map((version) => <option key={version.file} value={version.file}>{filename(version.file || "")}{version.size_bytes != null ? ` · ${formatBytes(version.size_bytes)}` : ""}{version.editor_version ? ` · Unity ${version.editor_version}` : ""}{version.availability ? ` · ${availabilityLabel(version.availability)}` : ""}</option>)}
+                  </select> : <ArchiveDetails file={row.file} version={selected} />}
+                  {!selected && row.file && <span className="import-note">Previous archive: {filename(row.file)}</span>}
                 </div>
-                  {projectsError && <p className="import-warning-text" role="alert">{projectsError} <Button type="button" className="button quiet" onPress={() => void loadProjects()}>Retry</Button></p>}
-                {inspecting && <p className="muted" role="status">Checking project…</p>}
-                {inspectError && <p className="import-warning-text" role="alert">{inspectError} <Button type="button" className="button quiet" onPress={() => void inspect(projectPath)}>Retry</Button></p>}
-                {projectInfo && (
-                  <dl className="import-project-info">
-                    <div><dt>Project</dt><dd title={projectInfo.path}>{projectInfo.title}<code className="import-project-path">{projectInfo.path}</code></dd></div>
-                    <div><dt>Unity</dt><dd>{projectInfo.version}</dd></div>
-                  </dl>
-                )}
-                <p className="import-section-hint">Works with Unity open or closed. No bridge or Editor launch is needed.</p>
-                <label className="import-overwrite">
-                  <input type="checkbox" checked={overwrite} onChange={(event) => setOverwrite(event.target.checked)} />
-                  <span>Replace changed existing assets, keeping backups</span>
-                </label>
-                <p className="import-section-hint">Identical files are skipped. Conflicting asset identities are never overwritten. Replaced files are backed up outside Assets; the result shows their location.</p>
-                <p className="import-warning"><strong>Save your Unity changes before importing.</strong> Files are installed directly. Unity processes them on refresh or next project open. With Auto Refresh disabled, use Assets → Refresh.</p>
-                <p className="import-section-hint">Stages up to 3 packages locally. Installation runs in order and continues if a package fails.</p>
-              </section>
-              </div>
-              {startError && <p className="import-warning-text" role="alert">{startError}</p>}
-            </>
-          )}
-          {job && (
-            <section className="import-section" aria-label="Import progress">
-              <h3>Progress</h3>
-              <p className="muted" role="status">
-                {job.status === "queued" && "Waiting to start…"}
-                {job.status === "running" && <>Installing into <code title={job.project}>{job.project}</code> — {job.completed ?? 0} of {job.total ?? order.length} packages.</>}
-                {showFinished && job.status === "completed" && "Files installed. Unity will process them on refresh or next project open."}
-                {showFinished && job.status === "cancelled" && "Import cancelled."}
-                {showFinished && job.status === "failed" && (job.results?.some((row) => row.status === "failed")
-                  ? `Import finished with errors. ${job.results.filter((row) => row.status === "installed").length} installed; ${job.results.filter((row) => row.status === "failed").length} failed; ${job.results.filter((row) => row.status === "cancelled").length} cancelled.`
-                  : "Import failed.")}
-              </p>
-              {job.stop_requested && showRunning && <p className="import-warning-text" role="status">Stop requested — the current package finishes first.</p>}
-              {job.error && <p className="import-warning-text" role="alert">{job.error}</p>}
-              {startError && <p className="import-warning-text" role="alert">{startError}</p>}
-              <table className="import-results">
-                <thead><tr><th scope="col">Package</th><th scope="col">Status</th></tr></thead>
-                <tbody>
-                  {(job.results || (showRunning ? order.map((asset) => ({ file: chosen[asset.asset_key] || "", status: "pending" as const })) : [])).map((row) => (
-                    <tr key={row.file} data-status={row.status}>
-                      <td title={row.file}>{row.file.split(/[\\/]/).pop() || "—"}{row.backup_path && <small className="import-backup">Backup: <code>{row.backup_path}</code></small>}</td>
-                      <td>
-                        {row.status === "pending" && "Pending"}
-                        {(row.status === "preparing" || row.status === "downloading") && (
-                          <>
-                            <Spinner className="spinner" aria-label={row.status === "preparing" ? "Preparing" : "Downloading"} />
-                            {" "}{row.status === "preparing" ? "Preparing staging copy…" : "Downloading…"}
-                            {row.bytes_total ? <small className="prep-bytes">{formatBytes(row.bytes_completed ?? 0)} / {formatBytes(row.bytes_total)}</small> : null}
-                            {row.bytes_total ? <span className="prep-progress" role="progressbar" aria-label="Download progress" aria-valuemin={0} aria-valuemax={row.bytes_total} aria-valuenow={row.bytes_completed ?? 0}><span className="prep-progress-fill" style={{ width: `${Math.min(100, Math.round(((row.bytes_completed ?? 0) / row.bytes_total) * 100))}%` }} /></span> : null}
-                          </>
-                        )}
-                        {row.status === "ready" && "Staged locally"}
-                        {row.status === "installing" && <><Spinner className="spinner" aria-label="Installing" /> Installing…</>}
-                        {row.status === "installed" && "Installed"}
-                        {row.status === "failed" && <span className="danger-text">Failed{row.error ? ` — ${row.error}` : ""}</span>}
-                        {row.status === "cancelled" && "Cancelled"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </section>
-          )}
-        </AlertDialogBody>
-        <AlertDialogFooter className="dialog-foot">
-          {showSetup && <Button ref={firstButtonRef} type="button" className="button quiet" onPress={onClose} isDisabled={running || starting}>Cancel</Button>}
-          {showRunning && <Button ref={firstButtonRef} type="button" className="button quiet" onPress={onClose} isDisabled={starting}>Hide</Button>}
-          {showRunning && <Button type="button" className="button danger" onPress={onStop} isDisabled={Boolean(job?.stop_requested)}>{job?.stop_requested ? "Stopping…" : "Stop after current package"}</Button>}
-          {showFinished && <Button type="button" className="button primary" onPress={onClose} autoFocus>Done</Button>}
-          {showSetup && <Button type="button" className="button primary" onPress={() => void start()} isDisabled={!canStart}>{starting ? "Starting…" : `Import ${order.length} package${order.length === 1 ? "" : "s"}`}</Button>}
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
+                <div className="import-row-actions">
+                  <span className="import-status" data-kind={!selected || availability === "missing" ? "failed" : availability === "local" ? "local" : "neutral"}>{!selected ? "Choose version" : availability === "missing" ? "Missing" : availability === "cloud_only" ? <><Icon as={Cloud} className="icon" aria-hidden="true" />Cloud</> : availability === "local" ? <><Icon as={Check} className="icon" aria-hidden="true" />Ready</> : "Unknown"}</span>
+                  {reordering ? <div className="import-package-order"><Button type="button" className="icon-button" onPress={() => move(index, -1)} isDisabled={index === 0 || starting} aria-label={`Move ${row.name} up`}><Icon as={ArrowUp} className="icon" aria-hidden="true" /></Button><Button type="button" className="icon-button" onPress={() => move(index, 1)} isDisabled={index === order.length - 1 || starting} aria-label={`Move ${row.name} down`}><Icon as={ArrowDown} className="icon" aria-hidden="true" /></Button></div> : <Button type="button" className="icon-button import-remove" onPress={() => remove(row)} isDisabled={starting} aria-label={`Remove ${row.name} from import`}><Icon as={X} className="icon" aria-hidden="true" /></Button>}
+                </div>
+              </li>;
+            })}</ol>
+            {!order.length && <p className="import-empty">No packages selected. Close this dialog to choose packages.</p>}
+          </section>
+          <details className="import-policy-details"><summary>How existing assets are handled</summary><p>Identical files are skipped. {overwrite ? "Changed files are replaced with backups outside Assets." : "A differing existing asset fails that package; it is not replaced."} Conflicting asset identities are never overwritten. Packages install in order and continue after individual failures.</p></details>
+        </> : <section className="import-section" aria-label="Import progress">
+          <div className="import-outcome" role="status">
+            <strong>{running ? `${installed.length} of ${job.total ?? results.length} installed` : `${installed.length} installed${failed.length ? ` · ${failed.length} failed` : ""}${notImported ? ` · ${notImported} not imported` : ""}`}</strong>
+            {running && <span>{job.stop_requested ? "Stopping after the current package…" : job.status === "queued" ? "Waiting to start…" : "You can keep browsing while packages import."}</span>}
+          </div>
+          {job.error && (preflight || !failed.some((row) => row.error === job.error)) && <div className="import-inline-error" role="alert">{job.error}</div>}
+          {finished && installed.length > 0 && <p className="import-note">Files installed. Unity processes them on refresh or next project open. Auto Refresh off? Use Assets → Refresh.</p>}
+          {finished ? <>
+            {renderResults([...failed, ...remaining.filter((row) => row.status !== "failed")])}
+            {installed.length > 0 && <details className="import-successes" open={remaining.length === 0}><summary><Icon as={Check} className="icon" aria-hidden="true" />Installed packages <span>{installed.length}</span></summary>{renderResults(installed)}</details>}
+          </> : renderResults(results)}
+        </section>}
+        <span className="sr-only" role="status">{notice}</span>
+      </AlertDialogBody>
+      <AlertDialogFooter className="dialog-foot">
+        {actionError && <p className="import-inline-error import-action-error" role="alert">{actionError}</p>}
+        {!job && <>
+          <section className="import-policy" aria-label="Replacement policy">
+            <label className="import-overwrite"><span><Icon as={ShieldCheck} className="icon" aria-hidden="true" /><strong>Replace changed assets</strong></span><input type="checkbox" role="switch" checked={overwrite} disabled={starting} onChange={(event) => setOverwrite(event.target.checked)} /><span className="import-toggle" aria-hidden="true">{overwrite ? "On" : "Off"}</span></label>
+            <div id="import-safety" className={overwrite ? "import-warning" : "import-save-note"} role="note"><Icon as={CircleAlert} className="icon" aria-hidden="true" /><p>{overwrite && <><strong>Existing assets may be replaced.</strong> Changed files are backed up.<br /></>}Save your Unity changes before importing.</p></div>
+          </section>
+          <span id="import-blocker" className="import-footer-note" role="status">{blocker || "Ready to import"}</span><Button ref={firstButtonRef} type="button" className="button quiet" onPress={onClose} isDisabled={starting}>Cancel</Button><Button type="button" className="button primary" onPress={() => void start()} isDisabled={!canStart} aria-describedby="import-blocker import-safety">{starting ? "Starting…" : `Import ${order.length} package${order.length === 1 ? "" : "s"}`}</Button>
+        </>}
+        {running && <><Button ref={firstButtonRef} type="button" className="button quiet" onPress={onClose}>Hide</Button><Button type="button" className="button quiet danger-text" onPress={() => void stop()} isDisabled={stopping || Boolean(job?.stop_requested)}>{stopping || job?.stop_requested ? "Stopping…" : "Stop after current package"}</Button></>}
+        {finished && <><Button ref={firstButtonRef} type="button" className={`button ${remaining.length ? "quiet" : "primary"}`} onPress={onClose}>Done</Button>{remaining.length > 0 && <Button type="button" className="button primary" onPress={review}>{recoveryLabel}</Button>}</>}
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>;
 }

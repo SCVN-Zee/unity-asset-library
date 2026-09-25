@@ -738,8 +738,8 @@ function registerIpc() {
 }
 function createWindow() {
   const window = new BrowserWindow({
-    width: 1480,
-    height: 960,
+    width: 1224,
+    height: 918,
     minWidth: 980,
     minHeight: 680,
     backgroundColor: "#111214",

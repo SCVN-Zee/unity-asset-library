@@ -305,7 +305,7 @@ const BranchedMenu: React.FC<BranchedMenuProps> = ({
   ariaLabel,
   className = "",
   width,
-  rowHeight = 36,
+  rowHeight = 32,
   indent = 24,
   trunk = 6,
   radius = 8,

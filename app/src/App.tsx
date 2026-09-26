@@ -963,6 +963,16 @@ function App() {
       })
       .map((entry) => entry.asset);
   }, [displayAssets, category, author, query, quick, sort, favoriteSet, untagged, selectedTags, tagMode]);
+  const selectionSummary = useMemo(() => {
+    let selectable = 0;
+    let selected = 0;
+    for (const asset of filtered) {
+      if (!unityPackages(asset).length) continue;
+      selectable += 1;
+      if (importSelection.has(asset.asset_key)) selected += 1;
+    }
+    return { selectable, selected, hidden: importSelection.size - selected };
+  }, [filtered, importSelection]);
   function clearFilters() {
     setQuery("");
     setCategory("All assets");
@@ -1211,7 +1221,7 @@ function App() {
                   if (typeof ref === "function") ref(node);
                   else if (ref) ref.current = node;
                 }}
-                className="button primary"
+                className="button quiet"
                 onPress={() => setActionsOpen((open) => !open)}
               >
                 Library actions{" "}
@@ -1499,8 +1509,9 @@ function App() {
             <Button className="filter-reset" onPress={clearFilters}>Clear filters</Button>
           </div>}
           <div className="import-controls" data-selected={importSelection.size > 0} role="group" aria-label="Package selection">
-            {importSelection.size > 0 && <span className="import-selection-count" role="status">{importSelection.size} selected</span>}
-            <Button type="button" className="button quiet" onPress={() => { if (importSelection.size > 0) { selectionAnchor.current = null; setImportSelection(new Set()); } else selectVisibleImport(); }} isDisabled={loading || importActive || (importSelection.size === 0 && !filtered.some((asset) => unityPackages(asset).length > 0))} aria-label={importSelection.size > 0 ? "Deselect all packages" : "Select all packages in current results"}>{importSelection.size > 0 ? "Deselect all" : "Select all"}</Button>
+            <span className="import-selection-count" role="status" aria-atomic="true">{importSelection.size > 0 ? <>{importSelection.size.toLocaleString()} selected{selectionSummary.hidden > 0 && <span className="selection-hidden"> · {selectionSummary.hidden.toLocaleString()} outside filters</span>}</> : "Select packages to import"}</span>
+            <Button type="button" className="button quiet selection-action" onPress={selectVisibleImport} isDisabled={loading || importActive || selectionSummary.selectable === selectionSummary.selected} aria-label="Select all packages in current results" title="Add every importable package in the current results to your selection">Select all</Button>
+            {importSelection.size > 0 && <Button type="button" className="button quiet selection-action" onPress={() => { selectionAnchor.current = null; setImportSelection(new Set()); }} isDisabled={importActive} aria-label="Deselect all packages">Clear selection</Button>}
             {importSelection.size > 0 && <Button ref={importTriggerRef} type="button" className="button primary" onPress={() => setImportOpen(true)} isDisabled={importActive} aria-label={`Import ${importSelection.size} selected package${importSelection.size === 1 ? "" : "s"}`}>Review import</Button>}
           </div>
           </div>

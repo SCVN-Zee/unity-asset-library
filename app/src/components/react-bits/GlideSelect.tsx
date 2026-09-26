@@ -11,6 +11,7 @@ import './GlideSelect.css';
 export interface GlideSelectOption {
   value: string;
   label: ReactNode;
+  description?: string;
   tag?: string;
 }
 
@@ -45,8 +46,6 @@ const SIZES: Record<string, { chip: number; row: number; font: number }> = {
   md: { chip: 32, row: 30, font: 13 },
   lg: { chip: 44, row: 40, font: 14 }
 };
-const PAD = 4;
-const GAP = 1;
 const MENU_GAP = 6;
 const DEFAULT_OPTIONS: (string | GlideSelectOption)[] = ['One', 'Two', 'Three'];
 
@@ -101,8 +100,20 @@ const GlideSelect: React.FC<GlideSelectProps> = ({
   const consumedEscape = useRef(false);
   const id = useId();
   const S = SIZES[size] ?? SIZES.md;
-  const step = S.row + GAP;
   const popOut = Math.round((popDuration * 2) / 3);
+  // Rows can be taller than the nominal --gs-row (rich options with descriptions wrap),
+  // so highlight geometry is measured from the actual option element, never assumed.
+  const placePill = (index: number) => {
+    const p = pillRef.current;
+    const row = index >= 0 ? document.getElementById(`${id}-${index}`) : null;
+    if (!p) return;
+    if (!row) {
+      p.style.opacity = '0';
+      return;
+    }
+    p.style.height = `${row.offsetHeight}px`;
+    p.style.transform = `translateY(${row.offsetTop}px)`;
+  };
 
   useLayoutEffect(() => {
     if (phase !== 'open') return;
@@ -129,7 +140,7 @@ const GlideSelect: React.FC<GlideSelectProps> = ({
     const p = pillRef.current;
     if (p) {
       p.style.transition = 'none';
-      p.style.transform = `translateY(${Math.max(0, selected) * step}px)`;
+      placePill(selected);
       p.style.opacity = '0';
       void p.offsetHeight;
       p.style.transition = '';
@@ -146,11 +157,12 @@ const GlideSelect: React.FC<GlideSelectProps> = ({
     }
     const jump = instant.current || p.style.opacity !== '1';
     p.style.transitionDuration = jump ? '0ms, 150ms' : '';
-    p.style.transform = `translateY(${active * step}px)`;
+    placePill(active);
     p.style.opacity = '1';
     if (instant.current) document.getElementById(id + '-' + active)?.scrollIntoView({ block: 'nearest' });
     instant.current = false;
-  }, [active, phase, step]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, phase]);
 
   const open = (viaKey: boolean) => {
     if (disabled) return;
@@ -296,8 +308,13 @@ const GlideSelect: React.FC<GlideSelectProps> = ({
           }
         }}
       >
-        <span className="glide-select__label" key={current} data-empty={selected < 0 ? '' : undefined}>
-          {selected >= 0 ? items[selected].label : placeholder}
+        <span
+          className="glide-select__label"
+          key={current}
+          data-empty={selected < 0 ? '' : undefined}
+          title={selected >= 0 ? textOf(items[selected]) : undefined}
+        >
+          {selected >= 0 ? textOf(items[selected]) : placeholder}
         </span>
         <span className="glide-select__chevron" aria-hidden="true">
           <ChevronDown size={14} strokeWidth={2} />
@@ -315,25 +332,35 @@ const GlideSelect: React.FC<GlideSelectProps> = ({
 
           >
             <span ref={pillRef} className="glide-select__pill" aria-hidden="true" />
-            {items.map((it, i) => (
-              <div
-                key={it.value}
-                id={`${id}-${i}`}
-                role="option"
-                aria-selected={i === selected}
-                data-index={i}
-                onPointerEnter={() => { instant.current = false; setActive(i); }}
-                onPointerDown={e => e.preventDefault()}
-                onClick={() => pick(i, false)}
-                className="glide-select__option"
-              >
-                <span className="glide-select__name">{it.label}</span>
-                {showTags && it.tag ? <span className="glide-select__tag">{it.tag}</span> : null}
-                <span className="glide-select__check" data-on={i === selected ? '' : undefined} aria-hidden="true">
-                  <Check size={14} strokeWidth={2} />
-                </span>
-              </div>
-            ))}
+            {items.map((it, i) => {
+              const name = textOf(it);
+              const full = [name, showTags ? it.tag : null, it.description].filter(Boolean).join(" — ");
+              return (
+                <div
+                  key={it.value}
+                  id={`${id}-${i}`}
+                  role="option"
+                  aria-selected={i === selected}
+                  aria-label={full}
+                  title={full}
+                  data-index={i}
+                  data-rich={it.description ? '' : undefined}
+                  onPointerEnter={() => { instant.current = false; setActive(i); }}
+                  onPointerDown={e => e.preventDefault()}
+                  onClick={() => pick(i, false)}
+                  className="glide-select__option"
+                >
+                  <span className="glide-select__main">
+                    <span className="glide-select__name">{it.label}</span>
+                    {it.description ? <span className="glide-select__desc">{it.description}</span> : null}
+                  </span>
+                  {showTags && it.tag ? <span className="glide-select__tag">{it.tag}</span> : null}
+                  <span className="glide-select__check" data-on={i === selected ? '' : undefined} aria-hidden="true">
+                    <Check size={14} strokeWidth={2} />
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
       ) : null}

@@ -74,7 +74,7 @@
 }
 
 .glide-select__label[data-empty] {
-  opacity: 0.6;
+  color: var(--muted);
 }
 
 .glide-select[data-swap] .glide-select__label {
@@ -157,7 +157,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  height: var(--gs-row);
+  min-height: var(--gs-row);
   padding: 0 8px 0 10px;
   border-radius: var(--gs-inner-radius);
   color: var(--gs-text);
@@ -167,6 +167,32 @@
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
   transition: background-color 150ms ease;
+}
+
+/* Rich rows (description present) grow to fit wrapped text instead of fixed height. */
+.glide-select__option[data-rich] {
+  align-items: center;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.glide-select__main {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.glide-select__desc {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.3;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .glide-select__option[aria-selected='true'] {
@@ -186,10 +212,27 @@
   text-overflow: ellipsis;
 }
 
+/* Rich rows wrap long project names/paths; pill geometry is measured, so variable heights are safe. */
+.glide-select__option[data-rich] .glide-select__name {
+  white-space: normal;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.glide-select__option[data-rich] .glide-select__tag {
+  align-self: flex-start;
+  margin-top: 1px;
+  max-width: 40%;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .glide-select__tag {
   flex-shrink: 0;
-  color: color-mix(in srgb, var(--gs-text) 55%, transparent);
-  font-size: calc(var(--gs-font) - 2px);
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .glide-select__check {

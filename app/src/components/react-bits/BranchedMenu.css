@@ -10,7 +10,7 @@
   --bm-accent: var(--accent, #f08a6c);
   --bm-line: var(--line, #3f3f46);
   --bm-font: 12px;
-  --bm-row: 36px;
+  --bm-row: 32px;
   --bm-indent: 24px;
   --bm-line-w: 1.5;
   --bm-draw: 400ms;
@@ -86,8 +86,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 24px;
+  height: 24px;
 }
 
 .branched-menu__toggle {

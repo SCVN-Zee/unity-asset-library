@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { AlertDialog, AlertDialogBackdrop, AlertDialogBody, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, Button, Icon } from "./ui";
 import { ArrowDown, ArrowUp, ArrowDownUp, Check, CircleAlert, Cloud, Folder, Package, ShieldCheck, X } from "lucide-react";
 import SpotlightCard from "./react-bits/SpotlightCard";
@@ -42,6 +42,15 @@ function archiveLabel(file: string) {
   return filename(file).match(/(?:^|[\s_-])(v?\d+(?:\.\d+)+(?:[a-z]\d*)?)(?=[\s_.(-]|$)/i)?.[1] || "Archive details";
 }
 
+function PackageThumb({ asset, name, badge }: { asset?: Asset | null; name: string; badge?: ReactNode }) {
+  const remote = asset?.thumbnail?.remote;
+  const fallback = (name || "Asset").split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+  return <span className="import-thumb" aria-hidden="true">
+    {remote ? <img src={remote} loading="lazy" alt="" /> : <span className="import-thumb-fallback">{fallback}</span>}
+    {badge != null && <span className="import-thumb-badge">{badge}</span>}
+  </span>;
+}
+
 type ReviewRow = { id: string; assetKey: string | null; name: string; file: string };
 type ImportDialogProps = {
   assets: Asset[];
@@ -63,13 +72,16 @@ function ArchiveDetails({ file, version }: { file: string; version?: AssetVersio
   </details>;
 }
 
-function ResultRow({ row, name, finished, onReveal }: { row: ImportResultRow; name: string; finished: boolean; onReveal: (path: string) => void }) {
+function ResultRow({ row, asset, name, finished, onReveal }: { row: ImportResultRow; asset?: Asset | null; name: string; finished: boolean; onReveal: (path: string) => void }) {
   const active = ["preparing", "downloading", "installing"].includes(row.status);
   const labels: Record<ImportResultRow["status"], string> = {
     pending: finished ? "Not imported" : "Waiting", preparing: "Preparing", downloading: "Downloading", ready: finished ? "Not imported" : "Ready", installing: "Installing", installed: "Installed", failed: "Failed", cancelled: "Not imported",
   };
+  const badge = active
+    ? <LatticeLoader label="" decorative cellSize={3} gap={1} />
+    : <Icon as={row.status === "installed" ? Check : row.status === "failed" ? CircleAlert : Package} className="icon" />;
   return <li className="import-result-row" data-status={row.status}>
-    <span className="import-row-symbol" aria-hidden="true">{active ? <LatticeLoader label="" decorative cellSize={3} gap={1} /> : <Icon as={row.status === "installed" ? Check : row.status === "failed" ? CircleAlert : Package} className="icon" />}</span>
+    <PackageThumb asset={asset} name={name} badge={badge} />
     <div className="import-package-main">
       <strong>{name}</strong>
       <ArchiveDetails file={row.file} />
@@ -225,7 +237,7 @@ export function ImportDialog({ assets, catalog, job, finalFocusRef, onClose, onS
   const title = !job ? `Import ${order.length} package${order.length === 1 ? "" : "s"}` : running ? "Importing packages" : preflight ? "Import couldn’t start" : job.status === "cancelled" ? "Import stopped" : failed.length ? "Import finished with issues" : "Import complete";
   const shownProjectPath = job?.project || projectPath;
   const shownProject = projectInfo?.path === shownProjectPath ? projectInfo : projects?.find((project) => project.path === shownProjectPath);
-  const renderResults = (rows: ImportResultRow[]) => <ul className="import-results">{rows.map((row) => <ResultRow key={row.file} row={row} name={byFile.get(row.file)?.name || order.find((item) => item.file === row.file)?.name || filename(row.file).replace(/\.unitypackage$/i, "")} finished={finished} onReveal={(path) => void reveal(path)} />)}</ul>;
+  const renderResults = (rows: ImportResultRow[]) => <ul className="import-results">{rows.map((row) => <ResultRow key={row.file} row={row} asset={byFile.get(row.file)} name={byFile.get(row.file)?.name || order.find((item) => item.file === row.file)?.name || filename(row.file).replace(/\.unitypackage$/i, "")} finished={finished} onReveal={(path) => void reveal(path)} />)}</ul>;
 
   return <AlertDialog isOpen onClose={() => { if (!starting) onClose(); }} finalFocusRef={finalFocusRef} initialFocusRef={firstButtonRef} isKeyboardDismissable={!starting} closeOnOverlayClick={false} className="dialog-overlay">
     <AlertDialogBackdrop className="dialog-backdrop" />
@@ -241,8 +253,8 @@ export function ImportDialog({ assets, catalog, job, finalFocusRef, onClose, onS
             <GlideSelect className="import-project-select" value={projectPath} disabled={starting} ariaLabel="Unity Hub project"
               placeholder={projects === null ? "Loading projects…" : "Choose a Unity project…"}
               options={[
-                ...(projectPath && !projects?.some(project => project.path === projectPath) ? [{ value: projectPath, label: projectInfo?.title || projectPath }] : []),
-                ...(projects || []).map(project => ({ value: project.path, label: project.title + ' · Unity ' + project.version + ' · ' + project.path })),
+                ...(projectPath && !projects?.some(project => project.path === projectPath) ? [{ value: projectPath, label: projectInfo?.title || filename(projectPath), description: projectPath }] : []),
+                ...(projects || []).map(project => ({ value: project.path, label: project.title, tag: "Unity " + project.version, description: project.path })),
               ]}
               onChange={value => void handleProject(value)} menuWidth={480}
             />
@@ -266,11 +278,14 @@ export function ImportDialog({ assets, catalog, job, finalFocusRef, onClose, onS
               const selected = versions.find((version) => version.file === row.file);
               const availability = selected?.availability;
               return <li key={row.id}>
-                <span className="import-package-number" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+                <PackageThumb asset={row.assetKey ? byKey.get(row.assetKey) : null} name={row.name} badge={String(index + 1).padStart(2, "0")} />
                 <div className="import-package-main"><strong>{row.name}</strong>
                   {versions.length > 1 || !selected ? <GlideSelect className="import-version-select" value={selected ? row.file : ""} disabled={starting || !versions.length} ariaLabel={'Archive version for ' + row.name}
                     placeholder={versions.length ? "Choose version…" : "Archive no longer in library"}
-                    options={versions.map(version => ({ value: version.file || '', label: filename(version.file || '') + (version.size_bytes != null ? ' · ' + formatBytes(version.size_bytes) : '') + (version.editor_version ? ' · Unity ' + version.editor_version : '') + (version.availability ? ' · ' + availabilityLabel(version.availability) : '') }))}
+                    options={versions.map(version => {
+                      const parts = [version.size_bytes != null ? formatBytes(version.size_bytes) : "", availabilityLabel(version.availability)].filter(Boolean);
+                      return { value: version.file || '', label: filename(version.file || ''), tag: version.editor_version ? "Unity " + version.editor_version : undefined, description: parts.join(" · ") || undefined };
+                    })}
                     onChange={file => setOrder(current => current.map(item => item.id === row.id ? { ...item, file } : item))} menuWidth={480}
                   /> : <ArchiveDetails file={row.file} version={selected} />}
                   {!selected && row.file && <span className="import-note">Previous archive: {filename(row.file)}</span>}

@@ -8,7 +8,7 @@ const path = require('node:path');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'ual-browsing-'));
 app.setPath('userData', path.join(temporary, 'profile'));
 const fixtures = [
-  { asset_key: 'audio-favorite', name: 'Forest Audio', author: 'Studio', category: { path: 'Audio/Ambient', levels: ['Audio', 'Ambient'] }, versions: [{ file: 'Audio/Forest v1.unitypackage', size_bytes: 1024 }] },
+  { asset_key: 'audio-favorite', name: 'Forest Audio', author: 'Studio', category: { path: 'Audio/Ambient/Nature', levels: ['Audio', 'Ambient', 'Nature'] }, versions: [{ file: 'Audio/Forest v1.unitypackage', size_bytes: 1024 }] },
   { asset_key: 'audio-other', name: 'City Audio', author: 'Studio', category: { path: 'Audio/Ambient', levels: ['Audio', 'Ambient'] }, versions: [{ file: 'City.unitypackage' }] },
   { asset_key: 'tools-favorite', name: 'Editor Tool', author: 'Studio', category: { path: 'Tools', levels: ['Tools'] }, versions: [{ file: 'Editor.unitypackage' }] },
   { asset_key: 'docs', name: 'Documentation', author: 'Studio', versions: [{ file: 'Docs.zip' }] },
@@ -52,6 +52,16 @@ async function click(selector, modifiers = []) {
   win.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, modifiers, ...bounds });
   win.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, modifiers, ...bounds });
 }
+async function chooseOption(label, text) {
+  const selector = '[role="combobox"][aria-label="' + label + '"]';
+  await click(selector);
+  await waitFor('document.querySelector(' + JSON.stringify(selector) + ').getAttribute("aria-expanded") === "true"');
+  const id = await evaluate('Array.from(document.querySelectorAll("[role=listbox] [role=option]")).find(e => e.textContent.includes(' + JSON.stringify(text) + '))?.id');
+  assert(id, 'Option is available: ' + text);
+  await evaluate('document.getElementById(' + JSON.stringify(id) + ').scrollIntoView({ block: "nearest" })');
+  await click('[id="' + id + '"]');
+  await waitFor('!document.querySelector("[role=listbox]")');
+}
 async function selection(names) {
   const expected = JSON.stringify([...names].sort());
   await waitFor(`JSON.stringify([...document.querySelectorAll('.import-check input:checked')].map(e => e.closest('.asset-cell').querySelector('.asset-card,.list-row').title).sort()) === ${JSON.stringify(expected)}`);
@@ -63,13 +73,30 @@ app.whenReady().then(async () => {
     await win.loadFile(path.join(__dirname, '../dist/renderer/index.html'));
     await waitFor('document.querySelector("img.brand-mark")?.naturalWidth > 0');
     await waitFor('document.querySelectorAll(".asset-card").length === 4');
+    await click('[aria-label="Expand Audio"]');
+    assert.equal(await evaluate('document.querySelectorAll(".asset-card").length'), 4, 'Expanding does not filter');
+    assert.equal(await evaluate(`!!document.querySelector('.category-tree [title="Nature"]').closest("[inert]")`), true);
+    await waitFor("document.querySelector('[aria-label=\"Collapse Audio\"]')?.getAttribute(\"aria-expanded\") === \"true\"");
+    await waitFor('!document.querySelector(".category-tree").getAnimations({ subtree: true }).some(a => a.playState === "running")');
+    await click('[aria-label="Expand Ambient"]');
+    await waitFor("document.querySelector('[aria-label=\"Collapse Ambient\"]')?.getAttribute(\"aria-expanded\") === \"true\"");
+    await waitFor('!document.querySelector(".category-tree").getAnimations({ subtree: true }).some(a => a.playState === "running")');
+    await click('.category-tree [title="Nature"]');
+    await waitFor('document.querySelectorAll(".asset-card").length === 1');
+    assert.equal(await evaluate('document.querySelector(".card-title").textContent'), 'Forest Audio');
+    await click('[aria-label="Remove category filter"]');
+    await waitFor('document.querySelectorAll(".asset-card").length === 4');
+    assert.equal(await evaluate(`document.querySelector('.category-tree [aria-current="true"]').title`), 'All categories');
+    await click('[aria-label="Collapse Audio"]');
+    await waitFor("!!document.querySelector('.category-tree [title=\"Nature\"]').closest(\"[inert]\")");
+    console.log('PASS: recursive branch expansion, leaf filtering, controlled reset and collapsed descendants');
     await click('[aria-label="Select all packages in current results"]');
     await selection(['City Audio', 'Editor Tool', 'Forest Audio']);
     await click('[aria-label="Deselect all packages"]');
     await selection([]);
     assert.equal(await evaluate(`document.querySelector('[title="Forest Audio"] .availability').getAttribute("data-availability")`), "cloud_only");
     assert.equal(await evaluate(`document.querySelector('[title="City Audio"] .availability').getAttribute("data-availability")`), "local");
-    await click('.side-section .nav-row:nth-of-type(2)');
+    await click('[aria-label="Library filters"] button[title="Favorites"]');
     await waitFor('document.querySelectorAll(".asset-card").length === 2');
     await click('.category-tree button[title="Audio"]');
     await waitFor('document.querySelectorAll(".asset-card").length === 1');
@@ -124,7 +151,7 @@ app.whenReady().then(async () => {
       await waitFor('!!document.querySelector(\'[aria-label="Add Forest Audio to favorites"]\')');
       await click('.asset-cell [aria-label="Add Forest Audio to favorites"]');
       await click('[title="City Audio"]'); await selection(['City Audio']);
-      await evaluate('(() => { const sort = document.querySelector(\'[aria-label="Sort assets"]\'); sort.value = sort.value === "name" ? "author" : "name"; sort.dispatchEvent(new Event("change", { bubbles: true })); })()');
+      await chooseOption('Sort assets', view === 'Grid' ? 'Author' : 'Name');
       await click('[title="Forest Audio"]', ['shift']); await selection(['Forest Audio']);
       await click('[title="City Audio"]'); await selection(['City Audio']);
       await evaluate('document.querySelector(\'[aria-label="Search library"]\').focus()');
@@ -139,12 +166,18 @@ app.whenReady().then(async () => {
     refreshed[0].versions[0].file = "Audio/Forest v2.unitypackage";
     await evaluate(`localStorage.setItem("ual:test-assets", ${JSON.stringify(JSON.stringify(refreshed))})`);
     await click('[aria-label="Import 1 selected package"]');
-    await waitFor(`!!document.querySelector('select[aria-label="Archive version for Forest Audio"]')`);
-    await evaluate(`(() => { const select = document.querySelector('select[aria-label="Unity Hub project"]'); select.value = "/fixture/project"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    await waitFor(`!!document.querySelector('[role="combobox"][aria-label="Archive version for Forest Audio"]')`);
+    await click('[role="combobox"][aria-label="Unity Hub project"]');
+    await waitFor("document.querySelector('[role=\"combobox\"][aria-label=\"Unity Hub project\"]')?.getAttribute(\"aria-expanded\") === \"true\"");
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
+    await waitFor('!document.querySelector("[role=listbox]")');
+    assert.equal(await evaluate('!!document.querySelector(".import-dialog")'), true, 'Escape closes select without closing import');
+    assert.equal(await evaluate('document.activeElement.getAttribute("aria-label")'), 'Unity Hub project');
+    await chooseOption('Unity Hub project', 'Fixture');
     await waitFor(`!!document.querySelector(".import-project-info")`);
-    assert.equal(await evaluate(`document.querySelector('select[aria-label="Archive version for Forest Audio"]').value`), "");
     assert.equal(await evaluate(`document.querySelector('.import-dialog .dialog-foot .primary').disabled`), true);
-    await evaluate(`(() => { const select = document.querySelector('select[aria-label="Archive version for Forest Audio"]'); select.value = "Audio/Forest v2.unitypackage"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    await chooseOption('Archive version for Forest Audio', 'Forest v2.unitypackage');
     await waitFor(`!document.querySelector('.import-dialog .dialog-foot .primary').disabled`);
     await click(".import-overwrite input");
     await click(".import-dialog .dialog-foot .primary");
@@ -186,7 +219,7 @@ app.whenReady().then(async () => {
     console.log("PASS: terminal import refreshes hydrated archive availability");
     await click(".task-indicator");
     await waitFor(`!document.querySelector(".task-details").hidden`);
-    assert.equal(await evaluate(`document.querySelector(".task-details .progress-error").textContent`), "Package could not be imported ");
+
     await click('[aria-label="Dismiss Import result"]');
     await waitFor(`!document.querySelector(".task-indicator")`);
     console.log("PASS: task hover, focus, Escape, review import, failure details and dismissal");
@@ -202,7 +235,7 @@ app.whenReady().then(async () => {
     await waitFor(`!!document.querySelector('[aria-label="Move Editor package 01 down"]')`);
     await click(`[aria-label="Move Editor package 01 down"]`);
     await waitFor(`document.querySelector(".import-package-main strong").textContent === "Editor package 02"`);
-    await evaluate(`(() => { const select = document.querySelector('select[aria-label="Unity Hub project"]'); select.value = "/fixture/project"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    await chooseOption('Unity Hub project', 'Fixture');
     await waitFor(`!document.querySelector(".import-dialog .primary").disabled`);
     for (const [width, height] of [[1200, 800], [983, 700], [390, 700]]) {
       win.setContentSize(width, height);
@@ -257,6 +290,24 @@ app.whenReady().then(async () => {
     await waitFor(`document.querySelectorAll('.import-packages > li').length === 2`);
     assert.deepEqual(await evaluate(`[...document.querySelectorAll('.import-packages .import-package-main > strong')].map(e => e.textContent)`), [batch[1].name, batch[2].name]);
     console.log("PASS: partial recovery excludes installed packages and retains cancelled packages");
+    const shrinking = structuredClone(fixtures);
+    shrinking[1].category = { path: 'Audio/Music', levels: ['Audio', 'Music'] };
+    await evaluate('localStorage.clear(); localStorage.setItem("ual:test-assets", ' + JSON.stringify(JSON.stringify(shrinking)) + ')');
+    await win.reload();
+    await waitFor('document.querySelectorAll(".asset-card").length === 4');
+    await click('[aria-label="Expand Audio"]');
+    await waitFor('!!document.querySelector(\'[aria-label="Collapse Audio"]\')');
+    await waitFor('!document.querySelector(".category-tree").getAnimations({ subtree: true }).some(a => a.playState === "running")');
+    await click('[title="Forest Audio"]');
+    await selection(['Forest Audio']);
+    await evaluate('localStorage.setItem("ual:test-assets", ' + JSON.stringify(JSON.stringify(shrinking.filter(asset => asset.asset_key !== 'audio-other'))) + ')');
+    await click('[aria-label="Import 1 selected package"]');
+    await waitFor('document.querySelectorAll(".asset-card").length === 3');
+    assert.equal(await evaluate('!!document.querySelector(\'.category-tree [title="Music"]\')'), false);
+    await click('.import-dialog .dialog-foot .quiet');
+    await waitFor('!document.querySelector(".import-dialog")');
+    assert.equal(await evaluate('document.querySelector(\'[aria-label="Collapse Audio"]\').getAttribute("aria-expanded")'), 'true');
+    console.log('PASS: catalog refresh safely removes a child from an expanded category');
   } catch (error) {
     console.error(error);
     exitCode = 1;

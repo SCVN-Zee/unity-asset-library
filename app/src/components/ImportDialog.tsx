@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { AlertDialog, AlertDialogBackdrop, AlertDialogBody, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, Button, Icon, Spinner } from "./ui";
-import { ArrowDown, ArrowUp, ArrowDownUp, Check, ChevronDown, CircleAlert, Cloud, Folder, Package, ShieldCheck, X } from "lucide-react";
+import { AlertDialog, AlertDialogBackdrop, AlertDialogBody, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, Button, Icon } from "./ui";
+import { ArrowDown, ArrowUp, ArrowDownUp, Check, CircleAlert, Cloud, Folder, Package, ShieldCheck, X } from "lucide-react";
+import SpotlightCard from "./react-bits/SpotlightCard";
+import GlideSelect from "./react-bits/GlideSelect";
+import LatticeLoader from "./react-bits/LatticeLoader";
+import SquishSwitch from "./react-bits/SquishSwitch";
 
 const api = window.ual;
 const filename = (file: string) => file.split(/[\\/]/).pop() || file;
@@ -65,7 +69,7 @@ function ResultRow({ row, name, finished, onReveal }: { row: ImportResultRow; na
     pending: finished ? "Not imported" : "Waiting", preparing: "Preparing", downloading: "Downloading", ready: finished ? "Not imported" : "Ready", installing: "Installing", installed: "Installed", failed: "Failed", cancelled: "Not imported",
   };
   return <li className="import-result-row" data-status={row.status}>
-    <span className="import-row-symbol" aria-hidden="true">{active ? <Spinner className="spinner" /> : <Icon as={row.status === "installed" ? Check : row.status === "failed" ? CircleAlert : Package} className="icon" />}</span>
+    <span className="import-row-symbol" aria-hidden="true">{active ? <LatticeLoader label="" decorative cellSize={3} gap={1} /> : <Icon as={row.status === "installed" ? Check : row.status === "failed" ? CircleAlert : Package} className="icon" />}</span>
     <div className="import-package-main">
       <strong>{name}</strong>
       <ArchiveDetails file={row.file} />
@@ -231,17 +235,17 @@ export function ImportDialog({ assets, catalog, job, finalFocusRef, onClose, onS
         <Button type="button" className="icon-button" onPress={onClose} isDisabled={starting} aria-label={running ? "Hide import progress" : "Close dialog"}><Icon as={X} className="icon" aria-hidden="true" /></Button>
       </AlertDialogHeader>
       <AlertDialogBody className="import-body" ref={bodyRef}>
-        <section className="import-project-card" aria-label="Target project">
+        <SpotlightCard className="import-project-card" role="region" aria-label="Target project">
           <div className="import-section-heading"><h3><Icon as={Folder} className="icon" aria-hidden="true" /> Target project</h3>{!job && projectInfo && <Button type="button" className="import-text-button" onPress={() => setEditingProject(!editingProject)} isDisabled={starting}>{editingProject ? "Keep project" : "Change"}</Button>}</div>
           {!job && editingProject ? <div className="import-project-row">
-            <div className="import-project-select">
-            <select className="native-select" value={projectPath} disabled={starting} onChange={(event) => void handleProject(event.target.value)} aria-label="Unity Hub project">
-              <option value="">{projects === null ? "Loading projects…" : "Choose a Unity project…"}</option>
-              {projectPath && !projects?.some((project) => project.path === projectPath) && <option value={projectPath}>{projectInfo?.title || projectPath}</option>}
-              {(projects || []).map((project) => <option key={project.path} value={project.path}>{project.title} · Unity {project.version} · {project.path}</option>)}
-            </select>
-            <Icon as={ChevronDown} className="icon" aria-hidden="true" focusable={false} />
-            </div>
+            <GlideSelect className="import-project-select" value={projectPath} disabled={starting} ariaLabel="Unity Hub project"
+              placeholder={projects === null ? "Loading projects…" : "Choose a Unity project…"}
+              options={[
+                ...(projectPath && !projects?.some(project => project.path === projectPath) ? [{ value: projectPath, label: projectInfo?.title || projectPath }] : []),
+                ...(projects || []).map(project => ({ value: project.path, label: project.title + ' · Unity ' + project.version + ' · ' + project.path })),
+              ]}
+              onChange={value => void handleProject(value)} menuWidth={480}
+            />
             <Button type="button" className="button quiet" onPress={() => void browseProject()} isDisabled={starting}>Browse…</Button>
           </div> : <div className="import-project-info"><strong>{shownProject?.title || filename(shownProjectPath)}</strong>{shownProject?.version && <span>Unity {shownProject.version}</span>}</div>}
           {shownProjectPath && <details className="import-project-path"><summary title={shownProjectPath}>{shownProjectPath}</summary><code>{shownProjectPath}</code></details>}
@@ -250,7 +254,7 @@ export function ImportDialog({ assets, catalog, job, finalFocusRef, onClose, onS
             {projectsError && <p className="import-inline-error" role="alert">{projectsError} <Button className="import-text-button" onPress={() => void loadProjects()}>Retry</Button></p>}
             {inspectError && <p className="import-inline-error" role="alert">{inspectError} {projectPath && <Button className="import-text-button" onPress={() => void inspect(projectPath)}>Retry</Button>}</p>}
           </>}
-        </section>
+        </SpotlightCard>
         {!job ? <>
           <section className="import-section" aria-label="Packages">
             <div className="import-section-heading"><h3>Packages <span className="import-count">{order.length}</span></h3><Button type="button" className="import-text-button" aria-pressed={reordering} onPress={() => setReordering(!reordering)} isDisabled={order.length < 2 || starting}><Icon as={ArrowDownUp} className="icon" aria-hidden="true" />{reordering ? "Done reordering" : "Reorder"}</Button></div>
@@ -264,10 +268,11 @@ export function ImportDialog({ assets, catalog, job, finalFocusRef, onClose, onS
               return <li key={row.id}>
                 <span className="import-package-number" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
                 <div className="import-package-main"><strong>{row.name}</strong>
-                  {versions.length > 1 || !selected ? <select className="native-select import-version-select" value={selected ? row.file : ""} disabled={starting || !versions.length} aria-label={`Archive version for ${row.name}`} onChange={(event) => { const file = event.target.value; setOrder((current) => current.map((item) => item.id === row.id ? { ...item, file } : item)); }}>
-                    <option value="" disabled>{versions.length ? "Choose version…" : "Archive no longer in library"}</option>
-                    {versions.map((version) => <option key={version.file} value={version.file}>{filename(version.file || "")}{version.size_bytes != null ? ` · ${formatBytes(version.size_bytes)}` : ""}{version.editor_version ? ` · Unity ${version.editor_version}` : ""}{version.availability ? ` · ${availabilityLabel(version.availability)}` : ""}</option>)}
-                  </select> : <ArchiveDetails file={row.file} version={selected} />}
+                  {versions.length > 1 || !selected ? <GlideSelect className="import-version-select" value={selected ? row.file : ""} disabled={starting || !versions.length} ariaLabel={'Archive version for ' + row.name}
+                    placeholder={versions.length ? "Choose version…" : "Archive no longer in library"}
+                    options={versions.map(version => ({ value: version.file || '', label: filename(version.file || '') + (version.size_bytes != null ? ' · ' + formatBytes(version.size_bytes) : '') + (version.editor_version ? ' · Unity ' + version.editor_version : '') + (version.availability ? ' · ' + availabilityLabel(version.availability) : '') }))}
+                    onChange={file => setOrder(current => current.map(item => item.id === row.id ? { ...item, file } : item))} menuWidth={480}
+                  /> : <ArchiveDetails file={row.file} version={selected} />}
                   {!selected && row.file && <span className="import-note">Previous archive: {filename(row.file)}</span>}
                 </div>
                 <div className="import-row-actions">
@@ -297,7 +302,7 @@ export function ImportDialog({ assets, catalog, job, finalFocusRef, onClose, onS
         {actionError && <p className="import-inline-error import-action-error" role="alert">{actionError}</p>}
         {!job && <>
           <section className="import-policy" aria-label="Replacement policy">
-            <label className="import-overwrite"><span><Icon as={ShieldCheck} className="icon" aria-hidden="true" /><strong>Replace changed assets</strong></span><input type="checkbox" role="switch" checked={overwrite} disabled={starting} onChange={(event) => setOverwrite(event.target.checked)} /><span className="import-toggle" aria-hidden="true">{overwrite ? "On" : "Off"}</span></label>
+            <label className="import-overwrite"><span><Icon as={ShieldCheck} className="icon" aria-hidden="true" /><strong>Replace changed assets</strong></span><SquishSwitch checked={overwrite} disabled={starting} onChange={setOverwrite} width={40} height={24} radius={12} ariaLabel="Replace changed assets" /><span className="import-toggle" aria-hidden="true">{overwrite ? "On" : "Off"}</span></label>
             <div id="import-safety" className={overwrite ? "import-warning" : "import-save-note"} role="note"><Icon as={CircleAlert} className="icon" aria-hidden="true" /><p>{overwrite && <><strong>Existing assets may be replaced.</strong> Changed files are backed up.<br /></>}Save your Unity changes before importing.</p></div>
           </section>
           <span id="import-blocker" className="import-footer-note" role="status">{blocker || "Ready to import"}</span><Button ref={firstButtonRef} type="button" className="button quiet" onPress={onClose} isDisabled={starting}>Cancel</Button><Button type="button" className="button primary" onPress={() => void start()} isDisabled={!canStart} aria-describedby="import-blocker import-safety">{starting ? "Starting…" : `Import ${order.length} package${order.length === 1 ? "" : "s"}`}</Button>

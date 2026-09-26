@@ -1,0 +1,21 @@
+/* React Bits Spotlight Card (MIT + Commons Clause), David Haz.
+ * Source revision 5c73f3d065d4c074ae3c5fa66b4918e07fc999fa:
+ * https://github.com/DavidHDev/react-bits/tree/5c73f3d065d4c074ae3c5fa66b4918e07fc999fa/src/ts-default/Components/SpotlightCard
+ * Full notice: ./LICENSE; distributed copy: app/public/react-bits-LICENSE.txt.
+ * Host owns shape, color and layout; no transform or focus clipping.
+ */
+.spotlight-card { position: relative; --mouse-x: 50%; --mouse-y: 50%; }
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .spotlight-card:not(.spotlight-card-disabled)::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    border-radius: inherit;
+    background: radial-gradient(circle at var(--mouse-x) var(--mouse-y), var(--spotlight-color), transparent 80%);
+    opacity: 0;
+    transition: opacity 160ms ease;
+    pointer-events: none;
+  }
+  .spotlight-card:hover::before { opacity: 1; }
+}

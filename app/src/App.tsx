@@ -21,20 +21,13 @@ import {
   InputField,
   Popover,
   PopoverContent,
-  Select,
-  SelectContent,
-  SelectIcon,
-  SelectItem,
-  SelectPortal,
-  SelectInput,
-  SelectTrigger,
-  Spinner,
+
 } from "./components/ui";
 import {
   ArrowLeft,
   ArrowRight,
   ChevronDown,
-  ChevronRight,
+
   CircleSlash,
   CircleCheck,
   CircleAlert,
@@ -57,6 +50,12 @@ import {
   X,
 } from "lucide-react";
 import { ImportDialog, availabilityLabel, availabilitySummary, unityPackages } from "./components/ImportDialog";
+import SpotlightCard from "./components/react-bits/SpotlightCard";
+import GlideSelect from "./components/react-bits/GlideSelect";
+import LatticeLoader from "./components/react-bits/LatticeLoader";
+import BranchedMenu, { type BranchedMenuItem } from "./components/react-bits/BranchedMenu";
+import RubberSegment from "./components/react-bits/RubberSegment";
+import SpringCheck from "./components/react-bits/SpringCheck";
 
 type QuickFilter = "all" | "favorites" | "pending" | "flagged" | "non-store";
 type ViewMode = "grid" | "list";
@@ -193,76 +192,12 @@ type CategoryNode = {
   children: Map<string, CategoryNode>;
 };
 
-function CategoryBranch({
-  node,
-  selected,
-  onSelect,
-}: {
-  node: CategoryNode;
-  selected: string;
-  onSelect: (path: string) => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const hasChildren = node.children.size > 0;
-  return (
-    <li>
-      <div className={`category-row ${selected === node.path ? "active" : ""}`}>
-        {hasChildren ? (
-          <Button
-            type="button"
-            className="category-toggle"
-            aria-label={`${expanded ? "Collapse" : "Expand"} ${node.path}`}
-            aria-expanded={expanded}
-            onPress={() => setExpanded(!expanded)}
-          >
-            <Icon
-              as={expanded ? ChevronDown : ChevronRight}
-              className="icon"
-              aria-hidden="true"
-              focusable={false}
-            />
-          </Button>
-        ) : (
-          <span className="category-toggle-space" />
-        )}
-        <Button
-          type="button"
-          className={`nav-row ${selected === node.path ? "active" : ""}`}
-          title={node.path}
-          aria-current={selected === node.path ? "true" : undefined}
-          onPress={() => {
-            onSelect(node.path);
-            if (hasChildren) setExpanded(true);
-          }}
-        >
-          <span className="category-name">
-            <Icon
-              as={Folder}
-              className="icon"
-              aria-hidden="true"
-              focusable={false}
-            />
-            <span>{node.name}</span>
-          </span>
-          <span className="nav-count">{node.count}</span>
-        </Button>
-      </div>
-      {hasChildren && (
-        <ul hidden={!expanded}>
-          {[...node.children.values()]
-            .sort((a, b) => a.name.localeCompare(b.name))
-            .map((child) => (
-              <CategoryBranch
-                key={child.path}
-                node={child}
-                selected={selected}
-                onSelect={onSelect}
-              />
-            ))}
-        </ul>
-      )}
-    </li>
-  );
+function categoryMenuItems(nodes: Map<string, CategoryNode>): BranchedMenuItem[] {
+  return [...nodes.values()].sort((a, b) => a.name.localeCompare(b.name)).map(node => ({
+    value: node.path, label: node.name, count: node.count,
+    icon: <Folder className="icon" aria-hidden="true" />,
+    children: node.children.size ? categoryMenuItems(node.children) : undefined,
+  }));
 }
 type ProgressProps = {
   job: ProgressSnapshot & { id: string; status: string; kind?: string; phase?: string; remaining?: number | null; error?: string | null; error_code?: string | null; result?: ActionResult | null };
@@ -336,7 +271,7 @@ function ActionProgress({ job, onDismiss, announce = true, compact = false, onRe
       <Button type="button" className="task-indicator" data-status={job.status} aria-label={`${title}: ${outcome}${!terminal && percent !== undefined ? `, ${percent}%` : ""}. Show details`} aria-expanded={detailsOpen} aria-controls={`task-details-${job.id}`} onPress={() => setDetailsOpen(true)}>
         <Icon as={job.status === "failed" || incompleteEnrichment ? CircleAlert : job.status === "completed" ? CircleCheck : job.status === "cancelled" ? CircleSlash : job.kind === "enrich" ? Sparkles : job.kind === "import" ? Package : RefreshCw} className="icon" aria-hidden="true" />
         <span className="task-label">{actionLabel}</span>
-        {!terminal && (percent === undefined ? <Spinner className="spinner task-spinner" aria-hidden="true" /> : <span className="task-percent">{percent}%</span>)}
+        {!terminal && (percent === undefined ? <LatticeLoader label="" decorative cellSize={3} gap={1} /> : <span className="task-percent">{percent}%</span>)}
       </Button>
       <div className="task-details" id={`task-details-${job.id}`} hidden={!detailsOpen}>{panel}</div>
     </div>
@@ -385,7 +320,7 @@ function StorageScreen({
 }) {
   const [pathTouched, setPathTouched] = useState(false);
   if (mode === "loading") {
-    return <div className="storage-shell"><div className="storage-loading"><div><Spinner className="spinner" aria-label="Loading storage configuration" /><span>Checking your library…</span>{storage?.busy && <StorageProgress progress={storage.progress} />}</div></div></div>;
+    return <div className="storage-shell"><div className="storage-loading"><div><LatticeLoader label="Checking your library…" cellSize={5} />{storage?.busy && <StorageProgress progress={storage.progress} />}</div></div></div>;
   }
   const onboarding = mode === "onboarding";
   const pathError = pathTouched && !path.trim() ? "Choose a library folder to continue." : "";
@@ -401,7 +336,7 @@ function StorageScreen({
         {storage?.ready && <Button type="button" className="button quiet" onPress={onCancel} isDisabled={busy}><Icon as={ArrowLeft} className="icon" aria-hidden="true" focusable={false} />Back to library</Button>}
       </header>
       <main className="storage-main">
-        <section className="storage-card" aria-labelledby="storage-heading">
+        <SpotlightCard className="storage-card" role="region" aria-labelledby="storage-heading">
           <div className="storage-kicker">{onboarding ? "WELCOME" : "LIBRARY SETTINGS"}</div>
           <h2 id="storage-heading">{onboarding ? "Where should Asset Library look?" : "Library location"}</h2>
           <p className="storage-lead">{onboarding ? "Choose a folder containing your Unity asset packages. We’ll scan packages and subfolders, then keep the index up to date." : "Change the folder used for your asset index. The current library stays untouched until the new folder is ready."}</p>
@@ -419,7 +354,7 @@ function StorageScreen({
             {displayedError && !busy && <Button type="button" className="button quiet" onPress={storage?.ready ? handleSave : onRetry} isDisabled={blocked}>Retry</Button>}
             <Button type="button" className="button primary" onPress={handleSave} isDisabled={busy || blocked || !path.trim()}>{busy ? "Saving…" : saveLabel}<Icon as={ArrowRight} className="icon" aria-hidden="true" focusable={false} /></Button>
           </div>
-        </section>
+        </SpotlightCard>
         <p className="storage-footnote">{onboarding ? "You can change this later from Settings." : storage?.path ? <>Current folder: <code title={storage.path}>{storage.path}</code></> : "No library folder is configured."}</p>
       </main>
     </div>
@@ -449,7 +384,7 @@ function PortRecoveryScreen({ request, onStorage }: { request: PortRecovery; onS
   return <div className="storage-shell port-recovery">
     <header className="storage-topbar"><div className="brand"><img className="brand-mark" src={appIcon} alt="" draggable={false} /><div><div className="eyebrow">UNITY ASSET LIBRARY</div><h1>Open your library</h1></div></div></header>
     <main className="storage-main">
-      <section className="storage-card" aria-labelledby="port-heading" aria-busy={busy}>
+      <SpotlightCard className="storage-card" role="region" aria-labelledby="port-heading" aria-busy={busy}>
         <h2 id="port-heading" ref={heading} tabIndex={-1}>{request.confirm ? `Stop ${processName}?` : `Port ${request.port} is busy`}</h2>
         <p className="storage-lead">{request.confirm ? <>Stopping <strong>{processName}</strong> will free this port for Asset Library. It may interrupt another app or lose unsaved work.</> : <>Another app is using this port. Use a different one to open your library without interrupting it.</>}</p>
         {request.owner ? <dl className="port-process"><div><dt>Process</dt><dd>{processName}</dd></div><div><dt>Process ID</dt><dd>{request.owner.pid}</dd></div><div><dt>Port</dt><dd>{request.port}</dd></div></dl> : <p className="storage-help">We couldn’t identify the app, so stopping it here isn’t available.</p>}
@@ -465,7 +400,7 @@ function PortRecoveryScreen({ request, onStorage }: { request: PortRecovery; onS
           <Button type="button" className="button quiet" onPress={() => void answer({ action: "cancel" })} isDisabled={busy}>{request.confirm ? "Keep it running" : "Cancel"}</Button>
           {request.owner && <Button type="button" className="button" onPress={() => void answer({ action: request.confirm ? "confirm-stop" : "stop" })} isDisabled={busy}>{request.confirm ? "Stop and continue" : "Review stop option"}</Button>}
         </div>
-      </section>
+      </SpotlightCard>
     </main>
   </div>;
 }
@@ -943,6 +878,7 @@ function App() {
     }
     return roots;
   }, [assets]);
+  const categoryItems = useMemo(() => categoryMenuItems(categoryTree), [categoryTree]);
   const favoriteSet = useMemo(() => new Set(favorites), [favorites]);
   const importAssets = useMemo<Asset[]>(
     () => [...importSelection].map((key) => assets.find((asset) => asset.asset_key === key)).filter((asset): asset is Asset => Boolean(asset)),
@@ -1456,55 +1392,22 @@ function App() {
         <aside className="sidebar" id="library-navigation" aria-label="Library navigation">
           <section className="side-section">
             <div className="section-label">Library</div>
-            {(
-              [
-                ["all", "All assets", assets.length],
-                ["favorites", "Favorites", favoriteCount],
-                ["pending", "Needs enrichment", pendingCount],
-                ["flagged", "Flagged", flaggedCount],
-                [
-                  "non-store",
-                  "Local only",
-                  assets.filter((asset) => asset.non_store).length,
-                ],
-              ] as const
-            ).map(([key, label, count]) => (
-              <Button
-                type="button"
-                key={key}
-                className={`nav-row ${quick === key ? "active" : ""}`}
-                aria-pressed={quick === key}
-                onPress={() => setQuick(key)}
-              >
-                <span>{label}</span>
-                <span className="nav-count">{count}</span>
-              </Button>
-            ))}
+            <BranchedMenu className="branched-menu-flat" ariaLabel="Library filters" selectedValues={[quick]} multi onSelect={value => setQuick(value as QuickFilter)} items={[
+              { value: 'all', label: 'All assets', count: assets.length, icon: <LayoutGrid className="icon" /> },
+              { value: 'favorites', label: 'Favorites', count: favoriteCount, icon: <Star className="icon" /> },
+              { value: 'pending', label: 'Needs enrichment', count: pendingCount, icon: <Sparkles className="icon" /> },
+              { value: 'flagged', label: 'Flagged', count: flaggedCount, icon: <CircleAlert className="icon" /> },
+              { value: 'non-store', label: 'Local only', count: assets.filter(asset => asset.non_store).length, icon: <Folder className="icon" /> },
+            ]} />
           </section>
           <section className="side-section categories">
             <div className="section-label">
               Categories <span>{categoryTree.size}</span>
             </div>
-            <Button
-              type="button"
-              className={`nav-row ${category === "All assets" ? "active" : ""}`}
-              onPress={() => setCategory("All assets")}
-            >
-              <span>All categories</span>
-              <span className="nav-count">{assets.length}</span>
-            </Button>
-            <ul className="category-tree">
-              {[...categoryTree.values()]
-                .sort((a, b) => a.name.localeCompare(b.name))
-                .map((node) => (
-                  <CategoryBranch
-                    key={node.path}
-                    node={node}
-                    selected={category}
-                    onSelect={(path) => { setCategory(path); setNavigationOpen(false); }}
-                  />
-                ))}
-            </ul>
+            <BranchedMenu className="category-tree" ariaLabel="Category filters" selectedValues={[category]}
+              items={[{ value: 'All assets', label: 'All categories', count: assets.length }, ...categoryItems]}
+              onSelect={path => { setCategory(path); setNavigationOpen(false); }}
+            />
           </section>
           <section className="side-section tags">
             <div className="section-label">
@@ -1514,38 +1417,18 @@ function App() {
             {!userTags && !tagError && <p className="tag-note">Tags are unavailable right now.</p>}
             {userTags && (
               <>
-                <Button
-                  type="button"
-                  className={`nav-row ${untagged ? "active" : ""}`}
-                  aria-pressed={untagged}
-                  onPress={() => setUntagged(!untagged)}
-                >
-                  <span>Untagged</span>
-                  <span className="nav-count">{untaggedCount}</span>
-                </Button>
-                {[...tagCounts.entries()]
-                  .sort((a, b) => a[0].localeCompare(b[0]))
-                  .map(([tag, count]) => (
-                    <Button
-                      type="button"
-                      key={tag}
-                      className={`nav-row ${selectedTags.includes(tag) ? "active" : ""}`}
-                      aria-pressed={selectedTags.includes(tag)}
-                      onPress={() =>
-                        setSelectedTags((current) =>
-                          current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag],
-                        )
-                      }
-                    >
-                      <span>{tag}</span>
-                      <span className="nav-count">{count}</span>
-                    </Button>
-                  ))}
+                <BranchedMenu className="branched-menu-flat" ariaLabel="Tag filters" multi selectedValues={[...(untagged ? ['untagged:'] : []), ...selectedTags.map(tag => 'tag:' + tag)]}
+                  items={[{ value: 'untagged:', label: 'Untagged', count: untaggedCount }, ...[...tagCounts.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([tag, count]) => ({ value: 'tag:' + tag, label: tag, count }))]}
+                  onSelect={value => {
+                    if (value === 'untagged:') setUntagged(!untagged);
+                    else { const tag = value.slice(4); setSelectedTags(current => current.includes(tag) ? current.filter(item => item !== tag) : [...current, tag]); }
+                  }}
+                />
                 {selectedTags.length > 1 && (
-                  <div className="tag-mode-toggle" role="group" aria-label="Match selected tags">
-                    <Button type="button" className={tagMode === "all" ? "selected" : ""} aria-pressed={tagMode === "all"} onPress={() => setTagMode("all")}>Match all</Button>
-                    <Button type="button" className={tagMode === "any" ? "selected" : ""} aria-pressed={tagMode === "any"} onPress={() => setTagMode("any")}>Match any</Button>
-                  </div>
+                  <RubberSegment className="tag-mode-toggle" aria-label="Match selected tags" size="sm" value={tagMode} draggable={false}
+                    items={[{ value: 'all', label: 'Match all' }, { value: 'any', label: 'Match any' }]}
+                    onChange={value => setTagMode(value as 'all' | 'any')}
+                  />
                 )}
                 <TagManager
                   tags={userTags.tags}
@@ -1578,103 +1461,24 @@ function App() {
               </p>
             </div>
             <div className="view-controls">
-              <Button
-                type="button"
-                className={`icon-button ${view === "grid" ? "selected" : ""}`}
-                onPress={() => setView("grid")}
-                aria-label="Grid view"
-                aria-pressed={view === "grid"}
-                title="Grid view"
-              >
-                <Icon
-                  as={LayoutGrid}
-                  className="icon"
-                  aria-hidden="true"
-                  focusable={false}
-                />
-              </Button>
-              <Button
-                type="button"
-                className={`icon-button ${view === "list" ? "selected" : ""}`}
-                onPress={() => setView("list")}
-                aria-label="List view"
-                aria-pressed={view === "list"}
-                title="List view"
-              >
-                <Icon
-                  as={List}
-                  className="icon"
-                  aria-hidden="true"
-                  focusable={false}
-                />
-              </Button>
-              <Select
-                className="sort-control"
-                selectedValue={author ? `author:${author}` : "all"}
-                initialLabel={author || "All authors"}
-                onValueChange={(value: string) => setAuthor(value === "all" ? "" : value.slice(7))}
-              >
-                <SelectTrigger className="sort-trigger">
-                  <SelectInput className="sort-input" placeholder="Filter by author" aria-label="Filter by author" />
-                  <SelectIcon>
-                    <Icon as={ChevronDown} className="icon" aria-hidden="true" focusable={false} />
-                  </SelectIcon>
-                </SelectTrigger>
-                <SelectPortal>
-                  <SelectContent className="sort-menu">
-                    <SelectItem value="all" label="All authors" className="sort-option" />
-                    {authors.map((name) => (
-                      <SelectItem key={name} value={`author:${name}`} label={name} className="sort-option" />
-                    ))}
-                  </SelectContent>
-                </SelectPortal>
-              </Select>
-              <Select
-                className="sort-control"
-                selectedValue={sort}
-                initialLabel={
-                  sort === "author"
-                    ? "Author"
-                    : sort === "size"
-                      ? "Size"
-                      : "Name"
-                }
-                onValueChange={(value: string) => setSort(value as SortMode)}
-              >
-                <SelectTrigger className="sort-trigger">
-                  <SelectInput
-                    className="sort-input"
-                    placeholder="Sort assets"
-                  />
-                  <SelectIcon>
-                    <Icon
-                      as={ChevronDown}
-                      className="icon"
-                      aria-hidden="true"
-                      focusable={false}
-                    />
-                  </SelectIcon>
-                </SelectTrigger>
-                <SelectPortal>
-                  <SelectContent className="sort-menu">
-                    <SelectItem
-                      value="name"
-                      label="Name"
-                      className="sort-option"
-                    />
-                    <SelectItem
-                      value="author"
-                      label="Author"
-                      className="sort-option"
-                    />
-                    <SelectItem
-                      value="size"
-                      label="Size"
-                      className="sort-option"
-                    />
-                  </SelectContent>
-                </SelectPortal>
-              </Select>
+              <RubberSegment aria-label="Asset view" size="sm" value={view} draggable={false}
+                items={[
+                  { value: 'grid', label: <LayoutGrid className="icon" aria-hidden="true" />, ariaLabel: 'Grid view', title: 'Grid view' },
+                  { value: 'list', label: <List className="icon" aria-hidden="true" />, ariaLabel: 'List view', title: 'List view' },
+                ]}
+                onChange={value => setView(value as ViewMode)}
+              />
+              <GlideSelect
+                className="sort-control" ariaLabel="Filter by author"
+                value={author ? 'author:' + author : 'all'}
+                options={[{ value: 'all', label: 'All authors' }, ...authors.map(name => ({ value: 'author:' + name, label: name }))]}
+                onChange={value => setAuthor(value === 'all' ? '' : value.slice(7))}
+              />
+              <GlideSelect
+                className="sort-control" ariaLabel="Sort assets" value={sort}
+                options={[{ value: 'name', label: 'Name' }, { value: 'author', label: 'Author' }, { value: 'size', label: 'Size' }]}
+                onChange={value => setSort(value as SortMode)} align="right"
+              />
             </div>
           </div>
           <div className="browser-actions">
@@ -1713,11 +1517,12 @@ function App() {
             <div className={view === "grid" ? "asset-grid" : "asset-list"}>
               {view === "list" && <div className="list-heading" aria-hidden="true"><span>Asset</span><span>Author</span><span>Category</span><span>Version</span><span /></div>}
               {filtered.map((asset) => (
-                <div className="asset-cell" key={asset.asset_key}>
+                <SpotlightCard className="asset-cell" key={asset.asset_key} enabled={view === "grid"}>
                   {unityPackages(asset).length > 0 && (
-                    <label className="import-check">
-                      <input type="checkbox" checked={importSelection.has(asset.asset_key)} onChange={(event) => selectAsset(asset, event.nativeEvent as MouseEvent, true)} disabled={importActive} aria-label={`Select ${asset.name} for import`} />
-                    </label>
+                    <SpringCheck className="import-check" boxSize={20} boxRadius={5} strike="none"
+                      checked={importSelection.has(asset.asset_key)} onChange={(_, event) => selectAsset(asset, event.nativeEvent as MouseEvent, true)}
+                      disabled={importActive} ariaLabel={'Select ' + asset.name + ' for import'}
+                    />
                   )}
                   <AssetCard
                     asset={asset}
@@ -1732,7 +1537,7 @@ function App() {
                     pending={favPending.has(asset.asset_key)}
                     onToggle={toggleFavorite}
                   />
-                </div>
+                </SpotlightCard>
               ))}
             </div>
           ) : (
@@ -2444,7 +2249,7 @@ function TagManager({
   const deleteCount = deleteTarget ? counts.get(deleteTarget) || 0 : 0;
   return (
     <div className="tag-manage">
-      <Button type="button" className="nav-row" aria-expanded={open} onPress={() => setOpen(!open)}>
+      <Button type="button" className="button quiet" aria-expanded={open} onPress={() => setOpen(!open)}>
         <span>Manage tags</span>
       </Button>
       {open && (

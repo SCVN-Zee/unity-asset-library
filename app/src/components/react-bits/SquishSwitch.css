@@ -1,0 +1,99 @@
+/* React Bits SquishSwitch styles (MIT + Commons Clause), upstream revision
+ * 5c73f3d065d4c074ae3c5fa66b4918e07fc999fa:
+ * https://github.com/DavidHDev/react-bits/blob/5c73f3d065d4c074ae3c5fa66b4918e07fc999fa/src/ts-default/Micro/SquishSwitch/SquishSwitch.css
+ * Local changes: native checkbox input with role="switch" overlays the visual
+ * track and owns the focus ring; default colors come from the app theme via
+ * light-dark(); calmer disabled/hover styling.
+ */
+.squish-switch-root {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.squish-switch {
+  --ss-w: 64px;
+  --ss-h: 32px;
+  --ss-inset: 4px;
+  --ss-thumb: 24px;
+  --ss-r: 16px;
+  --ss-thumb-r: 12px;
+  --ss-track: light-dark(#d8d5d0, #3a3f43);
+  --ss-track-on: var(--accent);
+  --ss-thumb-color: light-dark(#ffffff, #c9cfc9);
+  --ss-thumb-on: var(--on-accent);
+  --ss-fade: 320ms;
+
+  position: relative;
+  display: inline-block;
+  touch-action: pan-y;
+}
+
+.squish-switch__input {
+  position: absolute;
+  inset: -8px;
+  width: calc(100% + 16px);
+  height: calc(100% + 16px);
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.squish-switch__input:disabled {
+  cursor: not-allowed;
+}
+
+.squish-switch__input:focus-visible {
+  outline: none;
+}
+
+.squish-switch:has(.squish-switch__input:focus-visible) .squish-switch__track {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.squish-switch:has(.squish-switch__input:disabled) {
+  opacity: 0.5;
+}
+
+.squish-switch__track {
+  position: relative;
+  display: block;
+  width: var(--ss-w);
+  height: var(--ss-h);
+  border-radius: var(--ss-r);
+  background: var(--ss-track);
+  transition: background-color var(--ss-fade) ease;
+}
+
+.squish-switch[data-on] .squish-switch__track {
+  background: var(--ss-track-on);
+}
+
+.squish-switch__thumb {
+  position: absolute;
+  top: var(--ss-inset);
+  left: 0;
+  width: var(--ss-thumb);
+  height: var(--ss-thumb);
+  border-radius: var(--ss-thumb-r);
+  background: var(--ss-thumb-color);
+  transition: background-color var(--ss-fade) ease;
+}
+
+.squish-switch[data-on] .squish-switch__thumb {
+  background: var(--ss-thumb-on);
+}
+
+.squish-switch__label {
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .squish-switch__track,
+  .squish-switch__thumb {
+    transition-duration: 1ms;
+  }
+}

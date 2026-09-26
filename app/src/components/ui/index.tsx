@@ -18,9 +18,7 @@ import { createInput } from "@gluestack-ui/core/input/creator";
 import { UIIcon } from "@gluestack-ui/core/icon/creator";
 import type { LucideIcon, LucideProps } from "lucide-react";
 import { createPopover } from "@gluestack-ui/core/popover/creator";
-import { createSelect } from "@gluestack-ui/core/select/creator";
-// The v4 package omits the public spinner entry point.
-import { createSpinner } from "@gluestack-ui/core/lib/esm/spinner/creator";
+
 export { OverlayProvider } from "@gluestack-ui/core/overlay/creator";
 
 export const Icon = UIIcon as unknown as Component<
@@ -183,39 +181,7 @@ const InputHost = forwardRef<HTMLInputElement, HostProps>((props, ref) => (
     }}
   />
 ));
-// The core Select's native <select> is the accessible, interactive web control.
-// Its Trigger/Input are only the visual layer underneath that control.
-const SelectTriggerHost = forwardRef<HTMLDivElement, HostProps>(
-  (props, ref) => (
-    <div
-      {...domProps(props)}
-      ref={ref}
-      role="presentation"
-      aria-hidden="true"
-    />
-  ),
-);
-const SelectInputHost = forwardRef<HTMLInputElement, HostProps>(
-  (props, ref) => (
-    <input
-      {...domProps(props)}
-      ref={ref}
-      readOnly
-      aria-hidden="true"
-      tabIndex={-1}
-    />
-  ),
-);
-const OptionHost = forwardRef<HTMLOptionElement, HostProps>((props, ref) => (
-  <option
-    ref={ref}
-    value={props.value}
-    disabled={props.isDisabled}
-    className={props.className}
-  >
-    {props.label ?? props.children}
-  </option>
-));
+
 
 type Component<Element, Props> = ForwardRefExoticComponent<
   Props & RefAttributes<Element>
@@ -234,12 +200,7 @@ type InputProps = PartProps & {
 type InputFieldProps = ComponentPropsWithoutRef<"input"> & {
   onChangeText?: (text: string) => void;
 };
-type SelectProps = PartProps & {
-  selectedValue?: string;
-  initialLabel?: string;
-  onValueChange?: (value: string) => void;
-  isDisabled?: boolean;
-};
+
 type OverlayProps = PartProps & {
   isOpen?: boolean;
   onClose?: () => void;
@@ -283,56 +244,7 @@ export const InputField = CoreInput.Input as unknown as Component<
   InputFieldProps
 >;
 
-const CoreSelect = createSelect(
-  {
-    Root: ViewHost,
-    Trigger: SelectTriggerHost,
-    Input: SelectInputHost,
-    Icon: IconHost,
-  },
-  {
-    Portal: ViewHost,
-    Backdrop: ViewHost,
-    Content: ViewHost,
-    DragIndicator: ViewHost,
-    DragIndicatorWrapper: ViewHost,
-    Item: OptionHost,
-    ItemText: TextHost,
-    ScrollView: ViewHost,
-    VirtualizedList: ViewHost,
-    FlatList: ViewHost,
-    SectionList: ViewHost,
-    SectionHeaderText: TextHost,
-  },
-);
-export const Select = CoreSelect as unknown as Component<
-  HTMLDivElement,
-  SelectProps
->;
-export const SelectTrigger = CoreSelect.Trigger as unknown as Component<
-  HTMLDivElement,
-  PartProps
->;
-export const SelectInput = CoreSelect.Input as unknown as Component<
-  HTMLInputElement,
-  ComponentPropsWithoutRef<"input">
->;
-export const SelectIcon = CoreSelect.Icon as unknown as Component<
-  HTMLSpanElement,
-  HTMLAttributes<HTMLSpanElement>
->;
-export const SelectPortal = CoreSelect.Portal as unknown as Component<
-  HTMLSelectElement,
-  { children?: ReactNode }
->;
-export const SelectContent = CoreSelect.Content as unknown as Component<
-  HTMLDivElement,
-  PartProps
->;
-export const SelectItem = CoreSelect.Item as unknown as Component<
-  HTMLOptionElement,
-  { value: string; label: string; isDisabled?: boolean; className?: string }
->;
+
 
 const CorePopover = createPopover({
   Root: ViewHost,
@@ -391,6 +303,3 @@ export const Alert = createAlert({
   Text: TextHost,
   Icon: IconHost,
 }) as unknown as Component<HTMLDivElement, PartProps>;
-export const Spinner = createSpinner({
-  Root: SpinnerHost,
-}) as unknown as Component<HTMLSpanElement, HTMLAttributes<HTMLSpanElement>>;

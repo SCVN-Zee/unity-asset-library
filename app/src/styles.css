@@ -1136,7 +1136,8 @@ button:disabled, input:disabled, select:disabled {
 .import-check { position: absolute; top: 10px; left: 10px; z-index: 2; display: grid; place-items: center; width: 32px; height: 32px; min-height: 32px; background: var(--panel); border-radius: 7px; }
 .import-check .spring-check__input { width: 32px; height: 32px; }
 .asset-list .asset-cell .import-check { top: 50%; left: 6px; transform: translateY(-50%); }
-
+/* Reserve the checkbox hit area plus a gap, including rows without packages. */
+.asset-list .list-row, .asset-list .list-heading { padding-left: 50px; }
 .import-dialog { max-width: 760px; width: 100%; max-height: calc(100dvh - 48px); padding: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--panel); border-radius: var(--radius-dialog); }
 .import-dialog .dialog-top { padding: 24px; flex-shrink: 0; margin: 0; border-bottom: 1px solid var(--line-soft); align-items: center; }
 .import-heading { display: flex; gap: 14px; align-items: center; min-width: 0; }

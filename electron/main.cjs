@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, screen, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -740,7 +740,7 @@ function createWindow() {
   const window = new BrowserWindow({
     width: 1224,
     height: 918,
-    center: true,
+    show: false,
     minWidth: 980,
     minHeight: 680,
     backgroundColor: "#111214",
@@ -754,6 +754,14 @@ function createWindow() {
       sandbox: true,
     },
   });
+  const bounds = window.getBounds();
+  // Exclude the menu bar/notch and Dock from startup centering.
+  const { workArea } = screen.getDisplayMatching(bounds);
+  window.setPosition(
+    workArea.x + Math.max(0, Math.floor((workArea.width - bounds.width) / 2)),
+    workArea.y + Math.max(0, Math.floor((workArea.height - bounds.height) / 2)),
+  );
+  window.once("ready-to-show", () => window.show());
   window.on("close", (event) => {
     if (!quitReady && importActive()) {
       event.preventDefault();

@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type RefObject,
 } from "react";
 import {
@@ -45,6 +46,7 @@ import {
   RefreshCw,
   Search,
   Settings,
+  Keyboard,
   Sparkles,
   Star,
   X,
@@ -67,6 +69,11 @@ type DialogState = {
 } | null;
 
 const api = window.ual;
+const shortcutModifier = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
+
+function isTextEditing(target: EventTarget | null) {
+  return target instanceof HTMLElement && (target.isContentEditable || Boolean(target.closest("input:not([type=checkbox]):not([type=radio]), textarea, select, [role=combobox], [role=textbox]")));
+}
 
 function formatBytes(bytes: number) {
   if (!bytes) return "0 B";
@@ -434,11 +441,22 @@ function App() {
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [theme, setTheme] = useState<"system" | "light" | "dark">("system");
   const searchRef = useRef<HTMLInputElement>(null);
+  const browserRef = useRef<HTMLElement>(null);
+  const [focusedAssetKey, setFocusedAssetKey] = useState<string | null>(null);
+  const inspectorReturnRef = useRef<HTMLElement | null>(null);
+  const settingsReturnRef = useRef<HTMLElement | null>(null);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const shortcutReturnRef = useRef<HTMLElement>(null);
+  const shortcutCloseRef = useRef<HTMLButtonElement>(null);
   const detailsCloseRef = useRef<HTMLButtonElement>(null);
   const inspectorWasOpen = useRef(inspectorOpen);
   useEffect(() => {
     if (inspectorOpen && window.innerWidth < 768) detailsCloseRef.current?.focus();
-    else if (!inspectorOpen && inspectorWasOpen.current) searchRef.current?.focus();
+    else if (!inspectorOpen && inspectorWasOpen.current) {
+      const target = inspectorReturnRef.current;
+      if (target?.isConnected) target.focus();
+      else searchRef.current?.focus();
+    }
     inspectorWasOpen.current = inspectorOpen;
   }, [inspectorOpen]);
   useEffect(() => {
@@ -458,18 +476,8 @@ function App() {
   }, [query, category, quick, author, sort, selectedTags, tagMode, untagged, storageEpoch]);
   const [importOpen, setImportOpen] = useState(false);
   const [importJob, setImportJob] = useState<ImportJob | null>(null);
-  const importTriggerRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (storageView !== "library" || dialog || actionsOpen) return;
-    const focusSearch = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        searchRef.current?.focus();
-      }
-    };
-    document.addEventListener("keydown", focusSearch);
-    return () => document.removeEventListener("keydown", focusSearch);
-  }, [storageView, dialog, actionsOpen]);
+  const importReturnRef = useRef<HTMLElement>(null);
+
   const actionTriggerRef = useRef<HTMLButtonElement>(null);
   const actionRequestRef = useRef(false);
   const uiRefreshRef = useRef(false);
@@ -677,10 +685,15 @@ function App() {
   }
   function selectAsset(asset: Asset, { metaKey, shiftKey }: { metaKey: boolean; shiftKey: boolean }, checkbox = false) {
     setSelectedKey(asset.asset_key);
-    if (!checkbox && !metaKey && !shiftKey) setInspectorOpen(true);
-    if (importActive || unityPackages(asset).length === 0) return;
+    setFocusedAssetKey(asset.asset_key);
+    if (!checkbox && !metaKey && !shiftKey) {
+      inspectorReturnRef.current = document.activeElement as HTMLElement;
+      setInspectorOpen(true);
+    }
+    if (importActive) return;
     const index = filtered.findIndex((item) => item.asset_key === asset.asset_key);
     const anchor = filtered.findIndex((item) => item.asset_key === selectionAnchor.current);
+    if (unityPackages(asset).length === 0 && (!shiftKey || anchor < 0)) return;
     if (!shiftKey || anchor < 0) selectionAnchor.current = asset.asset_key;
     setImportSelection((current) => {
       if (shiftKey && anchor >= 0) {
@@ -973,6 +986,133 @@ function App() {
     }
     return { selectable, selected, hidden: importSelection.size - selected };
   }, [filtered, importSelection]);
+  const tabStopKey = filtered.some(asset => asset.asset_key === focusedAssetKey) ? focusedAssetKey : filtered[0]?.asset_key;
+  function clearSelection() {
+    selectionAnchor.current = null;
+    setImportSelection(new Set());
+  }
+  function openSettings() {
+    if (storageBusy) return;
+    settingsReturnRef.current = document.activeElement as HTMLElement;
+    setStoragePath(storage?.path || "");
+    setStorageError("");
+    setStorageView("settings");
+  }
+  function openShortcutHelp() {
+    shortcutReturnRef.current = document.activeElement as HTMLElement;
+    setShortcutsOpen(true);
+  }
+  function openImportReview() {
+    importReturnRef.current = document.activeElement as HTMLElement;
+    setImportOpen(true);
+  }
+  const importWasOpen = useRef(importOpen);
+  const shortcutsWereOpen = useRef(shortcutsOpen);
+  useEffect(() => {
+    const target = importWasOpen.current && !importOpen ? importReturnRef.current
+      : shortcutsWereOpen.current && !shortcutsOpen ? shortcutReturnRef.current : null;
+    importWasOpen.current = importOpen;
+    shortcutsWereOpen.current = shortcutsOpen;
+    if (!target) return;
+    const frame = requestAnimationFrame(() => { if (target.isConnected) target.focus(); else searchRef.current?.focus(); });
+    return () => cancelAnimationFrame(frame);
+  }, [importOpen, shortcutsOpen]);
+  useEffect(() => {
+    if (storageView === "settings") document.getElementById("storage-path")?.focus();
+    else if (storageView === "library" && settingsReturnRef.current) {
+      searchRef.current?.focus();
+      settingsReturnRef.current = null;
+    }
+  }, [storageView]);
+  useEffect(() => {
+    if (focusedAssetKey && !filtered.some(asset => asset.asset_key === focusedAssetKey) && document.activeElement === document.body) {
+      browserRef.current?.querySelector<HTMLElement>("[data-asset-key][tabindex='0']")?.focus();
+    }
+  }, [filtered, focusedAssetKey]);
+  useEffect(() => {
+    if (storageView !== "library" || storage?.portRecovery || dialog || actionsOpen || importOpen || shortcutsOpen) return;
+    const onShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.altKey || event.repeat) return;
+      if (document.querySelector("[role=dialog], [role=alertdialog], [role=listbox], [role=menu]")) return;
+      const key = event.key.toLowerCase();
+      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && key === "k") {
+        event.preventDefault();
+        searchRef.current?.focus();
+      } else if (!isTextEditing(event.target) && (event.metaKey || event.ctrlKey)) {
+        if (key === "a") {
+          event.preventDefault();
+          if (!loading && !importActive) { if (event.shiftKey) clearSelection(); else selectVisibleImport(); }
+        } else if (key === "," && !event.shiftKey) { event.preventDefault(); openSettings(); }
+        else if (key === "/" && !event.shiftKey) { event.preventDefault(); openShortcutHelp(); }
+        else if (key === "i" && event.shiftKey && importSelection.size > 0 && !importActive && !loading) {
+          event.preventDefault();
+          openImportReview();
+        }
+      } else if (event.key === "Escape" && !isTextEditing(event.target)) {
+        if (navigationOpen) { event.preventDefault(); setNavigationOpen(false); }
+        else if (inspectorOpen) { event.preventDefault(); setInspectorOpen(false); }
+      }
+    };
+    document.addEventListener("keydown", onShortcut);
+    return () => document.removeEventListener("keydown", onShortcut);
+  }, [storageView, storage?.portRecovery, dialog, actionsOpen, importOpen, shortcutsOpen, importSelection, importActive, loading, storageBusy, inspectorOpen, navigationOpen]);
+  function onBrowserKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (event.defaultPrevented || event.nativeEvent.isComposing || event.altKey || isTextEditing(event.target) || dialog || actionsOpen || importOpen || shortcutsOpen) return;
+
+    const target = event.target as HTMLElement;
+    if (!target.matches("[data-asset-key]")) return;
+    const index = filtered.findIndex(asset => asset.asset_key === target.dataset.assetKey);
+    if (index < 0) return;
+    if (event.key === " " || event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.repeat) return;
+      if (event.key === " ") selectAsset(filtered[index], { metaKey: true, shiftKey: false }, true);
+      else {
+        inspectorReturnRef.current = target;
+        setSelectedKey(filtered[index].asset_key);
+        setInspectorOpen(true);
+        requestAnimationFrame(() => detailsCloseRef.current?.focus());
+      }
+      return;
+    }
+    if (event.metaKey || event.ctrlKey) return;
+    let next = index;
+    if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = filtered.length - 1;
+    else if (event.key === "ArrowLeft" && view === "grid") next = Math.max(0, index - 1);
+    else if (event.key === "ArrowRight" && view === "grid") next = Math.min(filtered.length - 1, index + 1);
+    else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      if (view === "list") next = Math.max(0, Math.min(filtered.length - 1, index + direction));
+      else {
+        const buttons = Array.from(browserRef.current?.querySelectorAll<HTMLElement>("[data-asset-key]") || []);
+        const current = target.getBoundingClientRect();
+        let rowDistance = Infinity;
+        let columnDistance = Infinity;
+        buttons.forEach((button, candidate) => {
+          const bounds = button.getBoundingClientRect();
+          const row = (bounds.top - current.top) * direction;
+          const column = Math.abs(bounds.left - current.left);
+          if (row > 1 && (row < rowDistance - 1 || (Math.abs(row - rowDistance) <= 1 && column < columnDistance))) {
+            next = candidate; rowDistance = row; columnDistance = column;
+          }
+        });
+      }
+    } else return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (next === index) return;
+    if (event.shiftKey && !importActive) {
+      if (!selectionAnchor.current) selectionAnchor.current = filtered[index].asset_key;
+      selectAsset(filtered[next], { metaKey: false, shiftKey: true }, true);
+    }
+    setFocusedAssetKey(filtered[next].asset_key);
+    const button = browserRef.current?.querySelectorAll<HTMLElement>("[data-asset-key]")[next];
+    button?.focus();
+    button?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+
   function clearFilters() {
     setQuery("");
     setCategory("All assets");
@@ -1193,14 +1333,15 @@ function App() {
               placeholder="Search assets, authors, tags…"
               aria-label="Search library"
             />
-            {!query && <kbd>⌘ K</kbd>}
+            {!query && <kbd>{shortcutModifier} K</kbd>}
             {query && <Button className="search-clear" aria-label="Clear search" onPress={() => setQuery("")}><Icon as={X} className="icon" aria-hidden="true" /></Button>}
           </Input>
         <div className="top-actions">
+          <Button type="button" className="icon-button" aria-label="Keyboard shortcuts" title={shortcutModifier + " /"} onPress={openShortcutHelp}><Icon as={Keyboard} className="icon" aria-hidden="true" /></Button>
           <div className="header-tasks" role="group" aria-label="Background tasks">
             {actionStatus && !dismissedIds.has(actionStatus.id) && <ActionProgress compact job={actionStatus} onDismiss={dismissAction} announce={!(dialog && actionStatus.phase === "apply")} />}
             {state?.job && !dismissedIds.has(state.job.id) && <ActionProgress compact job={state.job} onDismiss={dismissEnrich} />}
-            {importJob && !dismissedIds.has(importJob.id) && <ActionProgress compact job={importJob} onDismiss={dismissImportJob} onReview={() => { if (document.activeElement instanceof HTMLButtonElement) importTriggerRef.current = document.activeElement; setImportOpen(true); }} />}
+            {importJob && !dismissedIds.has(importJob.id) && <ActionProgress compact job={importJob} onDismiss={dismissImportJob} onReview={openImportReview} />}
           </div>
           <Button type="button" className="icon-button theme-toggle" title={`Theme: ${theme}. Switch to ${theme === "system" ? "light" : theme === "light" ? "dark" : "system"}`} aria-label={`Theme: ${theme}. Switch to ${theme === "system" ? "light" : theme === "light" ? "dark" : "system"}`} onPress={() => setTheme(theme === "system" ? "light" : theme === "light" ? "dark" : "system")}>
             <Icon as={theme === "system" ? Monitor : theme === "light" ? Sun : Moon} className="icon" aria-hidden="true" />
@@ -1456,13 +1597,13 @@ function App() {
               <span>{storeCount} store records</span>
               <span className="muted">{error ? "Connection needs attention" : "Library connected"}</span>
             </div>
-            <Button type="button" className="settings-link" onPress={() => { setStoragePath(storage?.path || ""); setStorageError(""); setStorageView("settings"); }} isDisabled={storageBusy} aria-label="Open Settings">
+            <Button type="button" className="settings-link" onPress={openSettings} isDisabled={storageBusy} aria-label="Open Settings">
               <Icon as={Settings} className="icon" aria-hidden="true" focusable={false} />Settings
             </Button>
           </div>
 
         </aside>
-        <section className="content-column" aria-label="Asset browser">
+        <section ref={browserRef} className="content-column" aria-label="Asset browser" onKeyDownCapture={onBrowserKeyDown} onKeyUpCapture={(event) => { if ((event.target as HTMLElement).matches("[data-asset-key]") && (event.key === " " || event.key === "Enter")) { event.preventDefault(); event.stopPropagation(); } }} onFocusCapture={(event) => { const key = (event.target as HTMLElement).dataset.assetKey; if (key) setFocusedAssetKey(key); }}>
           <div className="content-head">
             <div>
               <h2>{quick === "all" ? category : { favorites: "Favorites", pending: "Needs enrichment", flagged: "Flagged", "non-store": "Local only" }[quick]}</h2>
@@ -1511,8 +1652,8 @@ function App() {
           <div className="import-controls" data-selected={importSelection.size > 0} role="group" aria-label="Package selection">
             <span className="import-selection-count" role="status" aria-atomic="true">{importSelection.size > 0 ? <>{importSelection.size.toLocaleString()} selected{selectionSummary.hidden > 0 && <span className="selection-hidden"> · {selectionSummary.hidden.toLocaleString()} outside filters</span>}</> : "Select packages to import"}</span>
             <Button type="button" className="button quiet selection-action" onPress={selectVisibleImport} isDisabled={loading || importActive || selectionSummary.selectable === selectionSummary.selected} aria-label="Select all packages in current results" title="Add every importable package in the current results to your selection">Select all</Button>
-            {importSelection.size > 0 && <Button type="button" className="button quiet selection-action" onPress={() => { selectionAnchor.current = null; setImportSelection(new Set()); }} isDisabled={importActive} aria-label="Deselect all packages">Clear selection</Button>}
-            {importSelection.size > 0 && <Button ref={importTriggerRef} type="button" className="button primary" onPress={() => setImportOpen(true)} isDisabled={importActive} aria-label={`Import ${importSelection.size} selected package${importSelection.size === 1 ? "" : "s"}`}>Review import</Button>}
+            {importSelection.size > 0 && <Button type="button" className="button quiet selection-action" onPress={clearSelection} isDisabled={importActive} aria-label="Deselect all packages">Clear selection</Button>}
+            {importSelection.size > 0 && <Button type="button" className="button primary" onPress={openImportReview} isDisabled={importActive} aria-label={`Import ${importSelection.size} selected package${importSelection.size === 1 ? "" : "s"}`}>Review import</Button>}
           </div>
           </div>
           {loading ? (
@@ -1539,6 +1680,7 @@ function App() {
                     asset={asset}
                     selected={importSelection.has(asset.asset_key)}
                     view={view}
+                    tabIndex={asset.asset_key === tabStopKey ? 0 : -1}
                     onClick={(event) => selectAsset(asset, event)}
                   />
                   <StarButton
@@ -1600,6 +1742,31 @@ function App() {
           )}
         </aside>
       </main>
+      {shortcutsOpen && <AlertDialog isOpen onClose={() => setShortcutsOpen(false)} initialFocusRef={shortcutCloseRef} finalFocusRef={shortcutReturnRef} isKeyboardDismissable className="dialog-overlay">
+        <AlertDialogBackdrop className="dialog-backdrop" />
+        <AlertDialogContent className="action-dialog shortcuts-dialog" aria-labelledby="shortcuts-title">
+          <AlertDialogHeader className="dialog-top"><h2 id="shortcuts-title">Keyboard shortcuts</h2><Button ref={shortcutCloseRef} className="icon-button" aria-label="Close keyboard shortcuts" onPress={() => setShortcutsOpen(false)}><Icon as={X} className="icon" aria-hidden="true" /></Button></AlertDialogHeader>
+          <AlertDialogBody>
+            <h3>Package browser</h3>
+            <dl className="shortcut-list">
+              <div><dt><kbd>{shortcutModifier} A</kbd></dt><dd>Select importable packages in all current results; keep hidden selections</dd></div>
+              <div><dt><kbd>{shortcutModifier} Shift A</kbd></dt><dd>Clear all selections, including hidden packages</dd></div>
+              <div><dt><kbd>Arrows · Home · End</kbd></dt><dd>Move focus without changing selection</dd></div>
+              <div><dt><kbd>Space · Shift Arrows</kbd></dt><dd>Toggle a package · extend a selection range</dd></div>
+              <div><dt><kbd>Enter</kbd></dt><dd>Open focused package details</dd></div>
+            </dl>
+            <h3>Library</h3>
+            <dl className="shortcut-list">
+              <div><dt><kbd>{shortcutModifier} K</kbd></dt><dd>Focus search</dd></div>
+              <div><dt><kbd>{shortcutModifier} Shift I</kbd></dt><dd>Review selected imports; does not start importing</dd></div>
+              <div><dt><kbd>{shortcutModifier} ,</kbd></dt><dd>Open settings</dd></div>
+              <div><dt><kbd>{shortcutModifier} /</kbd></dt><dd>Show this help</dd></div>
+              <div><dt><kbd>Escape</kbd></dt><dd>Close the active overlay or details; never stop an import</dd></div>
+            </dl>
+            <p className="muted">Tab and Shift Tab move between controls. Select all and clear selection work throughout the library outside text fields and overlays. Text fields keep normal editing shortcuts. Dialogs keep keyboard focus until closed.</p>
+          </AlertDialogBody>
+        </AlertDialogContent>
+      </AlertDialog>}
       {dialog && (
         <ActionDialog
           dialog={dialog}
@@ -1615,7 +1782,7 @@ function App() {
           assets={importAssets}
           catalog={assets}
           job={importJob}
-          finalFocusRef={importTriggerRef}
+          finalFocusRef={importReturnRef}
           onClose={() => { setImportOpen(false); if (importJob && !importActive) dismissImportJob(importJob.id); }}
           onStart={startImport}
           onStop={stopImport}
@@ -1633,11 +1800,13 @@ function AssetCard({
   selected,
   view,
   onClick,
+  tabIndex,
 }: {
   asset: Asset;
   selected: boolean;
   view: ViewMode;
   onClick: (event: { metaKey: boolean; shiftKey: boolean }) => void;
+  tabIndex: number;
 }) {
   const availability = availabilitySummary(asset.versions || []);
   const flagged = (asset.flags || []).length > 0;
@@ -1649,6 +1818,8 @@ function AssetCard({
         aria-pressed={selected}
         title={asset.name}
         onPress={onClick}
+        data-asset-key={asset.asset_key}
+        tabIndex={tabIndex}
       >
         <span className="list-name">
           <span className="list-avatar">{asset.thumbnail?.remote ? <img src={asset.thumbnail.remote} loading="lazy" alt="" /> : initials(asset)}</span>
@@ -1667,6 +1838,8 @@ function AssetCard({
       aria-pressed={selected}
       title={asset.name}
       onPress={onClick}
+      data-asset-key={asset.asset_key}
+      tabIndex={tabIndex}
     >
       <div className="thumb">
         {asset.thumbnail?.remote ? (

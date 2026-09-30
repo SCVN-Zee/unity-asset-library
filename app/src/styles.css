@@ -1253,3 +1253,11 @@ button:disabled, input:disabled, select:disabled {
   .import-row-actions { justify-content: space-between; }
   .import-dialog .button { padding: 0 12px; }
 }
+.shortcuts-dialog { max-width: 680px; }
+.shortcut-list { margin: 12px 0 24px; }
+.shortcut-list > div { display: grid; grid-template-columns: minmax(130px, 1fr) 2fr; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--line-soft); }
+.shortcut-list dd { margin: 0; color: var(--muted); }
+.shortcut-list kbd { font: inherit; font-weight: 600; }
+.asset-card:focus-visible { outline: 3px solid var(--text); outline-offset: 3px; }
+.list-row:focus-visible { outline: 3px solid var(--text); outline-offset: -4px; }
+@media (max-width: 480px) { .shortcut-list > div { grid-template-columns: 1fr; gap: 4px; } }

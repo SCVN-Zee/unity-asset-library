@@ -56,7 +56,7 @@ type ImportDialogProps = {
   assets: Asset[];
   catalog: Asset[];
   job: ImportJob | null;
-  finalFocusRef: RefObject<HTMLButtonElement | null>;
+  finalFocusRef: RefObject<HTMLElement | null>;
   onClose: () => void;
   onStart: (request: ImportRequest) => Promise<void>;
   onStop: () => Promise<void>;

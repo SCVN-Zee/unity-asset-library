@@ -205,7 +205,7 @@ type OverlayProps = PartProps & {
   isOpen?: boolean;
   onClose?: () => void;
   initialFocusRef?: RefObject<HTMLButtonElement | null>;
-  finalFocusRef?: RefObject<HTMLButtonElement | null>;
+  finalFocusRef?: RefObject<HTMLElement | null>;
   isKeyboardDismissable?: boolean;
 };
 type TriggerProps = ButtonProps & { ref?: Ref<HTMLButtonElement> };

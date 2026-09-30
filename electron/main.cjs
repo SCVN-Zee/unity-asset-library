@@ -740,6 +740,7 @@ function createWindow() {
   const window = new BrowserWindow({
     width: 1224,
     height: 918,
+    center: true,
     minWidth: 980,
     minHeight: 680,
     backgroundColor: "#111214",

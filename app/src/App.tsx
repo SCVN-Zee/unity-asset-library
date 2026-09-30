@@ -1049,13 +1049,14 @@ function App() {
           openImportReview();
         }
       } else if (event.key === "Escape" && !isTextEditing(event.target)) {
-        if (navigationOpen) { event.preventDefault(); setNavigationOpen(false); }
-        else if (inspectorOpen) { event.preventDefault(); setInspectorOpen(false); }
+        event.preventDefault();
+        if (importSelection.size > 0) { if (!importActive) clearSelection(); }
+        else if (inspectorOpen) setInspectorOpen(false);
       }
     };
     document.addEventListener("keydown", onShortcut);
     return () => document.removeEventListener("keydown", onShortcut);
-  }, [storageView, storage?.portRecovery, dialog, actionsOpen, importOpen, shortcutsOpen, importSelection, importActive, loading, storageBusy, inspectorOpen, navigationOpen]);
+  }, [storageView, storage?.portRecovery, dialog, actionsOpen, importOpen, shortcutsOpen, importSelection, importActive, loading, storageBusy, inspectorOpen]);
   function onBrowserKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
     if (event.defaultPrevented || event.nativeEvent.isComposing || event.altKey || isTextEditing(event.target) || dialog || actionsOpen || importOpen || shortcutsOpen) return;
 
@@ -1761,7 +1762,7 @@ function App() {
               <div><dt><kbd>{shortcutModifier} Shift I</kbd></dt><dd>Review selected imports; does not start importing</dd></div>
               <div><dt><kbd>{shortcutModifier} ,</kbd></dt><dd>Open settings</dd></div>
               <div><dt><kbd>{shortcutModifier} /</kbd></dt><dd>Show this help</dd></div>
-              <div><dt><kbd>Escape</kbd></dt><dd>Close the active overlay or details; never stop an import</dd></div>
+              <div><dt><kbd>Escape</kbd></dt><dd>Clear package selection first; press again to close asset details. Close the active overlay when one is open.</dd></div>
             </dl>
             <p className="muted">Tab and Shift Tab move between controls. Select all and clear selection work throughout the library outside text fields and overlays. Text fields keep normal editing shortcuts. Dialogs keep keyboard focus until closed.</p>
           </AlertDialogBody>

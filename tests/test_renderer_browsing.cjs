@@ -103,7 +103,12 @@ app.whenReady().then(async () => {
       await waitFor('document.activeElement.getAttribute("aria-label") === "Close asset details"');
       await selection(['City Audio']);
       await key('Escape');
+      await selection([]);
+      assert.equal(await evaluate('document.querySelector(".inspector").hidden'), false, 'Escape keeps asset details open');
+      await key('Escape');
       await waitFor('document.activeElement.title === "Forest Audio" && document.querySelector(".inspector").hidden');
+      await key('Space');
+      await selection(['Forest Audio']);
       await key('I', ['meta', 'shift']);
       await waitFor('!!document.querySelector(".import-dialog") && !!document.activeElement.closest(".import-dialog")');
       assert.equal(await evaluate('localStorage.getItem("ual:test-request")'), null, 'Review shortcut never imports');
@@ -125,7 +130,7 @@ app.whenReady().then(async () => {
     await key('A', ['control']);
     await selection(['Editor Tool', 'Forest Audio']);
     assert.equal(await evaluate('document.querySelector(".import-selection-count").textContent'), '3 selected · 1 outside filters');
-    await key('A', ['control', 'shift']);
+    await key('Escape');
     await selection([]);
     await evaluate('document.activeElement.blur()');
     await key('A', ['meta']);

@@ -5,6 +5,12 @@ window.addEventListener("DOMContentLoaded", () => {
 }, { once: true });
 
 contextBridge.exposeInMainWorld("ual", {
+  getPackageFavorites: () => ipcRenderer.invoke("packages:favorites"),
+  savePackageFavorite: (packageEntry) => ipcRenderer.invoke("packages:save", packageEntry),
+  removePackageFavorite: (id) => ipcRenderer.invoke("packages:remove", id),
+  reorderPackageFavorites: (ids) => ipcRenderer.invoke("packages:reorder", ids),
+  startPackageInstall: (request) => ipcRenderer.invoke("packages:start", request),
+  getPackageInstall: () => ipcRenderer.invoke("packages:status"),
   importProjects: () => ipcRenderer.invoke("import:projects"),
   chooseImportProject: () => ipcRenderer.invoke("import:choose-project"),
   inspectImportProject: (project) => ipcRenderer.invoke("import:inspect", project),

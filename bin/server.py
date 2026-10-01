@@ -57,6 +57,7 @@ import index_assets as ia  # noqa: E402
 import organize_versions as ov  # noqa: E402
 import storage  # noqa: E402
 import user_tags  # noqa: E402
+import favorite_packages  # noqa: E402
 
 
 SafetyError = cv.SafetyError
@@ -536,6 +537,19 @@ class ViewerService:
             ia.write_atomic(self._favorites_path(),
                             canonical({"favorites": result}))
         return {"favorites": result}
+
+    def op_package_favorites(self):
+        try:
+            return favorite_packages.load(self.state)
+        except favorite_packages.StoreError as exc:
+            raise SafetyError(str(exc)) from exc
+
+    def op_mutate_package_favorites(self, action, package=None, package_id=None, ids=None):
+        with self.state_write_lock():
+            try:
+                return favorite_packages.mutate(self.state, action, package, package_id, ids)
+            except favorite_packages.StoreError as exc:
+                raise SafetyError(str(exc)) from exc
 
     def resync_preview(self, scanned, progress=None):
         if progress:
@@ -1095,7 +1109,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         try:
             if path == "/api/state":
                 self._send_json(service.op_state())
-            elif path in ("/api/assets", "/api/tags", "/api/favorites", "/api/preferences"):
+            elif path in ("/api/assets", "/api/tags", "/api/favorites", "/api/preferences", "/api/package-favorites"):
                 # Readers must not observe a partially applied identity cutover.
                 with ia.state_write_lock(service.state, "HTTP snapshot", blocking=True):
                     if path == "/api/assets":
@@ -1104,6 +1118,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         self._send_json(service.op_tags())
                     elif path == "/api/favorites":
                         self._send_json(service.op_favorites())
+                    elif path == "/api/package-favorites":
+                        self._send_json(service.op_package_favorites())
                     else:
                         self._send_json(service.op_preferences())
             elif path.startswith("/api/action/"):
@@ -1139,6 +1155,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "/api/enrich/cancel": (["csrf"], ()),
             "/api/storage/prepare-restart": (["csrf"], ()),
             "/api/favorites": (["asset_key", "csrf", "favorite"], ()),
+            "/api/package-favorites/save": (["csrf", "package"], ()),
+            "/api/package-favorites/remove": (["csrf", "id"], ()),
+            "/api/package-favorites/reorder": (["csrf", "ids"], ()),
             "/api/tags": (["action", "csrf", "tag"], ("asset_key", "new_tag")),
             "/api/preferences": (["csrf", "preferences", "library_root"],
                                  ("only_if_missing",)),
@@ -1176,6 +1195,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self._reject(400, "bad_request")
                 else:
                     self._send_json(service.op_set_favorite(asset_key, favorite))
+            elif path == "/api/package-favorites/save":
+                self._send_json(service.op_mutate_package_favorites("save", package=body["package"]))
+            elif path == "/api/package-favorites/remove":
+                self._send_json(service.op_mutate_package_favorites("remove", package_id=body["id"]))
+            elif path == "/api/package-favorites/reorder":
+                self._send_json(service.op_mutate_package_favorites("reorder", ids=body["ids"]))
             elif path == "/api/preferences":
                 only_if_missing = body.get("only_if_missing", False)
                 if not isinstance(only_if_missing, bool):
@@ -1188,8 +1213,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(service.op_mutate_tags(body))
         except UnknownAsset:
             self._send_json({"error": "unknown_asset"}, 404)
-        except ValueError:
-            self._reject(400, "bad_request")
+        except ValueError as exc:
+            if path.startswith("/api/package-favorites/"):
+                self._send_json({"error": "bad_request", "detail": str(exc)}, 400)
+            else:
+                self._reject(400, "bad_request")
         except LibraryMismatch as exc:
             self._send_json({"error": "library_mismatch", "detail": str(exc)}, 409)
         except Busy as exc:

@@ -26,9 +26,22 @@ fs.writeFileSync(preload, `const favorites = new Set(['audio-favorite', 'tools-f
   getPreferences: async () => { try { return JSON.parse(localStorage.getItem('ual:prefs') || '{}'); } catch { return {}; } },
   setPreferences: async (prefs) => { localStorage.setItem('ual:prefs', JSON.stringify(prefs)); return prefs; },
   getLegacyLibraryRoot: async () => null,
+  getPackageFavorites: async () => ({ packages: JSON.parse(localStorage.getItem("ual:test-package-favorites") || "[]") }),
+  getPackageInstall: async () => JSON.parse(localStorage.getItem("ual:test-package-job") || "null"),
   importProjects: async () => [{ path: "/fixture/project", title: "Fixture", version: "6000.3.15f1" }],
   chooseImportProject: async () => null,
-  inspectImportProject: async (path) => ({ path, title: "Fixture", version: "6000.3.15f1" }),
+  inspectImportProject: async (path) => {
+    if (localStorage.getItem("ual:test-delay-inspection")) {
+      localStorage.setItem("ual:test-inspection-started", "true");
+      await new Promise(resolve => {
+        const timer = setInterval(() => {
+          if (localStorage.getItem("ual:test-release-inspection")) { clearInterval(timer); resolve(); }
+        }, 10);
+      });
+      localStorage.setItem("ual:test-inspection-finished", "true");
+    }
+    return { path, title: "Fixture", version: "6000.3.15f1" };
+  },
   startImport: async (request) => {
     localStorage.setItem("ual:test-request", JSON.stringify(request));
     return { id: "fixture-install", kind: "import", status: "completed", project: request.project, completed: request.packages.length, total: request.packages.length, results: request.packages.map(({ file }) => ({ file, status: "installed", ...(request.overwrite ? { backup_path: "/fixture/project/.ual-import-backups/fixture" } : {}) })) };
@@ -51,6 +64,7 @@ async function click(selector, modifiers = []) {
   const bounds = await evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`);
   win.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, modifiers, ...bounds });
   win.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, modifiers, ...bounds });
+  await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
 }
 async function key(keyCode, modifiers = []) {
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
@@ -415,6 +429,40 @@ app.whenReady().then(async () => {
     await waitFor('!document.querySelector(".import-dialog")');
     assert.equal(await evaluate('document.querySelector(\'[aria-label="Collapse Audio"]\').getAttribute("aria-expanded")'), 'true');
     console.log('PASS: catalog refresh safely removes a child from an expanded category');
+    const packageJob = { id: "saved-install", kind: "packages", status: "running", project: "/fixture/project", completed: 0, total: 1, results: [{ id: "math", label: "Math", source: "com.unity.mathematics", status: "installing" }] };
+    await evaluate('localStorage.setItem("ual:test-package-job", ' + JSON.stringify(JSON.stringify(packageJob)) + ')');
+    await win.reload();
+    await waitFor('document.querySelector(".favorite-package-progress")?.textContent.includes("Installing packages")');
+    await click('[aria-label="Open Settings"]');
+    await waitFor(`document.querySelector('[aria-label="Browse for library folder"]')?.disabled === true`);
+    packageJob.status = "completed";
+    packageJob.completed = 1;
+    packageJob.results[0].status = "installed";
+    await evaluate('localStorage.setItem("ual:test-package-job", ' + JSON.stringify(JSON.stringify(packageJob)) + ')');
+    await waitFor(`document.querySelector('[aria-label="Browse for library folder"]')?.disabled === false`);
+    await click('.storage-topbar .button');
+    await waitFor('document.querySelector(".favorite-package-progress")?.textContent.includes("Package installation complete")');
+    console.log("PASS: saved-package polling survives Settings navigation and releases library-change guards");
+    await evaluate('localStorage.setItem("ual:test-package-favorites", JSON.stringify([{ id: "math", label: "Math", kind: "registry", source: "com.unity.mathematics", version: "1.3.2" }])); localStorage.setItem("ual:prefs", JSON.stringify({ filters: { quick: "favorites" } })); localStorage.setItem("ual:test-delay-inspection", "true")');
+    await win.reload();
+    await waitFor('document.querySelector(".favorite-package-disclosure") && !document.querySelector(".favorite-package-disclosure").open');
+    await click(".favorite-package-disclosure summary");
+    await waitFor('document.querySelector(".favorite-packages-list")?.textContent.includes("Math")');
+    await click(".favorite-packages-heading .primary");
+    await waitFor(`!!document.querySelector('[role="combobox"][aria-label="Target Unity project"]')`);
+    await chooseOption("Target Unity project", "Fixture");
+    await waitFor('localStorage.getItem("ual:test-inspection-started") === "true"');
+    await key("Escape");
+    await waitFor(`!document.querySelector('[role="combobox"][aria-label="Target Unity project"]')`);
+    await click(".favorite-packages-heading .primary");
+    await waitFor(`!!document.querySelector('[role="combobox"][aria-label="Target Unity project"]')`);
+    await evaluate('localStorage.setItem("ual:test-release-inspection", "true")');
+    await waitFor('localStorage.getItem("ual:test-inspection-finished") === "true"');
+    await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+    assert.equal(await evaluate('document.querySelector(".favorite-package-dialog .dialog-footer .primary").disabled'), true);
+    await chooseOption("Target Unity project", "Fixture");
+    await waitFor('document.querySelector(".favorite-package-dialog .dialog-footer .primary").disabled === false');
+    console.log("PASS: cancelled project inspection cannot select a target in a new saved-package review");
   } catch (error) {
     console.error(error);
     exitCode = 1;

@@ -28,6 +28,9 @@ let pendingPortChoice = null;
 let importJob = null;
 let importPromise = Promise.resolve();
 let importCancelFile = null;
+let packageInstallJob = null;
+let packageInstallPromise = Promise.resolve();
+let packageInstallLibrary = null;
 const storageState = {
   path: null,
   ready: false,
@@ -578,6 +581,7 @@ function importActive() {
 
 function assertImportIdle() {
   if (importActive()) throw new Error("Wait for the import to finish, or stop after the current package.");
+  if (packageInstallActive()) throw new Error("Wait for saved-package installation to finish.");
 }
 
 function importSnapshot() {
@@ -691,6 +695,71 @@ function stopImport(id) {
 }
 
 
+function packageInstallActive() {
+  return Boolean(packageInstallJob && ["queued", "running"].includes(packageInstallJob.status));
+}
+
+function packageInstallSnapshot() {
+  if (!packageInstallJob || packageInstallLibrary !== backendSession?.vaultRoot) return null;
+  return JSON.parse(JSON.stringify(packageInstallJob));
+}
+
+async function executePackageInstall(request, guard) {
+  let temp;
+  const job = packageInstallJob;
+  const update = (event) => {
+    for (const key of ["stage", "completed", "total", "current_item", "results"]) {
+      if (Object.hasOwn(event, key)) job[key] = event[key];
+    }
+  };
+  try {
+    const state = await backendRequest("/api/state");
+    if ([state.job, state.action].some((item) => item && ["queued", "running"].includes(item.status))) throw new Error("Wait for the active library operation before installing packages.");
+    const saved = await backendRequest("/api/package-favorites");
+    if (guard.generation !== backendGeneration || guard.session !== backendSession) throw new Error("The library changed. Review saved packages again.");
+    const packages = request.ids.map((id) => {
+      const item = saved.packages.find((entry) => entry.id === id);
+      if (!item) throw new Error("A selected package is no longer saved. Refresh Favorites.");
+      return { ...item };
+    });
+    job.results = packages.map(({ id, label, source }) => ({ id, label, source, status: "pending" }));
+    job.status = "running";
+    job.stage = "preflight";
+    temp = fs.mkdtempSync(path.join(os.tmpdir(), "ual-packages-"));
+    const manifest = path.join(temp, "request.json");
+    fs.writeFileSync(manifest, JSON.stringify({ id: job.id, project: request.project, packages }), { mode: 0o600 });
+    const root = app.isPackaged ? path.join(process.resourcesPath, "ual-backend") : path.resolve(__dirname, "..");
+    const outcome = await runPythonCli([path.join(root, "bin", "install_favorite_packages.py"), "run", "--request", manifest], update, root);
+    if (!outcome || !["completed", "failed"].includes(outcome.status)) throw new Error("Package worker ended without a terminal result. Check the project before retrying.");
+    update(outcome);
+    job.status = outcome.status;
+    job.error = outcome.error || null;
+  } catch (error) {
+    if (error.outcome?.results?.length) update(error.outcome);
+    job.status = "failed";
+    job.error = String(error.message || error);
+  } finally {
+    job.finished_at = Date.now() / 1000;
+    if (temp) fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+function startPackageInstall(request) {
+  assertImportIdle();
+  if (quitting) throw new Error("The application is quitting.");
+  const guard = assertBackendRequestAllowed();
+  if (!request || Object.keys(request).length !== 2 || !Array.isArray(request.ids) ||
+      !request.ids.length || request.ids.length > 1000 || new Set(request.ids).size !== request.ids.length ||
+      request.ids.some((id) => typeof id !== "string" || !id.trim())) throw new Error("Choose saved packages and a Unity project.");
+  const project = importProjectPath(request.project);
+  const ids = [...request.ids];
+  packageInstallLibrary = guard.session.vaultRoot;
+  packageInstallJob = { id: crypto.randomUUID(), kind: "packages", status: "queued", stage: "queued", project,
+    completed: 0, total: ids.length, current_item: null, results: [], error: null, started_at: Date.now() / 1000 };
+  packageInstallPromise = executePackageInstall({ project, ids }, guard);
+  return packageInstallSnapshot();
+}
+
 function registerIpc() {
   if (registered) return;
   ipcMain.handle("import:projects", () => importCli("projects"));
@@ -702,6 +771,12 @@ function registerIpc() {
   ipcMain.handle("import:start", (_event, request) => startImport(request));
   ipcMain.handle("import:status", () => importSnapshot());
   ipcMain.handle("import:stop", (_event, id) => stopImport(id));
+  ipcMain.handle("packages:start", (_event, request) => startPackageInstall(request));
+  ipcMain.handle("packages:status", () => packageInstallSnapshot());
+  ipcMain.handle("packages:favorites", () => backendRequest("/api/package-favorites"));
+  ipcMain.handle("packages:save", (_event, packageEntry) => postJson("/api/package-favorites/save", { package: packageEntry }));
+  ipcMain.handle("packages:remove", (_event, id) => postJson("/api/package-favorites/remove", { id }));
+  ipcMain.handle("packages:reorder", (_event, ids) => postJson("/api/package-favorites/reorder", { ids }));
   ipcMain.handle("backend:assets", () => backendRequest("/api/assets"));
   ipcMain.handle("backend:tags", () => backendRequest("/api/tags"));
   ipcMain.handle("backend:mutate-tags", (_event, change) => {
@@ -790,7 +865,7 @@ function createWindow() {
   );
   window.once("ready-to-show", () => window.show());
   window.on("close", (event) => {
-    if (!quitReady && importActive()) {
+    if (!quitReady && (importActive() || packageInstallActive())) {
       event.preventDefault();
       app.quit();
     }
@@ -822,9 +897,16 @@ app.on("before-quit", (event) => {
     if (choice !== 1) return;
     stopImport(importJob.id);
   }
+  if (packageInstallActive()) {
+    const choice = dialog.showMessageBoxSync({ type: "warning", title: "Package installation in progress",
+      message: "Wait for package installation to finish before quitting?",
+      detail: "Unity Package Manager is updating the chosen project. It will not be interrupted.",
+      buttons: ["Keep window open", "Wait and quit"], defaultId: 0, cancelId: 0, noLink: true });
+    if (choice !== 1) return;
+  }
   quitting = true;
   if (pendingPortChoice) answerPortChoice(pendingPortChoice.id, { action: "cancel" });
-  void Promise.allSettled([startupPromise, saveQueue, importPromise, transitionPromise || Promise.resolve()]).then(() => stopOwnedBackend()).finally(() => { quitReady = true; app.quit(); });
+  void Promise.allSettled([startupPromise, saveQueue, importPromise, packageInstallPromise, transitionPromise || Promise.resolve()]).then(() => stopOwnedBackend()).finally(() => { quitReady = true; app.quit(); });
 });
 
 app.on("window-all-closed", () => {

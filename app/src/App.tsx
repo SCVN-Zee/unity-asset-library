@@ -51,6 +51,7 @@ import {
   Star,
   X,
 } from "lucide-react";
+import FavoritePackages from "./components/FavoritePackages";
 import { ImportDialog, availabilityLabel, availabilitySummary, unityPackages } from "./components/ImportDialog";
 import SpotlightCard from "./components/react-bits/SpotlightCard";
 import GlideSelect from "./components/react-bits/GlideSelect";
@@ -494,7 +495,38 @@ function App() {
       ? { id: actionStatus.id, kind: actionStatus.kind, phase: actionStatus.phase }
       : null,
   };
-  const importActive = Boolean(importJob && ["queued", "running"].includes(importJob.status));
+  const [packageJob, setPackageJob] = useState<PackageInstallJob | null>(null);
+  const [packageJobError, setPackageJobError] = useState("");
+  const packageInstallActive = Boolean(packageJob && ["queued", "running"].includes(packageJob.status));
+  useEffect(() => {
+    if (!storage?.ready || storageBusy) return;
+    let cancelled = false;
+    api.getPackageInstall().then(job => { if (!cancelled) { setPackageJob(job); setPackageJobError(""); } }).catch(cause => { if (!cancelled) setPackageJobError(cause instanceof Error ? cause.message : "Could not restore package installation status."); });
+    return () => { cancelled = true; };
+  }, [storageEpoch, storage?.ready, storageBusy]);
+  useEffect(() => {
+    if (!packageInstallActive) return;
+    let cancelled = false;
+    let polling = false;
+    const timer = window.setInterval(async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        const next = await api.getPackageInstall();
+        if (!cancelled) { setPackageJob(next); setPackageJobError(""); }
+      } catch (cause) {
+        if (!cancelled) setPackageJobError(cause instanceof Error ? cause.message : "Could not refresh package installation progress.");
+      } finally { polling = false; }
+    }, 650);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [packageJob?.id, packageJob?.status]);
+  async function startSavedPackageInstall(request: { project: string; ids: string[] }) {
+    const next = await api.startPackageInstall(request);
+    setPackageJob(next);
+    setPackageJobError("");
+    return next;
+  }
+  const importActive = packageInstallActive || Boolean(importJob && ["queued", "running"].includes(importJob.status));
   useEffect(() => {
     setImportSelection((current) => {
       const next = new Set([...current].filter((key) => assets.some((asset) => asset.asset_key === key && unityPackages(asset).length > 0)));
@@ -1605,7 +1637,7 @@ function App() {
 
         </aside>
         <section ref={browserRef} className="content-column" aria-label="Asset browser" onKeyDownCapture={onBrowserKeyDown} onKeyUpCapture={(event) => { if ((event.target as HTMLElement).matches("[data-asset-key]") && (event.key === " " || event.key === "Enter")) { event.preventDefault(); event.stopPropagation(); } }} onFocusCapture={(event) => { const key = (event.target as HTMLElement).dataset.assetKey; if (key) setFocusedAssetKey(key); }}>
-          <div className="content-head">
+          <div className={quick === "favorites" ? "content-head favorites-head" : "content-head"}>
             <div>
               <h2>{quick === "all" ? category : { favorites: "Favorites", pending: "Needs enrichment", flagged: "Flagged", "non-store": "Local only" }[quick]}</h2>
               <p>
@@ -1633,6 +1665,8 @@ function App() {
               />
             </div>
           </div>
+          <FavoritePackages disabled={storageBusy || loading || Boolean(busy) || tagBusy || Boolean(state?.job && ["queued", "running"].includes(state.job.status)) || Boolean(actionStatus && ["queued", "running"].includes(actionStatus.status)) || Boolean(importJob && ["queued", "running"].includes(importJob.status))} job={packageJob} jobError={packageJobError} onInstall={startSavedPackageInstall} storageEpoch={storageEpoch} hidden={quick !== "favorites"} />
+          {quick === "favorites" && <h2 className="starred-assets-heading">Starred assets</h2>}
           <div className="browser-actions">
           {(query || category !== "All assets" || quick !== "all" || author || untagged || selectedTags.length > 0) && <div className="filter-context" aria-label="Active filters">
             {quick !== "all" && <Button className="filter-chip" aria-label="Remove library filter" onPress={() => setQuick("all")}>{ { favorites: "Favorites", pending: "Needs enrichment", flagged: "Flagged", "non-store": "Local only" }[quick]}<Icon as={X} className="icon" aria-hidden="true" /></Button>}

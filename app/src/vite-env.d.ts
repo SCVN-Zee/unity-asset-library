@@ -40,7 +40,16 @@ declare global {
   type ActionIdentity = { id: string; kind: "resync" | "cleanup" | "organize"; phase: "plan" | "apply" };
   type Preferences = { theme?: string | null; sort?: string | null; view?: string | null; filters?: Record<string, unknown> | null; action?: ActionIdentity | null };
   type ImportJob = ProgressSnapshot & { id: string; kind: "import"; status: "queued" | "running" | "completed" | "failed" | "cancelled"; project: string; overwrite?: boolean; results: ImportResultRow[]; error?: string | null; stop_requested?: boolean };
+  type FavoritePackage = { id: string; label: string; kind: "registry" | "git"; source: string; version: string };
+  type PackageInstallResult = { id: string; label: string; source: string; status: "pending" | "installing" | "installed" | "skipped" | "failed"; error?: string };
+  type PackageInstallJob = ProgressSnapshot & { id: string; kind: "packages"; status: "queued" | "running" | "completed" | "failed"; project: string; stage: string; completed: number; total: number; current_item: string | null; results: PackageInstallResult[]; error: string | null };
   type UalBridge = {
+    getPackageFavorites: () => Promise<{ packages: FavoritePackage[] }>;
+    savePackageFavorite: (packageEntry: FavoritePackage) => Promise<{ packages: FavoritePackage[] }>;
+    removePackageFavorite: (id: string) => Promise<{ packages: FavoritePackage[] }>;
+    reorderPackageFavorites: (ids: string[]) => Promise<{ packages: FavoritePackage[] }>;
+    startPackageInstall: (request: { project: string; ids: string[] }) => Promise<PackageInstallJob>;
+    getPackageInstall: () => Promise<PackageInstallJob | null>;
     getStorage: () => Promise<StorageState>;
     answerPortChoice: (id: string, choice: PortChoice) => Promise<void>;
     retryBackend: () => Promise<void>;

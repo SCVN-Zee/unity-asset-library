@@ -103,14 +103,19 @@ function isViewerState(value, expected = {}) {
 }
 
 async function requestJson(endpoint, options = {}) {
-  const response = await fetch(`http://127.0.0.1:${backendPort}${endpoint}`, {
-    ...options,
-    headers: {
-      Accept: "application/json",
-      ...(options.headers || {}),
-    },
-  });
-  const text = await response.text();
+  let response;
+  let text;
+  try {
+    response = await fetch(`http://127.0.0.1:${backendPort}${endpoint}`, {
+      ...options,
+      headers: { Accept: "application/json", ...(options.headers || {}) },
+    });
+    text = await response.text();
+  } catch (cause) {
+    const error = new Error(cause.message, { cause });
+    error.code = "backend_transport_error";
+    throw error;
+  }
   let value = {};
   try {
     value = text ? JSON.parse(text) : {};
@@ -522,12 +527,32 @@ function assertBackendRequestAllowed() {
 
 async function backendRequest(endpoint, options = {}) {
   const guard = assertBackendRequestAllowed();
-  const value = await requestJson(endpoint, options);
-  if (endpoint === "/api/state") assertOwnState(value, guard.session);
-  if (guard.generation !== backendGeneration || backendSession !== guard.session) {
-    throw new Error("The library changed while the request was running; retry against the active library.");
+  const assertActive = () => {
+    if (quitting) throw new Error("The application is closing.");
+    assertBackendRequestAllowed();
+    if (guard.generation !== backendGeneration || backendSession !== guard.session) {
+      throw new Error("The library changed while the request was running; retry against the active library.");
+    }
+    options.signal?.throwIfAborted();
+  };
+  let retryDelay = 1000;
+  for (;;) {
+    assertActive();
+    let value;
+    try {
+      value = await requestJson(endpoint, options);
+    } catch (error) {
+      if (error.code !== "backend_transport_error") throw error;
+      assertActive();
+      // Only reads use this boundary. Never replay a mutation after an uncertain response.
+      await new Promise((resolve) => setTimeout(resolve, retryDelay).unref());
+      retryDelay = Math.min(retryDelay * 2, 30000);
+      continue;
+    }
+    assertActive();
+    if (endpoint === "/api/state") assertOwnState(value, guard.session);
+    return value;
   }
-  return value;
 }
 
 async function postJson(endpoint, body = {}, options = {}) {

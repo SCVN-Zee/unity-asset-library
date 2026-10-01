@@ -53,6 +53,52 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), "ual-bootstrap-"));
     assert.equal(externalStorage.ready, true);
     assert.equal(externalStorage.canChange, false);
     vm.runInContext("registerIpc()", context);
+    // Read outages recover without rejecting IPC; application failures and writes do not retry.
+    const retryTimers = [];
+    context.setTimeout = (callback, ms) => {
+      retryTimers.push(ms);
+      queueMicrotask(callback);
+      return { unref() {} };
+    };
+    let attempts = 0;
+    context.fetch = async () => {
+      if (++attempts <= 7) throw new TypeError("fetch failed");
+      return { ok: true, text: async () => JSON.stringify({ favorites: ["asset-a"] }) };
+    };
+    assert.deepEqual(JSON.parse(JSON.stringify(await handlers["backend:favorites"]())), { favorites: ["asset-a"] });
+    assert.equal(attempts, 8);
+    assert.deepEqual(retryTimers, [1000, 2000, 4000, 8000, 16000, 30000, 30000]);
+    for (const response of [
+      { ok: false, status: 403, text: async () => JSON.stringify({ error: "forbidden" }) },
+      { ok: true, text: async () => "not json" },
+    ]) {
+      attempts = 0;
+      context.fetch = async () => { attempts += 1; return response; };
+      await assert.rejects(handlers["backend:favorites"](), /forbidden|invalid JSON/);
+      assert.equal(attempts, 1);
+    }
+    attempts = 0;
+    context.fetch = async () => {
+      if (++attempts === 1) return { ok: true, text: async () => JSON.stringify(externalState) };
+      throw new TypeError("fetch failed");
+    };
+    await assert.rejects(handlers["backend:set-favorite"]({}, "asset-a", true), /fetch failed/);
+    assert.equal(attempts, 2);
+    for (const change of ["backendGeneration += 1", "storageState.busy = true", "quitting = true"]) {
+      attempts = 0;
+      context.fetch = async () => { attempts += 1; throw new TypeError("fetch failed"); };
+      context.setTimeout = (callback) => {
+        vm.runInContext(change, context);
+        queueMicrotask(callback);
+        return { unref() {} };
+      };
+      await assert.rejects(handlers["backend:favorites"](), /library changed|transition|closing/i);
+      assert.equal(attempts, 1);
+      vm.runInContext("storageState.busy = false; quitting = false", context);
+    }
+    context.setTimeout = setTimeout;
+    context.fetch = async () => ({ ok: true, text: async () => JSON.stringify(externalState) });
+    console.log("PASS: background read recovery, error boundaries, no write replay, lifecycle guards");
     // Invalid preference payloads must fail before contacting the backend.
     for (const bad of [null, "x", [], { theme: 5 }, { nope: "x" }, { action: { id: "a", kind: "bogus", phase: "plan" } }]) {
       await assert.rejects(async () => handlers["prefs:set"]({}, bad, selected), /Invalid preferences/);

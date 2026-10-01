@@ -40,11 +40,13 @@ def _rank(record):
     return (ia.version_key(record["version"], record["prerelease"]), record["release_date"] or "")
 
 
-def plan_cleanup(scanned):
+def plan_cleanup(scanned, identities=None):
     """Return a deterministic, fail-closed cleanup plan from current scan rows."""
     families = defaultdict(list)
-    for record in _parsed_records(scanned):
-        families[ia.asset_key(record)].append(record)
+    records = _parsed_records(scanned)
+    keys = ia.asset_identity.assign(records, identities or {"version": 1, "assets": {}})
+    for record in records:
+        families[keys[record["rel_path"]]].append(record)
 
     result = {"families": [], "removals": []}
     for key in sorted(families):
@@ -367,14 +369,15 @@ def main(argv=None, progress=None, state_lock_held=False):
     try:
         _root_identity(root)
         scanned = ia.scan(root, strict=True, progress=progress)
+        identities = ia.asset_identity.load(state)
         if not args.apply:
-            print(render_plan(plan_cleanup(scanned)))
+            print(render_plan(plan_cleanup(scanned, identities)))
             return 0
         snapshot = capture_snapshot(root, scanned, progress=progress)
-        plan = plan_cleanup(scanned)
+        plan = plan_cleanup(scanned, identities)
         return apply_cleanup(root, state, scanned, plan, bool(args.root), snapshot,
                              progress=progress, state_lock_held=state_lock_held)
-    except (KeyError, OSError, SafetyError) as exc:
+    except (KeyError, OSError, ValueError, SafetyError) as exc:
         print(f"cleanup aborted: {exc}", file=sys.stderr)
         return 2
 

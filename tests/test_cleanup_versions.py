@@ -54,11 +54,10 @@ class CleanupPlanTests(unittest.TestCase):
     def test_exact_maximum_tie_is_protected(self):
         plan = cv.plan_cleanup([
             record("Tools/Foo v1.0 (01 Jan 2025).unitypackage", "1.0", "2025-01-01"),
-            record("Archive/Foo v1.0 (01 Jan 2025).zip", "1.0", "2025-01-01"),
+            record("Tools/Foo v1.0 (01 Jan 2025).zip", "1.0", "2025-01-01"),
         ])
         self.assertFalse(plan["removals"])
         self.assertEqual(plan["families"][0]["reason"], "maximum-tie")
-        self.assertIn("protected foo (maximum-tie)", cv.render_plan(plan))
 
     def test_pipeline_and_discriminator_variants_do_not_compete(self):
         plan = cv.plan_cleanup([

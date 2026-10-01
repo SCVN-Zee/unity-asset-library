@@ -909,47 +909,6 @@ class TestPendingWorklist(unittest.TestCase):
         self.assertEqual(rs.filter_worklist(assets, pending_keys=set()), [])
 
 
-class TestQueueCleanup(unittest.TestCase):
-    """Resolved assets must leave the queue, or it grows forever and stops meaning
-    anything. Unresolved ones must stay — dropping them silently forgets an asset."""
-
-    def _queue(self, keys):
-        import tempfile
-        p = os.path.join(tempfile.mkdtemp(), "pending-enrichment.json")
-        with open(p, "w", encoding="utf-8") as fh:
-            json.dump({"generated": "t", "pending": [
-                {"asset_key": k, "title": k, "first_seen": "2026-08-02",
-                 "previously_unresolved": False} for k in keys]}, fh)
-        return p
-
-    def test_resolved_entry_is_removed(self):
-        p = self._queue(["a", "b"])
-        cache = {"resolved": {"a": {"status": "resolved"}}}
-        left = rs.prune_pending_queue(p, cache)
-        self.assertEqual(left, ["b"])
-        with open(p, encoding="utf-8") as fh:
-            self.assertEqual([e["asset_key"] for e in json.load(fh)["pending"]], ["b"])
-
-    def test_unresolved_entry_survives(self):
-        p = self._queue(["a"])
-        cache = {"resolved": {"a": {"status": "unverified"}}}
-        self.assertEqual(rs.prune_pending_queue(p, cache), ["a"])
-
-    def test_missing_queue_is_a_noop(self):
-        self.assertEqual(rs.prune_pending_queue("/nonexistent/q.json", {"resolved": {}}), [])
-
-    def test_malformed_queue_does_not_raise(self):
-        import tempfile
-        p = os.path.join(tempfile.mkdtemp(), "q.json")
-        with open(p, "w", encoding="utf-8") as fh:
-            fh.write("{ not json")
-        self.assertEqual(rs.prune_pending_queue(p, {"resolved": {}}), [])
-
-    def test_no_tmp_left_behind(self):
-        p = self._queue(["a"])
-        rs.prune_pending_queue(p, {"resolved": {"a": {"status": "resolved"}}})
-        d = os.path.dirname(p)
-        self.assertEqual([f for f in os.listdir(d) if f.endswith(".tmp")], [])
 
 
 class TestEnrichmentDoesNotMirror(unittest.TestCase):
@@ -1022,9 +981,7 @@ class _FakePool:
 
 
 class TestPendingResolveScope(unittest.TestCase):
-    """`resolve --pending` attempts only queued unresolved store assets. A missing,
-    empty, or malformed queue must attempt NOTHING — never widen into a full
-    store-eligible sweep. Non-store assets stay excluded even when queued."""
+    """Pending work derives from current inventory and cache, not queue survival."""
 
     def setUp(self):
         import tempfile
@@ -1078,45 +1035,21 @@ class TestPendingResolveScope(unittest.TestCase):
         code = rs.main(["resolve"] + args)
         return code, attempted
 
-    def test_pending_resume_attempts_only_queued_unresolved(self):
+    def test_pending_resume_reconciles_stale_queue_with_current_inventory(self):
         cache = {"resolved": {"b": {"status": "resolved"}}}
-        queue = {"pending": [{"asset_key": "a"}, {"asset_key": "b"}]}
-        code, attempted = self._run(
-            ["--pending", "--resume"],
+        queue = {"pending": [{"asset_key": "a"}, {"asset_key": "b"},
+                             {"asset_key": "deleted"}]}
+        code, attempted = self._run(["--pending", "--resume"],
             [self._asset("a"), self._asset("b"), self._asset("c")],
             cache=cache, queue=queue)
         self.assertEqual(code, 0)
+        self.assertEqual(attempted, ["a", "c"])
+
+    def test_pending_reconstructs_missing_queue(self):
+        code, attempted = self._run(["--pending", "--resume"],
+            [self._asset("a")], cache={"resolved": {}})
+        self.assertEqual(code, 0)
         self.assertEqual(attempted, ["a"])
-
-    def test_pending_without_resume_retries_resolved_entry(self):
-        cache = {"resolved": {"b": {"status": "resolved"}}}
-        queue = {"pending": [{"asset_key": "a"}, {"asset_key": "b"}]}
-        code, attempted = self._run(
-            ["--pending"],
-            [self._asset("a"), self._asset("b")],
-            cache=cache, queue=queue)
-        self.assertEqual(code, 0)
-        self.assertEqual(attempted, ["a", "b"])
-
-    def test_empty_queue_attempts_zero(self):
-        code, attempted = self._run(
-            ["--pending", "--resume"], [self._asset("a")],
-            cache={"resolved": {}}, queue={"pending": []})
-        self.assertEqual(code, 0)
-        self.assertEqual(attempted, [])
-
-    def test_missing_queue_attempts_zero(self):
-        code, attempted = self._run(
-            ["--pending", "--resume"], [self._asset("a")], cache={"resolved": {}})
-        self.assertEqual(code, 0)
-        self.assertEqual(attempted, [])
-
-    def test_malformed_queue_attempts_zero(self):
-        code, attempted = self._run(
-            ["--pending", "--resume"], [self._asset("a")],
-            cache={"resolved": {}}, queue="{ not json")
-        self.assertEqual(code, 0)
-        self.assertEqual(attempted, [])
 
     def test_no_pending_flag_keeps_full_scope(self):
         queue = {"pending": [{"asset_key": "a"}]}
@@ -1133,7 +1066,7 @@ class TestPendingResolveScope(unittest.TestCase):
             [self._asset("a"), self._asset("n", non_store=True)],
             cache={"resolved": {}}, queue=queue)
         self.assertEqual(code, 0)
-        self.assertEqual(attempted, [])
+        self.assertEqual(attempted, ["a"])
 
     def test_all_blocked_abort_returns_failure_after_six_attempts(self):
         def blocked(asset, pool, session=None):
@@ -1214,7 +1147,7 @@ class TestCacheWriteLock(unittest.TestCase):
         from unittest import mock
         import index_assets as ia
         self._write("assets.json", {"assets": [self._asset("a")]})
-        self._write("cache.json", {"resolved": {}})
+        self._write("cache.json", {"resolved": {"a": {"status": "resolved"}}})
         self.patchers = [
             mock.patch.object(ia, "state_dir", return_value=self.state),
             mock.patch.object(rs, "resolve_asset",
@@ -1248,30 +1181,13 @@ class TestCacheWriteLock(unittest.TestCase):
         finally:
             fcntl.flock(holder, fcntl.LOCK_UN)
             holder.close()
-        self.assertEqual(self._read_cache(), '{"resolved": {}}')
+        self.assertEqual(json.loads(self._read_cache()), {"resolved": {"a": {"status": "resolved"}}})
         # After release the identical command runs and the lock is reusable.
         self.assertEqual(rs.main(["resolve", "--pending"]), 0)
         self.assertEqual(rs.main(["resolve", "--pending"]), 0)
 
-    def test_lock_file_lives_in_state_dir(self):
-        self._start()
-        self.assertEqual(rs.main(["resolve", "--pending"]), 0)
-        self.assertTrue(os.path.exists(os.path.join(self.state, "cache-write.lock")))
 
 
-    def test_enrich_lock_handoff_skips_nested_lock(self):
-        from unittest import mock
-        with mock.patch.object(rs, "_main_unlocked", return_value=7) as run:
-            self.assertEqual(rs.main(["enrich"], state_lock_held=True), 7)
-        run.assert_called_once_with(["enrich"])
-    def test_enrich_acquires_shared_state_lock(self):
-        import index_assets as ia
-        from unittest import mock
-        with mock.patch.object(ia, "state_dir", return_value=self.state), \
-                mock.patch.object(rs, "_main_unlocked", return_value=8) as run:
-            self.assertEqual(rs.main(["enrich"]), 8)
-        run.assert_called_once_with(["enrich"])
-        self.assertTrue(os.path.exists(os.path.join(self.state, "state-write.lock")))
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

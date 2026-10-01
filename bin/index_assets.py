@@ -16,6 +16,13 @@ one run and --state relocates the state directory (tests pass both to sandbox).
 State lives in the vault's .data/ directory, never in the tool repo.
 review-queue.md are generated outputs; React/Electron is the supported viewer.
 
+Stable family ownership is maintained by asset_identity; titles are discovery
+hints, not permanent user-data keys. Local moves use stat metadata without
+hydrating archives. Publisher/subfolder scope separates same-name discoveries;
+unknown publishers sharing the same folder and title cannot be distinguished
+without additional provenance. Pending enrichment is derived by pending_queue,
+so deleting its generated queue never discards unresolved work.
+
 Usage:
     python3 index_assets.py scan          # write <library>/.data/assets.json
     python3 index_assets.py emit          # write assets.csv + review-queue.md
@@ -32,6 +39,8 @@ import user_tags
 import re
 import sys
 import tempfile
+import unicodedata
+import asset_identity
 from datetime import datetime, timezone
 
 from progress import emit_progress, json_progress
@@ -120,6 +129,8 @@ def scan(root, strict=False, progress=None):
                 "size": st.st_size,
                 "mtime": st.st_mtime,
                 "st_blocks": st.st_blocks,
+                "file_identity": [st.st_dev, st.st_ino,
+                                  getattr(st, "st_birthtime_ns", 0)],
                 "format": "zip" if filename.endswith(".zip") else "unitypackage",
             })
     records.sort(key=lambda r: r["rel_path"])
@@ -291,8 +302,8 @@ def parse(rel_path):
 
 
 def normalize_title(title):
-    t = title.casefold()
-    t = re.sub(r"[^a-z0-9]+", " ", t)
+    t = unicodedata.normalize("NFC", title).casefold()
+    t = "".join(c if c.isalnum() else " " for c in t)
     return " ".join(t.split())
 
 
@@ -300,24 +311,15 @@ def base_key(parsed):
     """Identity WITHOUT pipeline. Two pipeline builds of one product share a base key
     but differ in asset_key, which is what lets group() call them variants rather than
     unrelated files."""
-    parts = [normalize_title(parsed["title"]).replace(" ", "-")]
+    family = json.loads(asset_identity.family_hint(parsed))
+    parts = [family[0], family[1]]
     parts += [d.lower() for d in parsed["discriminators"]]
     return "/".join(p for p in parts if p) or "unnamed"
 
 
 def asset_key(parsed):
-    """Identity: normalized title + discriminators + pipeline.
-
-    Discriminators stay in the key so a (PSD)/(Source)/(PRO) archive can never
-    share an identity with its plain sibling, making it structurally impossible
-    to flag an editable-source pack as redundant.
-    """
-    parts = [normalize_title(parsed["title"]).replace(" ", "-")]
-    for d in parsed["discriminators"]:
-        parts.append(d.lower())
-    if parsed["pipeline"]:
-        parts.append(parsed["pipeline"].lower())
-    return "/".join(p for p in parts if p) or "unnamed"
+    """Initial family key; persisted identities take precedence during rebuilds."""
+    return asset_identity.initial_key(parsed)
 
 
 # ---------------------------------------------------------------------------
@@ -350,7 +352,7 @@ def pick_latest(items, version_of=lambda x: x[0], prerelease_of=None):
 # Verdicts describe; they never prescribe an action. Nothing is ever moved.
 # ---------------------------------------------------------------------------
 
-def group(entries):
+def group(entries, keys=None):
     """Group size-identical archives and classify each cluster."""
     by_size = {}
     for e in entries:
@@ -365,7 +367,8 @@ def group(entries):
         dirs = {os.path.dirname(m["rel_path"]) for m in members}
         versions = {m.get("version") for m in members}
 
-        if len(bases) > 1:
+        if len(bases) > 1 or (keys and len(pipelines) == 1 and
+                             len({keys[m["rel_path"]] for m in members}) > 1):
             # Unrelated products that happen to share a byte count, e.g. the two
             # distinct 4096-byte broken downloads. Also covers (PSD)/(Source)/(PRO)
             # siblings, whose discriminators are part of the base key.
@@ -417,7 +420,7 @@ FOLDER_CATEGORY = {
 }
 
 
-def build(scanned, progress=None):
+def build(scanned, progress=None, identities=None):
     """Assemble one entry per asset with versions[] newest-first."""
     parsed_all = []
     for i, rec in enumerate(scanned):
@@ -425,9 +428,11 @@ def build(scanned, progress=None):
                       examined=i, built=0)
         p = parse(rec["rel_path"])
         p.update(size=rec["size"], mtime=rec["mtime"], st_blocks=rec["st_blocks"])
+        p["file_identity"] = rec.get("file_identity")
         parsed_all.append(p)
 
-    groups = group(parsed_all)
+    keys = asset_identity.assign(parsed_all, identities or {"version": 1, "assets": {}})
+    groups = group(parsed_all, keys)
     dup_reason = {}
     for g in groups:
         for member in g["members"]:
@@ -436,7 +441,7 @@ def build(scanned, progress=None):
 
     by_key = {}
     for p in parsed_all:
-        by_key.setdefault(asset_key(p), []).append(p)
+        by_key.setdefault(keys[p["rel_path"]], []).append(p)
 
     assets = []
     for i, (key, members) in enumerate(sorted(by_key.items())):
@@ -454,6 +459,7 @@ def build(scanned, progress=None):
                 "prerelease": m["prerelease"],
                 "file": m["rel_path"],
                 "size_bytes": m["size"],
+                "file_identity": m.get("file_identity"),
                 "release_date": m["release_date"],
                 "editor_version": m["editor_version"],
                 "pipeline": m["pipeline"],
@@ -492,6 +498,7 @@ def build(scanned, progress=None):
     emit_progress(progress, "build", len(by_key), len(by_key), None,
                   examined=len(scanned), built=len(assets))
     return {
+        "identity_version": 1,
         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "file_count": len(scanned),
         "asset_count": len(assets),
@@ -758,7 +765,7 @@ def diff_manifest(prev, now, had_previous=None):
     }
 
 
-def classify_added(paths, cache):
+def classify_added(paths, cache, data):
     """Split added files into new versions of known assets vs genuinely new assets.
 
     A known asset reuses its cached resolution with no network. A new asset needs a web
@@ -766,9 +773,10 @@ def classify_added(paths, cache):
     queued but flagged — re-queuing it silently would imply a fresh lookup will succeed.
     """
     new_assets, new_versions = [], []
+    by_path = {v["file"]: a["asset_key"] for a in data["assets"] for v in a["versions"]}
     for path in paths:
         parsed = parse(path)
-        key = asset_key(parsed)
+        key = by_path[path]
         record = (cache or {}).get(key)
         entry = {"asset_key": key, "title": parsed["title"], "path": path}
         if record and record.get("status") == "resolved":
@@ -831,35 +839,6 @@ def append_changelog(path, entry):
     write_atomic(path, CHANGELOG_HEADER + "\n" + entry.rstrip() + "\n\n" + body)
 
 
-def write_pending_queue(path, new_assets):
-    """Merge into the queue, preserving first_seen for entries already there."""
-    existing = {}
-    if os.path.exists(path):
-        try:
-            with open(path, encoding="utf-8") as fh:
-                existing = {e["asset_key"]: e for e in json.load(fh).get("pending", [])}
-        except (ValueError, KeyError):
-            # Do not silently forget the queue — that is exactly the failure the
-            # accumulate-with-first_seen design exists to avoid. Keep the bad file.
-            existing = {}
-            try:
-                os.replace(path, path + ".corrupt")
-                print(f"update: pending queue unreadable — preserved as "
-                      f"{os.path.basename(path)}.corrupt, starting a fresh queue")
-            except OSError:
-                print("update: pending queue unreadable and could not be preserved")
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    for a in new_assets:
-        if a["asset_key"] not in existing:
-            existing[a["asset_key"]] = {
-                "asset_key": a["asset_key"], "title": a["title"],
-                "first_seen": today,
-                "previously_unresolved": a["previously_unresolved"],
-            }
-    payload = {"generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-               "pending": [existing[k] for k in sorted(existing)]}
-    write_atomic(path, json.dumps(payload, indent=1, sort_keys=True))
-    return len(payload["pending"])
 
 
 # ---------------------------------------------------------------------------
@@ -898,12 +877,16 @@ def main(argv=None, state_lock_held=False, scanned=None, progress=None):
     probe_args, _ = probe.parse_known_args(argv)
     held = state_lock_held or probe_args.state_lock_held
     index_dir = os.path.abspath(probe_args.state) if probe_args.state else data_dir(probe_args.root) if probe_args.root else state_dir()
+    import storage
+    import resolve_store
     try:
         if held:
+            with resolve_store._cache_write_lock(index_dir, "index_assets"):
+                return _main_unlocked(argv, scanned=scanned, progress=progress)
+        with state_write_lock(index_dir, "index_assets", blocking=True), \
+                resolve_store._cache_write_lock(index_dir, "index_assets"):
             return _main_unlocked(argv, scanned=scanned, progress=progress)
-        with state_write_lock(index_dir, "index_assets", blocking=True):
-            return _main_unlocked(argv, scanned=scanned, progress=progress)
-    except user_tags.TagStoreError as exc:
+    except (user_tags.TagStoreError, storage.StorageError, ValueError, OSError) as exc:
         print(f"index_assets: {exc}")
         return 1
 def _main_unlocked(argv=None, scanned=None, progress=None):
@@ -924,6 +907,9 @@ def _main_unlocked(argv=None, scanned=None, progress=None):
     root = os.path.abspath(args.root) if args.root else cfg["vault_root"]
     index_dir = os.path.abspath(args.state) if args.state else data_dir(root)
     assets_json = os.path.join(index_dir, "assets.json")
+    import storage
+    import pending_queue
+    storage.recover(repo_dir(), state=index_dir)
 
     data = None
 
@@ -931,18 +917,15 @@ def _main_unlocked(argv=None, scanned=None, progress=None):
         # Read the previous state BEFORE overwriting it. assets.json is the record.
         prev, had_previous = {}, False
         if os.path.exists(assets_json):
-            try:
-                with open(assets_json, encoding="utf-8") as fh:
-                    prev = manifest_of(json.load(fh))
-                had_previous = True
-            except ValueError:
-                print("update: assets.json unreadable — establishing baseline")
+            with open(assets_json, encoding="utf-8") as fh:
+                prev = manifest_of(json.load(fh))
+            had_previous = True
         else:
             print("update: no previous state — establishing baseline")
 
         if scanned is None:
             scanned = scan(root, progress=progress)
-        data = build(scanned, progress=progress)
+        data, cache, snapshots = storage.prepare_index(index_dir, scanned, progress=progress)
         emit_progress(progress, "compare", 0, 1, None, examined=0)
         diff = diff_manifest(prev, {r["rel_path"]: r["size"] for r in scanned},
                              had_previous=had_previous)
@@ -951,53 +934,18 @@ def _main_unlocked(argv=None, scanned=None, progress=None):
                       index_removed=len(diff["removed"]),
                       index_resized=len(diff["resized"]))
 
-        cache = {}
-        cache_path = os.path.join(index_dir, "cache.json")
-        if os.path.exists(cache_path):
-            try:
-                with open(cache_path, encoding="utf-8") as fh:
-                    cache = json.load(fh).get("resolved", {})
-            except ValueError:
-                print("update: cache.json unreadable — treating all additions as new")
-
-        classified = classify_added(diff["added"], cache)
-
-        # build() regenerates entries from disk with empty store metadata, so writing it
-        # straight out would wipe every enrichment from the index (recoverable from
-        # cache.json, but the emitted viewer would be bare until someone noticed).
-        # The documented pipeline is scan -> enrich -> emit; update must not skip enrich.
-        # Imported lazily: resolve_store pulls write_atomic from this module.
-        try:
-            import resolve_store
-            overrides = {}
-            overrides_path = os.path.join(index_dir, "overrides.json")
-            if os.path.exists(overrides_path):
-                try:
-                    with open(overrides_path, encoding="utf-8") as fh:
-                        overrides = json.load(fh)
-                except ValueError:
-                    print("update: overrides.json unreadable — ignored")
-            data = resolve_store.merge(data, {"resolved": cache}, overrides)
-            emit_progress(progress, "merge", 1, 1, None, resolved=len(cache))
-        except ImportError:
-            print("update: resolve_store unavailable — index written without enrichment")
-
-        # Tags are user-owned: migrate any pre-user_tags.json tags out of the
-        # OLD assets.json before it is overwritten (CLI-only rescans included),
-        # then overlay the authoritative store over whatever merge produced.
-        user_tags.migrate(index_dir, lock_already_held=True)
-        data = user_tags.overlay(data, index_dir)
+        classified = classify_added(diff["added"], cache.get("resolved", {}), data)
+        emit_progress(progress, "merge", 1, 1, None, resolved=len(cache.get("resolved", {})))
         emit_progress(progress, "write", 0, 1, assets_json)
-        write_atomic(assets_json, json.dumps(data, indent=1, sort_keys=True))
+        storage.commit_snapshot(repo_dir(), index_dir, {"assets": data, **snapshots})
         emit_progress(progress, "write", 1, 1, assets_json)
 
         entry = format_changelog_entry(
             diff, classified, datetime.now().strftime("%Y-%m-%d %H:%M"))
         if entry:
             append_changelog(os.path.join(index_dir, "CHANGES.md"), entry)
-        queued = write_pending_queue(
-            os.path.join(index_dir, "pending-enrichment.json"),
-            classified["new_assets"])
+        queued = len(pending_queue.reconcile(
+            os.path.join(index_dir, "pending-enrichment.json"), data, cache))
 
         print(f"update: +{len(diff['added'])} -{len(diff['removed'])} "
               f"~{len(diff['resized'])}"
@@ -1011,10 +959,9 @@ def _main_unlocked(argv=None, scanned=None, progress=None):
 
     if "scan" in args.steps:
         scanned = scan(root, progress=progress)
-        data = build(scanned, progress=progress)
-        user_tags.migrate(index_dir, lock_already_held=True)
-        data = user_tags.overlay(data, index_dir)
-        write_atomic(assets_json, json.dumps(data, indent=1, sort_keys=True))
+        data, cache, snapshots = storage.prepare_index(index_dir, scanned, progress=progress)
+        storage.commit_snapshot(repo_dir(), index_dir, {"assets": data, **snapshots})
+        pending_queue.reconcile(os.path.join(index_dir, "pending-enrichment.json"), data, cache)
         dups = [g for g in data["duplicate_groups"] if g["verdict"] == "duplicate"]
         print(f"scan: {data['file_count']} files -> {data['asset_count']} assets, "
               f"{len(dups)} duplicate groups "
@@ -1026,6 +973,8 @@ def _main_unlocked(argv=None, scanned=None, progress=None):
                 data = json.load(fh)
         user_tags.migrate(index_dir, lock_already_held=True)
         data = user_tags.overlay(data, index_dir)
+        pending_queue.reconcile(os.path.join(index_dir, "pending-enrichment.json"),
+                                data, storage._read_cache(index_dir))
         data = annotate_pending(
             data, os.path.join(index_dir, "pending-enrichment.json"))
         rows = emit_csv(data, os.path.join(index_dir, "assets.csv"))

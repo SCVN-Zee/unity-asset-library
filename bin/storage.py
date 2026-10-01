@@ -7,6 +7,12 @@ config.json is only the agreed exception: the last-opened-library pointer.
 Legacy repo state/ is copied
 into .data once (gated by a durable completion marker), never overwritten,
 and never deleted.
+
+Package identity and annotation cutovers share the recovery journal so a failed
+rebuild cannot detach user data. Ambiguous legacy groups retain shared user
+annotations on each descendant, but store metadata cannot safely be inherited.
+Their original records remain in .data/identity-migration-backup.json.
+This migration backup is not an ongoing backup of later user edits.
 """
 
 from __future__ import annotations
@@ -34,7 +40,8 @@ JOURNAL_VERSION = 1
 DATA_DIR_NAME = ".data"
 _INSTANCE_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 _TXN_RE = re.compile(r"^[0-9a-f]{32}$")
-_ALLOWED = ("assets", "pending", "review", "meta", "csv", "config")
+_ALLOWED = ("assets", "pending", "review", "meta", "csv", "config",
+            "identities", "tags", "favorites", "cache", "overrides", "identity-backup")
 
 # Existing destination files win; migration keeps the old files as a recovery backup.
 _LEGACY_MIGRATABLE = ("assets.json", "cache.json", "overrides.json", "user_tags.json",
@@ -208,7 +215,10 @@ def _journal_read(state, legacy_output=False):
         raise StorageError("storage recovery journal contains unsafe progress")
     journal["backed_up"] = backed_up
     journal["existed"] = existed
-    if legacy_output:
+    if legacy_output and journal.get("layout") != "library":
+        if any(name not in ("assets", "pending", "review", "meta", "csv", "config")
+               for name in names):
+            raise StorageError("legacy recovery journal contains an unsafe file")
         # Legacy journals targeted the repo output dir for csv and the repo
         # config.json itself; recovery must restore those original paths.
         output_rel = journal.get("output_rel", ".")
@@ -229,6 +239,12 @@ def _targets(state):
         "meta": os.path.join(state, "index-meta.json"),
         "csv": os.path.join(state, "assets.csv"),
         "config": os.path.join(state, "config.json"),
+        "identities": os.path.join(state, "identities.json"),
+        "tags": os.path.join(state, "user_tags.json"),
+        "favorites": os.path.join(state, "favorites.json"),
+        "cache": os.path.join(state, "cache.json"),
+        "overrides": os.path.join(state, "overrides.json"),
+        "identity-backup": os.path.join(state, "identity-migration-backup.json"),
     }
 
 
@@ -293,6 +309,7 @@ def recover(repo, state=None):
     journal = _journal_read(state, legacy_output=legacy_mode)
     if journal is None:
         return False
+    legacy_mode = legacy_mode and journal.get("layout") != "library"
     txn = journal["txn"]
     names = journal["entries"]
     committed = journal.get("status") == "committed"
@@ -463,18 +480,127 @@ def status(repo=None):
                           error=error, needs_index=needs_index)
 
 
-def _pending_for(data, cache):
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    rows = []
-    resolved = cache.get("resolved", {}) if isinstance(cache, dict) else {}
-    for asset in data.get("assets", []):
-        if asset.get("non_store") or (resolved.get(asset.get("asset_key"), {}).get("status") == "resolved"):
-            continue
-        rows.append({"asset_key": asset["asset_key"], "title": asset["name"],
-                     "first_seen": today,
-                     "previously_unresolved": bool(resolved.get(asset.get("asset_key")))})
-    return {"generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "pending": sorted(rows, key=lambda row: row["asset_key"])}
+def prepare_index(state, scanned, progress=None):
+    """Build and rekey in memory; caller commits all changed stores together.
+
+    Legacy merged annotations follow every descendant; ambiguous cache and
+    override records do not. Original records are retained in a migration backup.
+    Must run under the shared state lock, after recovery.
+    """
+    identities = ia.asset_identity.load(state)
+    previous = {"assets": []}
+    path = os.path.join(state, "assets.json")
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                previous = json.load(fh)
+        except (OSError, ValueError) as exc:
+            raise StorageError("asset index is unreadable; refusing identity migration") from exc
+        if not isinstance(previous, dict) or not isinstance(previous.get("assets"), list):
+            raise StorageError("asset index is malformed; refusing identity migration")
+        if any(not isinstance(asset, dict) or not isinstance(asset.get("asset_key"), str)
+               or not isinstance(asset.get("versions"), list) for asset in previous["assets"]):
+            raise StorageError("asset index contains an invalid package identity")
+    if previous.get("identity_version") == 1 and not identities["assets"]:
+        identities = ia.asset_identity.snapshot(previous, identities)
+    data = ia.build(scanned, progress=progress, identities=identities)
+    changes = ia.asset_identity.rekeys(previous, data)
+    cache = _read_cache(state)
+    overrides = {}
+    overrides_path = os.path.join(state, "overrides.json")
+    if os.path.exists(overrides_path):
+        try:
+            with open(overrides_path, encoding="utf-8") as fh:
+                overrides = json.load(fh)
+        except (OSError, ValueError) as exc:
+            raise StorageError("metadata overrides are unreadable") from exc
+        if not isinstance(overrides, dict):
+            raise StorageError("metadata overrides are malformed")
+    ia.user_tags.migrate(state, lock_already_held=True)
+    tags = ia.user_tags.load(state)
+    snapshots = {"identities": ia.asset_identity.snapshot(data, identities)}
+    if changes:
+        favorites = {"favorites": []}
+        favorites_path = os.path.join(state, "favorites.json")
+        if os.path.exists(favorites_path):
+            try:
+                with open(favorites_path, encoding="utf-8") as fh:
+                    favorites = json.load(fh)
+            except (OSError, ValueError) as exc:
+                raise StorageError("favorites are unreadable; refusing identity migration") from exc
+            if (not isinstance(favorites, dict) or set(favorites) != {"favorites"}
+                    or not isinstance(favorites["favorites"], list)
+                    or not all(isinstance(key, str) and key for key in favorites["favorites"])):
+                raise StorageError("favorites are malformed; refusing identity migration")
+        if not os.path.exists(os.path.join(state, "identity-migration-backup.json")):
+            snapshots["identity-backup"] = {"assets": previous, "tags": tags,
+                                            "favorites": favorites, "cache": cache,
+                                            "overrides": overrides}
+        tags = {"tags": tags["tags"], "assignments": ia.asset_identity.migrate_keyed(
+            tags["assignments"], changes, shared=True)}
+        snapshots["tags"] = tags
+        if os.path.exists(favorites_path):
+            snapshots["favorites"] = {"favorites": sorted({target
+                for key in favorites["favorites"] for target in changes.get(key, [key])})}
+        cache = dict(cache)
+        for name in ("resolved", "misses"):
+            cache[name] = ia.asset_identity.migrate_keyed(cache.get(name, {}), changes)
+        if os.path.exists(os.path.join(state, "cache.json")):
+            snapshots["cache"] = cache
+        overrides = ia.asset_identity.migrate_keyed(overrides, changes)
+        if os.path.exists(overrides_path):
+            snapshots["overrides"] = overrides
+    data = resolve_store.merge(data, cache, overrides)
+    for asset in data["assets"]:
+        asset["tags"] = sorted(tags["assignments"].get(asset["asset_key"], []))
+        asset["tag_source"] = "user"
+    import pending_queue
+    existing = pending_queue.load_existing(os.path.join(state, "pending-enrichment.json"))
+    if changes and existing:
+        existing = {"pending": [dict(row, asset_key=target)
+            for row in existing["pending"]
+            for target in changes.get(row["asset_key"], [row["asset_key"]])]}
+    snapshots["pending"] = pending_queue.pending_payload(data, cache, existing)
+    return data, cache, snapshots
+
+
+def commit_snapshot(repo, state, payloads):
+    """Journal one coherent index/identity/user-data cutover under the state lock."""
+    txn = uuid.uuid4().hex
+    names = list(payloads)
+    if any(name not in _ALLOWED for name in names):
+        raise StorageError("unsafe storage transaction entry")
+    journal = {"version": JOURNAL_VERSION, "txn": txn, "status": "prepared",
+               "layout": "library", "entries": names, "backed_up": [], "existed": []}
+    _write_json(_journal_path(state), journal)
+    try:
+        for name, payload in payloads.items():
+            _, stage, _ = _entry_paths(state, txn, name)
+            if name == "review":
+                ia.emit_review_queue(payload, stage)
+            elif name == "csv":
+                ia.emit_csv(payload, stage)
+            else:
+                _write_json(stage, payload)
+        journal["status"] = "applying"
+        _write_json(_journal_path(state), journal)
+        for name in names:
+            target, stage, backup = _entry_paths(state, txn, name)
+            if os.path.exists(target):
+                journal["existed"].append(name)
+                os.replace(target, backup)
+            journal["backed_up"].append(name)
+            _write_json(_journal_path(state), journal)
+            os.replace(stage, target)
+        journal["status"] = "committed"
+        _write_json(_journal_path(state), journal)
+        recover(repo, state=state)
+    except BaseException:
+        try:
+            recover(repo, state=state)
+        except BaseException:
+            pass
+        raise
 
 
 def _read_cache(state):
@@ -486,7 +612,9 @@ def _read_cache(state):
             cache = json.load(fh)
     except (OSError, ValueError) as exc:
         raise StorageError("metadata cache is unreadable; refusing to replace it") from exc
-    if not isinstance(cache, dict) or not isinstance(cache.get("resolved", {}), dict):
+    if (not isinstance(cache, dict) or not isinstance(cache.get("resolved", {}), dict)
+            or not isinstance(cache.get("misses", {}), dict)
+            or any(not isinstance(record, dict) for record in cache.get("resolved", {}).values())):
         raise StorageError("metadata cache is invalid; refusing to replace it")
     return cache
 
@@ -500,10 +628,11 @@ def configure(repo=None, root=None, instance_id=None, progress=False):
     selected = _canonical_root(root)
     _reject_workspace_overlap(selected, repo)
     state = _ensure_data_dir(selected)
-    txn = uuid.uuid4().hex
+    # The shared transaction helper supplies its own recovery token.
     progress_cb = json_progress if progress else None
     with _lock(os.path.join(state, "server-instance.lock"), blocking=False):
-        with ia.state_write_lock(state, "storage configure", blocking=True):
+        with ia.state_write_lock(state, "storage configure", blocking=True), \
+                resolve_store._cache_write_lock(state, "storage configure"):
             recover(repo, state=state)
             # Legacy repo state only ever migrates into the library its
             # index binding names; switching libraries never bleeds data.
@@ -512,69 +641,15 @@ def configure(repo=None, root=None, instance_id=None, progress=False):
             scanned = ia.scan(selected, strict=True, progress=progress_cb)
             if _identity(selected) != before:
                 raise StorageError("vault root identity changed during scan")
-            data = ia.build(scanned, progress=progress_cb)
-            cache = _read_cache(state)
-            overrides_path = os.path.join(state, "overrides.json")
-            overrides = {}
-            if os.path.exists(overrides_path):
-                try:
-                    with open(overrides_path, encoding="utf-8") as fh:
-                        overrides = json.load(fh)
-                except (OSError, ValueError) as exc:
-                    raise StorageError("metadata overrides are unreadable") from exc
-            data = resolve_store.merge(data, cache, overrides)
-            try:
-                ia.user_tags.migrate(state, lock_already_held=True)
-                data = ia.user_tags.overlay(data, state)
-            except ia.user_tags.TagStoreError as exc:
-                raise StorageError(str(exc)) from exc
-            pending = _pending_for(data, cache)
+            data, cache, snapshots = prepare_index(state, scanned, progress=progress_cb)
+            pending = snapshots.pop("pending")
             metadata = {"api_version": API_VERSION, "vault_root": selected,
                         "repo": repo, "root_identity": before}
             config = {"vault_root": selected, "repo": repo, "api_version": API_VERSION}
-            stage_names = ["assets", "pending", "review", "meta", "csv", "config"]
-            journal = {"version": JOURNAL_VERSION, "txn": txn, "status": "prepared",
-                       "entries": stage_names,
-                       "backed_up": [], "existed": []}
-            _write_json(_journal_path(state), journal)
-            try:
-                for name in stage_names:
-                    target, stage, _ = _entry_paths(state, txn, name)
-                    os.makedirs(os.path.dirname(stage), exist_ok=True)
-                    if name == "assets":
-                        _write_json(stage, data)
-                    elif name == "pending":
-                        _write_json(stage, pending)
-                    elif name == "meta":
-                        _write_json(stage, metadata)
-                    elif name == "review":
-                        ia.emit_review_queue(data, stage)
-                    elif name == "csv":
-                        ia.emit_csv(data, stage)
-                    else:
-                        _write_json(stage, config)
-                journal["status"] = "applying"
-                _write_json(_journal_path(state), journal)
-                for name in stage_names:
-                    target, stage, backup = _entry_paths(state, txn, name)
-                    if os.path.exists(target):
-                        journal["existed"].append(name)
-                        os.replace(target, backup)
-                    journal["backed_up"].append(name)
-                    _write_json(_journal_path(state), journal)
-                    os.replace(stage, target)
-                journal["status"] = "committed"
-                _write_json(_journal_path(state), journal)
-                recover(repo, state=state)
-                # The repo config.json pointer is written only after the
-                # journaled commit succeeded.
-                _write_pointer(repo, selected)
-            except BaseException:
-                try:
-                    recover(repo, state=state)
-                except BaseException:
-                    pass
-                raise
+            commit_snapshot(repo, state, {"assets": data, "pending": pending,
+                "review": data, "meta": metadata, "csv": data, "config": config,
+                **snapshots})
+            _write_pointer(repo, selected)
     return _state_payload(repo, path=selected, ready=True, needs_setup=False, error=None)
 
 

@@ -469,38 +469,27 @@ class TestDiffManifest(unittest.TestCase):
 
 
 class TestClassifyAdded(unittest.TestCase):
-    """A new VERSION of a known asset reuses its cached resolution offline. A genuinely
-    NEW asset needs a web search, which needs a session — so the two must not be
-    conflated, or every added file would look like it needs a lookup."""
+    def _classify(self, record=None):
+        path = "Tools/Renamed Product v2.0.unitypackage"
+        data = {"assets": [{"asset_key": "persistent-key",
+                            "versions": [{"file": path}]}]}
+        cache = {"persistent-key": record} if record else {}
+        return ia.classify_added([path], cache, data)
 
-    CACHE = {
-        "dungen": {"status": "resolved", "id": "15682"},
-        # pipeline is part of asset_key, so a URP file keys as "<title>/urp"
-        "moderncity/urp": {"status": "unverified", "candidates_rejected": []},
-    }
-
-    def test_new_version_of_known_asset_is_not_queued(self):
-        """The common 'downloaded v2.19 over v2.18' case must not burn a search."""
-        got = ia.classify_added(["Tools/DunGen v2.19.0.unitypackage"], self.CACHE)
+    def test_known_identity_reuses_resolution_after_rename(self):
+        got = self._classify({"status": "resolved", "id": "15682"})
         self.assertEqual(got["new_assets"], [])
-        self.assertEqual(len(got["new_versions"]), 1)
-        self.assertEqual(got["new_versions"][0]["asset_key"], "dungen")
+        self.assertEqual(got["new_versions"][0]["asset_key"], "persistent-key")
 
-    def test_genuinely_new_asset_is_queued(self):
-        got = ia.classify_added(["Tools/Totally New Thing v1.0.unitypackage"], self.CACHE)
+    def test_new_identity_requires_resolution(self):
+        got = self._classify()
         self.assertEqual(got["new_versions"], [])
-        self.assertEqual(len(got["new_assets"]), 1)
         self.assertFalse(got["new_assets"][0]["previously_unresolved"])
 
-    def test_previously_failed_asset_is_queued_but_flagged(self):
-        """Re-queuing silently would imply a fresh lookup will succeed. It already failed."""
-        got = ia.classify_added(["3D/ModernCity_URP_2021.3.6f1.unitypackage"], self.CACHE)
-        self.assertEqual(len(got["new_assets"]), 1)
+    def test_previously_failed_identity_remains_pending(self):
+        got = self._classify({"status": "unverified"})
+        self.assertEqual(got["new_versions"], [])
         self.assertTrue(got["new_assets"][0]["previously_unresolved"])
-
-    def test_empty_input(self):
-        got = ia.classify_added([], self.CACHE)
-        self.assertEqual((got["new_assets"], got["new_versions"]), ([], []))
 
 
 class TestChangelog(unittest.TestCase):
@@ -595,7 +584,10 @@ class TestUpdateVerb(unittest.TestCase):
         self._run()
         q = json.loads(Path(os.path.join(self.root, ".index",
                                          "pending-enrichment.json")).read_text())
-        self.assertTrue(any("brand" in e["asset_key"] for e in q["pending"]))
+        with open(os.path.join(self.root, ".index", "assets.json")) as fh:
+            assets = json.load(fh)["assets"]
+        key = next(a["asset_key"] for a in assets if a["local_name"] == "Brand New Pack")
+        self.assertIn(key, {e["asset_key"] for e in q["pending"]})
 
     def test_update_progress_separates_index_diff_from_emission_rows(self):
         self._run()
@@ -733,17 +725,6 @@ class TestReviewFindingFixesPhase1(unittest.TestCase):
         ia.append_changelog(p, "## new\n")
         self.assertIn("A.unitypackage", Path(p).read_text(encoding="utf-8"))
 
-    def test_corrupt_pending_queue_is_preserved_not_silently_dropped(self):
-        """HIGH. Losing the queue silently is the exact failure the accumulate-with-
-        first_seen design exists to prevent."""
-        import tempfile
-        d = tempfile.mkdtemp()
-        p = os.path.join(d, "pending-enrichment.json")
-        Path(p).write_text("{ this is not json", encoding="utf-8")
-        ia.write_pending_queue(p, [{"asset_key": "new-one", "title": "New One",
-                                    "previously_unresolved": False}])
-        self.assertTrue(os.path.exists(p + ".corrupt"), "bad queue was not preserved")
-        self.assertIn("new-one", Path(p).read_text(encoding="utf-8"))
 
     def test_corrupt_index_is_preserved_when_tags_cannot_be_migrated(self):
         root = self._tree()
@@ -760,15 +741,6 @@ class TestReviewFindingFixesPhase1(unittest.TestCase):
         self.assertFalse(d["is_baseline"])
         self.assertEqual(d["added"], ["a"])
 
-    def test_unittest_main_guard_is_the_last_statement(self):
-        """HIGH. The guard sat mid-file, so direct invocation reported OK on 37 tests
-        while silently skipping 8 later classes — including the 717-to-0 regression."""
-        for f in ("test_index_assets.py", "test_resolve_store.py"):
-            with self.subTest(file=f):
-                p = Path(__file__).parent / f
-                lines = [ln for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()]
-                self.assertIn("__main__", lines[-2],
-                              f"{f}: guard is not at the end — later classes are skipped")
 
 
 

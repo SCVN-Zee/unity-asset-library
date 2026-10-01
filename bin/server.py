@@ -161,7 +161,7 @@ class ViewerService:
         self._job_thread = None
         self._action_thread = None
         self._scan = ia.scan
-        self._plan_cleanup = cv.plan_cleanup
+        self._plan_cleanup = self._plan_cleanup_impl
         self._capture_cleanup_snapshot = cv.capture_snapshot
         self._apply_cleanup = cv.apply_cleanup
         self._load_assets = self._load_assets_impl
@@ -171,6 +171,7 @@ class ViewerService:
         self._index_update = self._index_update_impl
         try:
             with ia.state_write_lock(self.state, "storage migration", blocking=True):
+                storage.recover(self.repo, state=self.state)
                 storage.ensure_migrated(self.repo, cfg)
         except storage.StorageError as exc:
             raise SafetyError(str(exc)) from exc
@@ -193,14 +194,19 @@ class ViewerService:
     def _index_update_impl(self, scanned, progress=None):
         return ia.main(["update", "--root", self.root, "--state", self.state],
                        state_lock_held=True, scanned=scanned, progress=progress)
-    def _pending_count(self):
-        path = os.path.join(self.state, "pending-enrichment.json")
-        if not os.path.exists(path):
-            return 0
+
+    def _plan_cleanup_impl(self, scanned):
         try:
-            with open(path, encoding="utf-8") as fh:
-                return len(json.load(fh).get("pending", []))
-        except (ValueError, OSError):
+            return cv.plan_cleanup(scanned, ia.asset_identity.load(self.state))
+        except ValueError as exc:
+            raise SafetyError(str(exc)) from exc
+
+    def _pending_count(self):
+        from pending_queue import pending_payload
+        try:
+            return len(pending_payload(self._load_assets(),
+                                       storage._read_cache(self.state))["pending"])
+        except (ValueError, OSError, storage.StorageError):
             return 0
 
     # -- locks --------------------------------------------------------------
@@ -514,13 +520,13 @@ class ViewerService:
     def op_set_favorite(self, asset_key, favorite):
         """Atomic, idempotent set keyed on asset identity, under the shared
         state write lock so CLI index writers cannot interleave."""
-        try:
-            keys = {a["asset_key"] for a in self._load_assets()["assets"]}
-        except (KeyError, TypeError, ValueError) as exc:
-            raise SafetyError("the asset index is unreadable") from exc
-        if asset_key not in keys:
-            raise UnknownAsset(asset_key)
         with self.state_write_lock():
+            try:
+                keys = {a["asset_key"] for a in self._load_assets()["assets"]}
+            except (KeyError, TypeError, ValueError) as exc:
+                raise SafetyError("the asset index is unreadable") from exc
+            if asset_key not in keys:
+                raise UnknownAsset(asset_key)
             current = set(self._read_favorites())
             if favorite:
                 current.add(asset_key)
@@ -1089,14 +1095,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         try:
             if path == "/api/state":
                 self._send_json(service.op_state())
-            elif path == "/api/assets":
-                self._send_json(service.op_assets())
-            elif path == "/api/tags":
-                self._send_json(service.op_tags())
-            elif path == "/api/favorites":
-                self._send_json(service.op_favorites())
-            elif path == "/api/preferences":
-                self._send_json(service.op_preferences())
+            elif path in ("/api/assets", "/api/tags", "/api/favorites", "/api/preferences"):
+                # Readers must not observe a partially applied identity cutover.
+                with ia.state_write_lock(service.state, "HTTP snapshot", blocking=True):
+                    if path == "/api/assets":
+                        self._send_json(service.op_assets())
+                    elif path == "/api/tags":
+                        self._send_json(service.op_tags())
+                    elif path == "/api/favorites":
+                        self._send_json(service.op_favorites())
+                    else:
+                        self._send_json(service.op_preferences())
             elif path.startswith("/api/action/"):
                 snapshot = service.op_action(path[len("/api/action/"):])
                 if snapshot is None:

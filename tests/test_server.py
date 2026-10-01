@@ -308,16 +308,23 @@ class TestApiAndBoundary(ServerHarnessTestCase):
             with self.subTest(path=path):
                 self.assertEqual(status, 404, data)
 
-    def test_state_exposes_token_and_pending_count(self):
+    def test_state_exposes_token_and_derives_pending_from_inventory(self):
         with open(os.path.join(self.h.state, "pending-enrichment.json"), "w") as fh:
             json.dump({"pending": [{"asset_key": "a"}, {"asset_key": "b"}]}, fh)
         status, headers, body = self.h.request("GET", "/api/state")
         body = json.loads(body)
         self.assertEqual(status, 200)
-        self.assertEqual(body["pending_enrichment"], 2)
+        self.assertEqual(body["pending_enrichment"], 1)  # Only the current k1 asset exists.
         self.assertEqual(body["service"], "unity-asset-library")
         self.assertTrue(body["csrf"])
         self.assertIsNone(body["job"])
+        with open(os.path.join(self.h.state, "cache.json"), "w") as fh:
+            json.dump({"resolved": {"k1": {"status": "resolved"}}}, fh)
+        _, _, resolved = self.h.request("GET", "/api/state")
+        self.assertEqual(json.loads(resolved)["pending_enrichment"], 0)
+        os.unlink(os.path.join(self.h.state, "cache.json"))
+        _, _, reset = self.h.request("GET", "/api/state")
+        self.assertEqual(json.loads(reset)["pending_enrichment"], 1)
 
     def test_assets_endpoint_returns_authoritative_index(self):
         self.h._make_archive("A.unitypackage", b"aaa")
@@ -471,7 +478,7 @@ class TestResyncAndCleanup(ServerHarnessTestCase):
         service._load_assets = service._load_assets_impl
         service._index_update = service._index_update_impl
         path = os.path.join(self.h.state, "assets.json")
-        previous = {"assets": [{"versions": [
+        previous = {"assets": [{"asset_key": "a", "versions": [
             {"file": "gone.unitypackage", "size_bytes": 9},
             {"file": "a.unitypackage", "size_bytes": 1}]}]}
         with open(path, "w") as fh:

@@ -23,6 +23,11 @@ Transport outcomes are typed Hit | NoResult | Blocked. Blocked aborts the run an
 writes nothing: collapsing Blocked into NoResult would cache ~861 permanent false
 misses and then report a poisoned cache as a 100% hit rate.
 
+--pending selects all current unresolved store-eligible identities. Its JSON
+queue is reconstructible bookkeeping, not an independent source of work;
+missing/corrupt queues therefore do not suppress lookups. Use --resume for
+restartable resolution and export-titles --pending for an offline worklist.
+
 Usage:
     python3 resolve_store.py spike            # 30-asset calibration gate
     python3 resolve_store.py resolve --resume # full pass, restartable
@@ -46,7 +51,7 @@ import urllib.parse
 from urllib.parse import urlsplit, urlunsplit
 
 import requests
-
+import pending_queue
 try:
     from progress import json_progress
 except ImportError:  # pragma: no cover - direct legacy imports during bootstrap
@@ -495,30 +500,6 @@ def filter_worklist(assets, pending_keys=None):
     return rows
 
 
-def prune_pending_queue(path, cache):
-    """Drop entries whose cache record is resolved; keep everything else.
-
-    Only `resolved` leaves the queue. Dropping an unresolved entry would silently forget
-    an asset, which is the failure the accumulate-with-first_seen design exists to avoid.
-    Returns the remaining asset_keys.
-    """
-    if not os.path.exists(path):
-        return []
-    try:
-        with open(path, encoding="utf-8") as fh:
-            pending = json.load(fh).get("pending", [])
-    except (ValueError, KeyError, TypeError):
-        print(f"{os.path.basename(path)} unreadable — queue left untouched")
-        return []
-    resolved = (cache or {}).get("resolved", {})
-    kept = [e for e in pending
-            if (resolved.get(e["asset_key"]) or {}).get("status") != "resolved"]
-    if len(kept) != len(pending):
-        write_atomic_json(path, {
-            "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "pending": kept})
-    return [e["asset_key"] for e in kept]
-
 
 def write_atomic_json(path, obj):
     from index_assets import write_atomic
@@ -847,32 +828,41 @@ def _cache_write_lock(index_dir, command):
         fh.close()
 
 
-def load_pending_keys(index_dir, label):
-    """Queued asset_keys as a set. Missing, empty, or malformed queues yield an
-    EMPTY set — never None — so a broken queue can never widen a --pending run
-    into a full store-eligible sweep."""
-    path = os.path.join(index_dir, "pending-enrichment.json")
-    keys = set()
-    if os.path.exists(path):
-        try:
-            with open(path, encoding="utf-8") as fh:
-                keys = {e["asset_key"] for e in json.load(fh).get("pending", [])}
-        except (ValueError, KeyError, TypeError):
-            print(f"{label}: pending queue unreadable — attempting nothing")
-    return keys
+def load_pending_keys(index_dir, data, cache, lock_already_held=False):
+    """Reconstruct pending keys while serializing queue snapshot writers."""
+    from index_assets import state_write_lock
+    with state_write_lock(index_dir, "pending reconciliation", blocking=True,
+                          already_held=lock_already_held):
+        return set(pending_queue.reconcile(
+            os.path.join(index_dir, "pending-enrichment.json"), data, cache))
+
+
+def _read_index(index_dir, lock_already_held=False):
+    from index_assets import repo_dir, state_write_lock
+    import storage
+    with state_write_lock(index_dir, "resolver snapshot", blocking=True,
+                          already_held=lock_already_held):
+        storage.recover(repo_dir(), state=index_dir)
+        with open(os.path.join(index_dir, "assets.json"), encoding="utf-8") as fh:
+            return json.load(fh)
 
 
 def main(argv=None, state_lock_held=False):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if state_lock_held and "--state-lock-held" not in argv:
+        argv.append("--state-lock-held")
     probe = argparse.ArgumentParser(add_help=False)
     probe.add_argument("command", choices=["spike", "resolve", "enrich", "export-titles", "import-ids"])
     probe.add_argument("--state-lock-held", action="store_true")
     probe.add_argument("--state", default=None)
+    probe.add_argument("--pending", action="store_true")
     probe_args, _ = probe.parse_known_args(argv)
     held = state_lock_held or probe_args.state_lock_held
-    if probe_args.command == "enrich" and not held:
+    if probe_args.command in ("enrich", "export-titles"):
         from index_assets import state_dir, state_write_lock
         index_dir = os.path.abspath(probe_args.state) if probe_args.state else state_dir()
-        with state_write_lock(index_dir, "resolve_store enrich", blocking=True):
+        with state_write_lock(index_dir, "resolve_store " + probe_args.command, blocking=True,
+                              already_held=held), _cache_write_lock(index_dir, probe_args.command):
             return _main_unlocked(argv)
     return _main_unlocked(argv)
 def _main_unlocked(argv=None):
@@ -903,11 +893,11 @@ def _main_unlocked(argv=None):
     assets_json = os.path.join(index_dir, "assets.json")
     cache_path = os.path.join(index_dir, "cache.json")
     overrides_path = os.path.join(index_dir, "overrides.json")
-    with open(assets_json, encoding="utf-8") as fh:
-        data = json.load(fh)
+    data = _read_index(index_dir, lock_already_held=True) if args.command in ("enrich", "export-titles") else None
 
     if args.command == "export-titles":
-        pending_keys = load_pending_keys(index_dir, "export-titles") if args.pending else None
+        cache = load_cache(cache_path) if args.pending else None
+        pending_keys = load_pending_keys(index_dir, data, cache, lock_already_held=True) if args.pending else None
         rows = filter_worklist(data["assets"], pending_keys)
         out = args.out or os.path.join(index_dir, "search-worklist.json")
         write_atomic_json(out, rows)
@@ -926,6 +916,7 @@ def _main_unlocked(argv=None):
         with open(args.ids_file, encoding="utf-8") as fh:
             supplied = json.load(fh)
         with _cache_write_lock(index_dir, args.command):
+            data = _read_index(index_dir, args.state_lock_held)
             by_key = {a["asset_key"]: a for a in data["assets"]}
             cache = load_cache(cache_path)
             session = requests.Session()
@@ -984,9 +975,8 @@ def _main_unlocked(argv=None):
         from index_assets import write_atomic
         data = user_tags.overlay(data, index_dir)
         write_atomic(assets_json, json.dumps(data, indent=1, sort_keys=True))
-        remaining = prune_pending_queue(
-            os.path.join(index_dir, "pending-enrichment.json"),
-            {"resolved": cache.get("resolved", {})})
+        remaining = pending_queue.reconcile(
+            os.path.join(index_dir, "pending-enrichment.json"), data, cache)
         e = data["enrichment"]
         _progress(args.progress_json, "enrich", e["resolved"], e["store_eligible"],
                   counts={"inventory_resolved": e["resolved"],
@@ -1002,10 +992,11 @@ def _main_unlocked(argv=None):
         return 0
 
     with _cache_write_lock(index_dir, args.command):
+        data = _read_index(index_dir, args.state_lock_held)
         cache = load_cache(cache_path)
         eligible = [a for a in data["assets"] if not a.get("non_store")]
         if args.pending:
-            pending_keys = load_pending_keys(index_dir, args.command)
+            pending_keys = load_pending_keys(index_dir, data, cache, args.state_lock_held)
             eligible = [a for a in eligible if a["asset_key"] in pending_keys]
             if not pending_keys:
                 print("  (pending queue is empty — attempting nothing)")

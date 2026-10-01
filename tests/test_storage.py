@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import json
+import contextlib
+import io
 import os
 import sys
 import tempfile
@@ -268,6 +270,8 @@ class StorageTest(unittest.TestCase):
         ia.write_atomic(os.path.join(self.repo, "config.json"),
                         json.dumps({"vault_root": moved}))
         result = storage.status(self.repo)
+        self.assertTrue(result["needsIndex"])
+        self.assertFalse(result["needsSetup"])
         storage.configure(self.repo, moved, "instance-test-2")
         moved_state = storage.data_dir(moved)
         self.assertEqual(user_tags.load(moved_state)["assignments"][key], ["keeper"])
@@ -275,6 +279,30 @@ class StorageTest(unittest.TestCase):
             rebuilt = json.load(fh)
         self.assertEqual([v["file"] for a in rebuilt["assets"] for v in a["versions"]],
                          ["A v1.0.unitypackage"])
+
+    def test_replaced_root_remembers_path_and_rebuilds_preserving_tags(self):
+        storage.configure(self.repo, self.root_a, "instance-test-1")
+        state = self._state(self.root_a)
+        with open(os.path.join(state, "assets.json"), encoding="utf-8") as fh:
+            key = json.load(fh)["assets"][0]["asset_key"]
+        user_tags.mutate(state, {"action": "assign", "tag": "keeper", "asset_key": key})
+        old = self.root_a + "-old"
+        os.rename(self.root_a, old)
+        os.mkdir(self.root_a)
+        os.rename(os.path.join(old, ".data"), state)
+        os.rename(os.path.join(old, "A v1.0.unitypackage"),
+                  os.path.join(self.root_a, "A v1.0.unitypackage"))
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = storage.main(["--repo", self.repo, "status"])
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["path"], os.path.realpath(self.root_a))
+        self.assertTrue(result["needsIndex"])
+        self.assertFalse(result["needsSetup"])
+        self.assertEqual(code, 0)
+        storage.configure(self.repo, result["path"], "instance-test-2")
+        self.assertTrue(storage.status(self.repo)["ready"])
+        self.assertEqual(user_tags.load(state)["assignments"][key], ["keeper"])
 
     def test_unwritable_library_data_fails_without_fallback(self):
         legacy = self._write_legacy_state(self.root_a)

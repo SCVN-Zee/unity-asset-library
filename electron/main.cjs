@@ -397,6 +397,8 @@ async function bootstrapStorage() {
     captureLegacyLibraryRoot();
     return backendSession;
   } catch (error) {
+    // A failed status command can still identify the saved (offline) folder.
+    if (error.outcome) applyStorageOutcome(parseStorageOutcome(error.outcome), !backendSession?.external);
     setStorageError(error, { canChange: !backendSession?.external, needsSetup: false });
     return null;
   } finally {

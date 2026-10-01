@@ -449,7 +449,14 @@ def status(repo=None):
     if fresh is not None and set(fresh) != {"vault_root"}:
         _write_pointer(repo, root)
     ready, error = _valid_index(state, root, repo)
-    needs_index = not ready and error == "index is not built yet"
+    # A stale binding invalidates the index, not the saved folder selection.
+    # Re-scan before serving assets; keep identity checks during the scan.
+    needs_index = not ready and error in {
+        "index is not built yet",
+        "index belongs to a different vault root",
+        "vault root identity changed; rebuild required",
+        "index belongs to a different application workspace",
+    }
     if needs_index:
         error = None
     return _state_payload(repo, path=root, ready=ready, needs_setup=False,
@@ -600,7 +607,7 @@ def main(argv=None):
                    "needsIndex": False, "error": str(exc)}
     # One JSON line on stdout: the Electron host parses single-line outcomes.
     print(json.dumps(outcome))
-    return 0 if outcome.get("ready") or outcome.get("needsSetup") else 1
+    return 0 if any(outcome.get(key) for key in ("ready", "needsSetup", "needsIndex")) else 1
 
 
 if __name__ == "__main__":

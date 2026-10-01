@@ -6,7 +6,8 @@ Request: {id, repo, root, project, packages: [{asset_key, file}],
           overwrite?: bool (default false), cancel_file?}
 `<root>/.data/assets.json` is the authoritative index. No Unity Editor, unity
 CLI, bridge or runner takes part in `run`: files are written straight to
-Assets/ while preserving GUIDs. Individual files are atomic; Unity refreshes separately.
+Assets/ while preserving asset GUIDs and existing shared-folder identities.
+Individual files are atomic; Unity refreshes separately.
 Output: UL_PROGRESS JSON lines followed by one terminal JSON line. Exit 0 means
 completed/cancelled, 1 package failure, 2 preflight failure. Creating cancel_file
 or sending SIGINT/SIGTERM stops after the current package, never mid-import.

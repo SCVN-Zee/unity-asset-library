@@ -174,6 +174,39 @@ class ImportTests(unittest.TestCase):
         self.assertFalse((self.project / "Assets/New.txt").exists())
         self.assertFalse((self.project / "Assets/New.txt.meta").exists())
 
+    def test_shared_folder_preserves_project_identity_and_unrelated_assets(self):
+        self.install([('a' * 32, 'Assets/Plugins', None),
+                      ('b' * 32, 'Assets/Plugins/Existing.txt', b'existing')])
+        meta = self.project / 'Assets/Plugins.meta'
+        original = meta.read_bytes() + b'DefaultImporter:\n  userData: project settings\n'
+        meta.write_bytes(original)
+        for overwrite in (False, True):
+            with self.subTest(overwrite=overwrite):
+                self.install([('c' * 32, 'Assets/Plugins', None),
+                              ('d' * 32, 'Assets/Plugins/Odin/New.txt', b'odin')], overwrite)
+                self.assertEqual(meta.read_bytes(), original)
+                self.assertEqual((self.project / 'Assets/Plugins/Existing.txt').read_bytes(), b'existing')
+                self.assertEqual((self.project / 'Assets/Plugins/Odin/New.txt').read_bytes(), b'odin')
+                self.assertIn('d' * 32, (self.project / 'Assets/Plugins/Odin/New.txt.meta').read_text())
+
+    def test_shared_folder_without_metadata_is_reused_without_assigning_package_guid(self):
+        (self.project / 'Assets/Plugins').mkdir()
+        self.install([('a' * 32, 'Assets/Plugins', None),
+                      ('b' * 32, 'Assets/Plugins/New.txt', b'new')])
+        self.assertFalse((self.project / 'Assets/Plugins.meta').exists())
+        self.assertEqual((self.project / 'Assets/Plugins/New.txt').read_bytes(), b'new')
+
+    def test_shared_folder_metadata_symlink_is_rejected_before_writing(self):
+        (self.project / 'Assets/Plugins').mkdir()
+        outside = self.base / 'outside.meta'
+        outside.write_bytes(b'untouched')
+        (self.project / 'Assets/Plugins.meta').symlink_to(outside)
+        with self.assertRaises(pi.InstallError):
+            self.install([('a' * 32, 'Assets/Plugins', None),
+                          ('b' * 32, 'Assets/Plugins/New.txt', b'new')], True)
+        self.assertEqual(outside.read_bytes(), b'untouched')
+        self.assertFalse((self.project / 'Assets/Plugins/New.txt').exists())
+
     def test_moved_folder_and_asset_guid_keep_project_paths_and_empty_folders(self):
         folder, file = "a" * 32, "b" * 32
         self.install([(folder, "Assets/Original", None), (file, "Assets/Original/A.txt", b"old")])

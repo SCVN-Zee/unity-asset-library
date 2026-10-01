@@ -10,6 +10,10 @@ backup path without rolling back an already completed install.
 Legacy parent folders may omit folderAsset metadata. A payloadless record is
 recognized as a folder only when validated package paths descend from it;
 metadata and GUIDs are preserved verbatim. Missing leaf payloads remain errors.
+Existing folders with a different or missing GUID are reused without writing
+their metadata; Unity creates missing folder metadata on refresh. Matching GUIDs
+still resolve moved folders and assets. File GUID conflicts remain errors even
+when replacement is enabled.
 """
 import contextlib
 import errno
@@ -257,6 +261,12 @@ def _plan(root, records, overwrite):
         existing, meta = inspect(target), inspect(target + ".meta")
         if existing is not None and (existing["kind"] == "dir") != record["folder"]:
             raise InstallError("Asset changes file/folder type: " + target)
+        if record["folder"] and existing is not None and identities.get(record["guid"]) != target:
+            # Shared containers belong to the project, not the package. Preserve
+            # their metadata (or let Unity generate missing metadata on refresh).
+            if meta is not None and meta["kind"] != "file":
+                raise InstallError("Asset metadata is not a file: " + target + ".meta")
+            continue
         if existing is not None or meta is not None:
             if meta is None or meta["kind"] != "file" or _guid(_read(root, target + ".meta")) != record["guid"]:
                 raise InstallError("Destination is occupied by a different or unknown GUID: " + target)

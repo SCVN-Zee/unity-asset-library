@@ -7,6 +7,7 @@ const { promisify } = require("node:util");
 const { Readable, Transform } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
 const semver = require("semver");
+const yauzl = require("yauzl");
 const run = promisify(execFile);
 const REPO = "SCVN-Zee/unity-asset-library";
 const API = `https://api.github.com/repos/${REPO}/releases/latest`;
@@ -51,6 +52,75 @@ async function downloadVerified(release, destination, onProgress = () => {}, sig
   }
 }
 
+// Extract files and materialize link parents before creating any symlinks.
+async function extractBundle(zipPath, workspace, signal) {
+  const root = path.join(workspace, BUNDLE);
+  const links = [];
+  const names = new Set();
+  await new Promise((resolve, reject) => {
+    yauzl.open(zipPath, { lazyEntries: true, strictFileNames: true }, (error, zip) => {
+      if (error || !zip) return reject(error ?? new Error("Cannot open update ZIP."));
+      const fail = (cause) => { zip.close(); reject(cause); };
+      zip.on("error", fail);
+      zip.on("entry", (entry) => {
+        void (async () => {
+          signal?.throwIfAborted();
+          const name = entry.fileName;
+          if (name.startsWith("__MACOSX/")) { zip.readEntry(); return; }
+          const parts = name.replace(/\/$/, "").split("/");
+          if (parts[0] !== BUNDLE || parts.some((part) => !part || part === "." || part === "..") || /[\\\x00-\x1f]/.test(name)) {
+            throw new Error("Unsafe path in update ZIP.");
+          }
+          const key = name.replace(/\/$/, "").normalize("NFD").toLowerCase();
+          if (names.has(key)) throw new Error("Duplicate path in update ZIP.");
+          names.add(key);
+          const file = path.join(workspace, ...parts);
+          const mode = entry.externalFileAttributes >>> 16;
+          const kind = mode & 0o170000;
+          if (name.endsWith("/")) {
+            if (kind && kind !== 0o040000) throw new Error("Invalid ZIP directory.");
+            await fsp.mkdir(file, { recursive: true, mode: 0o755 });
+          } else {
+            if (kind && kind !== 0o100000 && kind !== 0o120000) throw new Error("Unsupported ZIP entry type.");
+            if (kind === 0o120000 && entry.uncompressedSize > 4096) throw new Error("Invalid ZIP symlink.");
+            const stream = await new Promise((ok, no) => zip.openReadStream(entry, (e, s) => e || !s ? no(e) : ok(s)));
+            if (kind === 0o120000) {
+              const chunks = [];
+              for await (const chunk of stream) chunks.push(chunk);
+              const target = Buffer.concat(chunks).toString("utf8");
+              const resolved = path.resolve(path.dirname(file), target);
+              if (!target || /[\x00-\x1f]/.test(target) || path.isAbsolute(target) || !resolved.startsWith(root + path.sep)) {
+                throw new Error("External symlink in update ZIP.");
+              }
+              links.push({ file, target });
+            } else {
+              await fsp.mkdir(path.dirname(file), { recursive: true, mode: 0o755 });
+              await pipeline(stream, fs.createWriteStream(file, { flags: "wx", mode: (mode & 0o777) || 0o644 }), { signal });
+            }
+          }
+          zip.readEntry();
+        })().catch(fail);
+      });
+      zip.on("end", resolve);
+      zip.readEntry();
+    });
+  });
+  for (const link of links) {
+    signal?.throwIfAborted();
+    await fsp.mkdir(path.dirname(link.file), { recursive: true, mode: 0o755 });
+  }
+  // A link used as another link's parent now conflicts with a real directory.
+  for (const link of links) {
+    signal?.throwIfAborted();
+    await fsp.symlink(link.target, link.file);
+  }
+  for (const link of links) {
+    if (!(await fsp.realpath(link.file)).startsWith(root + path.sep)) throw new Error("External symlink chain in update ZIP.");
+  }
+  if (await fsp.realpath(root) !== root) throw new Error("Invalid update bundle root.");
+  return root;
+}
+
 async function stageUpdate(release, target, onProgress, signal) {
   if (target.includes("/AppTranslocation/") || !target.endsWith(".app")) {
     throw new Error("Move Unity Asset Library to Applications before updating.");
@@ -62,30 +132,17 @@ async function stageUpdate(release, target, onProgress, signal) {
   try {
     const zip = path.join(workspace, "update.zip");
     await downloadVerified(release, zip, onProgress, signal);
-    const { stdout: entries } = await run("/usr/bin/unzip", ["-Z", "-1", zip], { maxBuffer: 16 * 1024 * 1024 });
-    if (entries.split("\n").filter(Boolean).some((entry) => entry.startsWith("/") || entry.split("/").includes(".."))) {
-      throw new Error("Unsafe paths in update archive.");
-    }
-    await run("/usr/bin/ditto", ["-x", "-k", zip, workspace]);
-    const bundle = path.join(workspace, BUNDLE);
-    const root = await fsp.realpath(bundle);
-    if (root !== bundle) throw new Error("Update bundle must not be a symlink.");
-    async function checkLinks(directory) {
-      for (const entry of await fsp.readdir(directory, { withFileTypes: true })) {
-        const file = path.join(directory, entry.name);
-        if (entry.isSymbolicLink()) {
-          const resolved = await fsp.realpath(file);
-          if (!resolved.startsWith(root + path.sep)) throw new Error("Update contains an external symlink.");
-        } else if (entry.isDirectory()) await checkLinks(file);
-      }
-    }
-    await checkLinks(bundle);
+    const bundle = await extractBundle(zip, workspace, signal);
     const plist = path.join(bundle, "Contents", "Info.plist");
     for (const [key, expected] of [["CFBundleIdentifier", "com.unityassetlibrary.viewer"], ["CFBundleShortVersionString", release.version]]) {
-      const { stdout } = await run("/usr/bin/plutil", ["-extract", key, "raw", "-o", "-", plist]);
+      const { stdout } = await run("/usr/bin/plutil", ["-extract", key, "raw", "-o", "-", plist], { signal });
       if (stdout.trim() !== expected) throw new Error(`Update ${key} does not match the release.`);
     }
-    await run("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle]);
+    const { stdout: executable } = await run("/usr/bin/plutil", ["-extract", "CFBundleExecutable", "raw", "-o", "-", plist], { signal });
+    const name = executable.trim();
+    if (!name || name === "." || name === ".." || path.basename(name) !== name) throw new Error("Invalid app executable.");
+    await run("/usr/bin/lipo", [path.join(bundle, "Contents", "MacOS", name), "-verify_arch", "arm64"], { signal });
+    await run("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle], { signal });
     await fsp.rm(zip);
     return workspace;
   } catch (error) {
@@ -192,4 +249,4 @@ function createUpdates({ app, dialog, Menu, requestRestart }) {
   };
 }
 
-module.exports = { createUpdates, selectRelease, downloadVerified, stageUpdate, launchInstaller };
+module.exports = { createUpdates, selectRelease, downloadVerified, extractBundle, stageUpdate, launchInstaller };

@@ -6,8 +6,10 @@
 # to trigger GitHub Releases; prerelease versions are marked as prereleases.
 # Installed macOS arm64 builds check stable GitHub releases on startup and from
 # the app menu. No Apple certificate is needed: the custom installer verifies
-# the GitHub ZIP digest and ad-hoc bundle before a confirmed restart. Keep the
-# ZIP asset; GitHub must supply its SHA-256 digest. No latest-mac.yml is required.
+# the GitHub ZIP digest, safely extracts contained files/links, and checks bundle
+# identity, version, arm64 executable and signature before a confirmed restart.
+# ZIP assets require a GitHub SHA-256 digest; no latest-mac.yml is required.
+# This verifies integrity against trusted GitHub metadata, not publisher identity.
 # Install in a writable Applications folder, not a mounted DMG/translocated app.
 # Existing releases without this updater need one manual installation first.
 # Installer log: ~/Library/Application Support/Unity Asset Index/updates/install.log

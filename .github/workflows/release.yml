@@ -65,7 +65,7 @@ jobs:
             fi
           else
             gh release create "$GITHUB_REF_NAME" --verify-tag --draft \
-              --title "$GITHUB_REF_NAME" --notes "macOS Apple Silicon (arm64). Python and dependencies are included; no separate runtime installation is needed. This app is ad-hoc signed, not notarized. If macOS blocks first launch, use System Settings > Privacy & Security > Open Anyway. Updates are installed manually." \
+              --title "$GITHUB_REF_NAME" --notes "macOS Apple Silicon (arm64). Python and dependencies are included; no separate runtime installation is needed. This app is ad-hoc signed, not notarized. If macOS blocks first launch, use System Settings > Privacy & Security > Open Anyway. Install in Applications. The app checks GitHub Releases for stable updates; use the app menu to check manually. Downloads are SHA-256 verified and installed after a confirmed restart." \
               "${flags[@]}"
           fi
           gh release upload "$GITHUB_REF_NAME" release/*.dmg release/*.zip --clobber

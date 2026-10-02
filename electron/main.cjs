@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, screen, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, screen, shell, Menu } = require("electron");
 const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -19,6 +19,8 @@ let backendSession = null;
 let backendGeneration = 0;
 let quitting = false;
 let quitReady = false;
+let updates = null;
+let updateRestart = false;
 let registered = false;
 let startupPromise = Promise.resolve();
 let saveQueue = Promise.resolve();
@@ -883,6 +885,11 @@ app.whenReady().then(() => {
   registerIpc();
   createWindow();
   startupPromise = bootstrapStorage();
+  updates = require("./updates.cjs").createUpdates({ app, dialog, Menu, requestRestart: () => {
+    updateRestart = true;
+    app.quit();
+  } });
+  void updates.check();
 });
 
 app.on("before-quit", (event) => {
@@ -894,7 +901,7 @@ app.on("before-quit", (event) => {
       message: "Stop the queue and quit after the current package finishes?",
       detail: "Already installed packages remain in the project.",
       buttons: ["Keep importing", "Stop after current and quit"], defaultId: 0, cancelId: 0, noLink: true });
-    if (choice !== 1) return;
+    if (choice !== 1) { updateRestart = false; return; }
     stopImport(importJob.id);
   }
   if (packageInstallActive()) {
@@ -902,11 +909,23 @@ app.on("before-quit", (event) => {
       message: "Wait for package installation to finish before quitting?",
       detail: "Unity Package Manager is updating the chosen project. It will not be interrupted.",
       buttons: ["Keep window open", "Wait and quit"], defaultId: 0, cancelId: 0, noLink: true });
-    if (choice !== 1) return;
+    if (choice !== 1) { updateRestart = false; return; }
   }
   quitting = true;
   if (pendingPortChoice) answerPortChoice(pendingPortChoice.id, { action: "cancel" });
-  void Promise.allSettled([startupPromise, saveQueue, importPromise, packageInstallPromise, transitionPromise || Promise.resolve()]).then(() => stopOwnedBackend()).finally(() => { quitReady = true; app.quit(); });
+  void Promise.allSettled([startupPromise, saveQueue, importPromise, packageInstallPromise, transitionPromise || Promise.resolve()])
+    .then(() => stopOwnedBackend())
+    .then(async () => {
+      if (updateRestart) await updates.install();
+      else if (updates) await updates.discard();
+      quitReady = true;
+      app.quit();
+    }).catch((error) => {
+      quitting = false;
+      updateRestart = false;
+      dialog.showErrorBox("Cannot install update", error.message);
+      startupPromise = bootstrapStorage();
+    });
 });
 
 app.on("window-all-closed", () => {

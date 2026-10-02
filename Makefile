@@ -4,6 +4,15 @@
 # Commit release code first, then make bump [VERSION=minor|major|1.2.3-beta.1].
 # bump preserves unrelated staged work and NEVER pushes. Push the printed command
 # to trigger GitHub Releases; prerelease versions are marked as prereleases.
+# Installed macOS arm64 builds check stable GitHub releases on startup and from
+# the app menu. No Apple certificate is needed: the custom installer verifies
+# the GitHub ZIP digest and ad-hoc bundle before a confirmed restart. Keep the
+# ZIP asset; GitHub must supply its SHA-256 digest. No latest-mac.yml is required.
+# Install in a writable Applications folder, not a mounted DMG/translocated app.
+# Existing releases without this updater need one manual installation first.
+# Installer log: ~/Library/Application Support/Unity Asset Index/updates/install.log
+# Previous app: .ual-update-*/previous.app beside the installed bundle; retained
+# for manual recovery. Remove obsolete backups only after confirming the update.
 .DEFAULT_GOAL := dev
 VERSION ?= patch
 PYTHON := .build/python/cpython-3.12.11-macos-aarch64-none/bin/python3
@@ -27,6 +36,8 @@ python:
 test: python
 	npm run typecheck
 	node tests/test_desktop_bootstrap.cjs
+	node tests/test_updates.cjs
+	node tests/test_update_install.cjs
 	$(PYTHON) -m unittest discover -s tests
 
 pack:

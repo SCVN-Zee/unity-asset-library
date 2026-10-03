@@ -850,7 +850,7 @@ function createWindow() {
     backgroundColor: "#111214",
     title: "Unity Asset Library",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
-    trafficLightPosition: { x: 16, y: 24 },
+    trafficLightPosition: { x: 16, y: 20 },
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,

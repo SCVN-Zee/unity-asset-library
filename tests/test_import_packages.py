@@ -84,6 +84,31 @@ class ImportTests(unittest.TestCase):
         self.assertFalse((self.project / "Library").exists())
         self.assertFalse((self.project / pi.BACKUPS).exists())
 
+    def test_package_manager_manifest_is_ignored_without_changing_dependencies(self):
+        dependencies = self.project / 'Packages/manifest.json'
+        dependencies.parent.mkdir()
+        original = b'{"dependencies":{"com.unity.shadergraph":"17.0.0"}}'
+        dependencies.write_bytes(original)
+        extras = [('packagemanagermanifest', b'', tarfile.DIRTYPE),
+                  ('packagemanagermanifest/asset', b'{"dependencies":{"com.unity.shadergraph":"14.0.10"}}', tarfile.REGTYPE),
+                  ('packagemanagermanifest/pathname', b'Packages/manifest.json\n00', tarfile.REGTYPE)]
+        self.install([('a' * 32, 'Assets/VFX.txt', b'payload')], extras=extras)
+        self.assertEqual((self.project / 'Assets/VFX.txt').read_bytes(), b'payload')
+        self.assertEqual(dependencies.read_bytes(), original)
+        self.assertFalse((self.project / 'Assets/packagemanagermanifest').exists())
+
+    def test_package_manager_manifest_does_not_bypass_archive_safety(self):
+        for name, kind in [('packagemanagermanifest/asset', tarfile.SYMTYPE),
+                           ('packagemanagermanifest/pathname', tarfile.LNKTYPE),
+                           ('packagemanagermanifest/../outside', tarfile.REGTYPE),
+                           ('packagemanagermanifest/unexpected', tarfile.REGTYPE),
+                           ('packagemanagermanifest/nested', tarfile.DIRTYPE)]:
+            with self.subTest(name=name, kind=kind), self.assertRaises(pi.InstallError):
+                self.install([('a' * 32, 'Assets/VFX.txt', b'payload')], extras=[(name, b'', kind)])
+            self.assertEqual(list((self.project / 'Assets').iterdir()), [])
+        with self.assertRaisesRegex(pi.InstallError, 'no assets'):
+            self.install([], extras=[('packagemanagermanifest/asset', b'{}', tarfile.REGTYPE)])
+
     def test_unity_gzip_extra_header_is_supported(self):
         archive = self.root / self.rows[0]["file"]
         data = bytearray(archive.read_bytes())

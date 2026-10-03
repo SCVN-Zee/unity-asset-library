@@ -77,11 +77,16 @@ def parse_package(package, staging):
                     continue
                 raise InstallError("Unsafe archive member: " + repr(member.name))
             if member.isdir():
+                if parts == ["packagemanagermanifest"]:
+                    continue  # Dependency metadata, not an Assets directory.
                 if len(parts) != 1 or not re.fullmatch(r"[0-9a-fA-F]{32}", parts[0]):
                     raise InstallError("Unsupported archive directory: " + name)
                 continue
             if not member.isfile():
                 raise InstallError("Archive links and special files are not allowed: " + name)
+            if parts in (["packagemanagermanifest", "asset"],
+                         ["packagemanagermanifest", "pathname"]):
+                continue  # Never replace the project's Packages/manifest.json.
             if len(parts) == 1 and parts[0] == ".icon.png":
                 continue  # Store preview, not an asset.
             if len(parts) != 2 or not re.fullmatch(r"[0-9a-fA-F]{32}", parts[0]):

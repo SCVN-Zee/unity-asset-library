@@ -9,7 +9,9 @@ const { pipeline } = require("node:stream/promises");
 const semver = require("semver");
 const yauzl = require("yauzl");
 const run = promisify(execFile);
-const REPO = "SCVN-Zee/unity-asset-library";
+const REPO = require('../package.json').releaseRepository;
+if (typeof REPO !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_.-]+$/.test(REPO) ||
+    ['.', '..'].includes(REPO.split('/')[1])) throw new Error('Invalid packaged release repository.');
 const API = `https://api.github.com/repos/${REPO}/releases/latest`;
 const BUNDLE = "Unity Asset Library.app";
 
@@ -249,4 +251,4 @@ function createUpdates({ app, dialog, Menu, requestRestart }) {
   };
 }
 
-module.exports = { createUpdates, selectRelease, downloadVerified, extractBundle, stageUpdate, launchInstaller };
+module.exports = { REPO, createUpdates, selectRelease, downloadVerified, extractBundle, stageUpdate, launchInstaller };

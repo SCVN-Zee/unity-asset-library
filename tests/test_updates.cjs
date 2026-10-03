@@ -4,7 +4,7 @@ const path = require("node:path");
 const os = require("node:os");
 const http = require("node:http");
 const crypto = require("node:crypto");
-const { selectRelease, downloadVerified, extractBundle } = require("../electron/updates.cjs");
+const { REPO, selectRelease, downloadVerified, extractBundle } = require("../electron/updates.cjs");
 
 function makeZip(es) {
   const t = new Uint32Array(256);
@@ -68,7 +68,7 @@ function makeZip(es) {
     const release = { tag_name: "v0.3.0", draft: false, prerelease: false, assets: [{
       name: "unity-asset-library-0.3.0-arm64.zip", state: "uploaded", size: payload.length,
       digest: `sha256:${crypto.createHash("sha256").update(payload).digest("hex")}`,
-      browser_download_url: "https://github.com/SCVN-Zee/unity-asset-library/releases/download/v0.3.0/unity-asset-library-0.3.0-arm64.zip",
+      browser_download_url: `https://github.com/${REPO}/releases/download/v0.3.0/unity-asset-library-0.3.0-arm64.zip`,
     }] };
     assert.equal(selectRelease(release, "0.2.6").version, "0.3.0");
     assert.equal(selectRelease(release, "0.3.0"), null);

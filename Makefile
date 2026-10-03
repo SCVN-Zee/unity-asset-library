@@ -38,6 +38,7 @@ python:
 test: python
 	npm run typecheck
 	node tests/test_desktop_bootstrap.cjs
+	node --test tests/release/*.test.cjs
 	node tests/test_updates.cjs
 	node tests/test_update_install.cjs
 	$(PYTHON) -m unittest discover -s tests

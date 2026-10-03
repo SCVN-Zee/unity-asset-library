@@ -11,7 +11,6 @@ type Props = {
   storageEpoch: number;
   hidden?: boolean;
   job: PackageInstallJob | null;
-  jobError: string;
   onInstall: (request: { project: string; ids: string[] }) => Promise<PackageInstallJob>;
 };
 
@@ -34,7 +33,20 @@ function detectPackageKind(source: string): FavoritePackage["kind"] | null {
   return null;
 }
 
-export default function FavoritePackages({ disabled, storageEpoch, hidden = false, job, jobError, onInstall }: Props) {
+export function PackageInstallProgress({ job, jobError, onDismiss }: { job: PackageInstallJob | null; jobError: string; onDismiss: (id: string) => void }) {
+  const active = Boolean(job && ["queued", "running"].includes(job.status));
+  return <>
+    {jobError && <p className="favorite-packages-error" role="alert">{jobError}</p>}
+    {job && <section className="favorite-package-progress" aria-live="polite" aria-label="Saved package installation progress">
+      <div className="progress-heading"><strong>{active ? "Installing packages…" : job.status === "completed" ? "Package installation complete" : "Package installation finished with issues"}</strong>{!active && <Button className="icon-button" aria-label="Dismiss package installation result" onPress={() => onDismiss(job.id)}><Icon as={X} className="icon" aria-hidden="true" /></Button>}</div>
+      <p>{job.completed} / {job.total} processed{job.current_item ? ` · ${job.current_item}` : ""}</p><code>{job.project}</code>
+      {job.error && <p className="favorite-packages-error">{job.error}</p>}
+      <ul>{job.results.map(row => <li key={row.id} data-status={row.status}><span>{row.label}</span><strong>{resultLabels[row.status]}</strong>{row.error && <p className="favorite-packages-error">{row.error}</p>}</li>)}</ul>
+    </section>}
+  </>;
+}
+
+export default function FavoritePackages({ disabled, storageEpoch, hidden = false, job, onInstall }: Props) {
   const [packages, setPackages] = useState<FavoritePackage[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -224,12 +236,6 @@ export default function FavoritePackages({ disabled, storageEpoch, hidden = fals
         <div className="favorite-package-actions"><Button type="button" className="icon-button" aria-label={`Edit ${item.label}`} title="Edit" isDisabled={blocked} onPress={() => { setDraft({ ...item }); setError(""); }}><Icon as={Pencil} className="icon" aria-hidden="true" /></Button><Button type="button" className="icon-button" aria-label={`Remove ${item.label}`} title="Remove" isDisabled={blocked} onPress={() => void remove(item.id)}><Icon as={Trash2} className="icon" aria-hidden="true" /></Button></div>
       </li>)}</ol>)}
     </details>
-    {jobError && <p className="favorite-packages-error" role="alert">{jobError}</p>}
-    {job && <div className="favorite-package-progress" aria-live="polite">
-      <div role="status"><strong>{active ? "Installing packages…" : job.status === "completed" ? "Package installation complete" : "Package installation finished with issues"}</strong><p>{job.completed} / {job.total} processed{job.current_item ? ` · ${job.current_item}` : ""}</p><code>{job.project}</code></div>
-      {job.error && <p className="favorite-packages-error">{job.error}</p>}
-      <ul>{job.results.map(row => <li key={row.id} data-status={row.status}><span>{row.label}</span><strong>{resultLabels[row.status]}</strong>{row.error && <p className="favorite-packages-error">{row.error}</p>}</li>)}</ul>
-    </div>}
     {reviewOpen && <AlertDialog isOpen onClose={closeReview} finalFocusRef={reviewRef} isKeyboardDismissable={!working} closeOnOverlayClick={false} className="dialog-overlay">
       <AlertDialogBackdrop className="dialog-backdrop" />
       <AlertDialogContent className="action-dialog favorite-package-dialog" aria-labelledby="favorite-review-title">

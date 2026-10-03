@@ -136,36 +136,30 @@ h1 {
   align-items: center;
   gap: var(--space-2);
 }
-.header-tasks { display: flex; align-items: center; gap: 6px; }
-.header-tasks:empty { display: none; }
-.header-task { position: relative; }
-.task-indicator { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--muted); font-size: 11px; white-space: nowrap; }
+.task-indicator { flex: none; }
+.task-spinner { animation: task-spin 1s linear infinite; }
+@keyframes task-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .task-spinner { animation: none; } }
 .task-indicator:hover, .task-indicator[aria-expanded="true"] { background: var(--panel-2); color: var(--text); }
 .task-indicator:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .task-indicator[data-status="running"] > .icon, .task-indicator[data-status="failed"] { color: var(--accent); }
-.task-indicator[data-status="completed"] > .icon { color: var(--green); }
-.task-percent { font-variant-numeric: tabular-nums; color: var(--text); }
 
-.task-details { position: absolute; top: 100%; right: 0; padding-top: 10px; width: min(360px, calc(100vw - 32px)); z-index: 50; }
-.task-details .progress-panel { margin: 0; box-shadow: var(--shadow); }
+.task-backdrop { position: fixed; inset: 0; -webkit-app-region: no-drag; }
+.task-details { width: min(420px, calc(100vw - 32px)); max-height: min(640px, calc(100dvh - 96px)); overflow-y: auto; padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--panel); box-shadow: var(--shadow); }
+.task-details h2 { font-size: 14px; }
+.task-details > .progress-heading { flex-wrap: wrap; }
+.task-details .progress-panel, .task-details .download-status, .task-details .favorite-package-progress { margin: 0; }
+.task-details .favorite-package-progress code { overflow-wrap: anywhere; }
+.task-details .download-status.failed { color: var(--danger); }
 .task-details .progress-meta { align-items: flex-start; flex-direction: column; }
 .task-details .progress-current { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .task-details .progress-error { overflow-wrap: anywhere; }
 .task-review { margin-top: 12px; }
-@media (max-width: 1000px) {
-  .task-label { display: none; }
-  .task-indicator { padding: 0 8px; }
-  .header-task { position: static; }
-  .header-tasks { position: relative; }
-}
 @media (max-width: 767px) {
   .topbar .brand { min-width: 0; }
   .topbar h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .topbar { gap: 12px; }
   .top-actions { flex-shrink: 0; }
-  .task-percent { display: none; }
-  .header-tasks { position: static; }
-  .task-details { top: 54px; right: 16px; }
 }
 .connection {
   display: flex;
@@ -417,6 +411,8 @@ html[data-focus-visible="false"] .asset-context-menu__item:focus-visible { box-s
   color: var(--accent);
 }
 
+.download-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; padding: 8px 12px; border: 1px solid var(--line-soft); border-radius: var(--radius-control); color: var(--accent-text); font-size: 12px; }
+.download-status span { overflow-wrap: anywhere; min-width: 0; }
 .asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 12px; }
 .asset-grid .asset-cell { border-radius: var(--radius-panel); }
 .asset-card {
@@ -453,8 +449,6 @@ html[data-focus-visible="false"] .asset-context-menu__item:focus-visible { box-s
 .source-badge.availability {
   color: var(--muted);
 }
-.source-badge.availability[data-availability="cloud_only"],
-.source-badge.availability[data-availability="mixed"] {
 .source-badge.availability .lucide-circle-check {
   color: var(--green);
 }
@@ -463,6 +457,8 @@ html[data-focus-visible="false"] .asset-context-menu__item:focus-visible { box-s
   width: 14px;
   height: 14px;
 }
+.source-badge.availability[data-availability="cloud_only"],
+.source-badge.availability[data-availability="mixed"] {
   color: var(--accent);
 }
 .list-row .source-badge {

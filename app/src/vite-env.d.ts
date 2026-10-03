@@ -57,6 +57,7 @@ declare global {
     saveStorage: (path: string) => Promise<StorageState>;
     getState: () => Promise<State>;
     getAssets: () => Promise<AssetIndex>;
+    downloadAsset: (assetKey: string) => Promise<{ downloaded: number }>;
     resync: () => Promise<{ job_id: string }>;
     resyncApply: (planHash: string) => Promise<{ job_id: string }>;
     cleanupPlan: () => Promise<{ job_id: string }>;

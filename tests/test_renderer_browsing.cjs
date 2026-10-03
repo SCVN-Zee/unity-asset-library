@@ -15,11 +15,23 @@ const fixtures = [
 ];
 fixtures[0].versions[0].availability = "cloud_only";
 fixtures[1].versions[0].availability = "local";
+fixtures[1].store = 'https://assetstore.unity.com/packages/city-audio';
 const preload = path.join(temporary, 'preload.cjs');
 fs.writeFileSync(preload, `const favorites = new Set(['audio-favorite', 'tools-favorite']); require('electron').contextBridge.exposeInMainWorld('ual', {
   getStorage: async () => ({ path: '/fixture', ready: true, canChange: true, busy: false }),
   getState: async () => ({ pending_enrichment: 0, job: null, action: null, ready: true, vault_root: '/fixture' }),
   getAssets: async () => ({ assets: JSON.parse(localStorage.getItem("ual:test-assets") || ${JSON.stringify(JSON.stringify(fixtures))}) }),
+  openExternal: async url => { localStorage.setItem('ual:test-open-url', url); },
+  revealItem: async file => { localStorage.setItem('ual:test-reveal-file', file); },
+  downloadAsset: async key => {
+    localStorage.setItem('ual:test-download-key', key);
+    await new Promise(resolve => { const timer = setInterval(() => { if (localStorage.getItem('ual:test-download-release')) { clearInterval(timer); resolve(); } }, 10); });
+    if (localStorage.getItem('ual:test-download-fail')) throw new Error('Cloud provider offline');
+    const assets = JSON.parse(${JSON.stringify(JSON.stringify(fixtures))});
+    assets.find(asset => asset.asset_key === key).versions.forEach(version => { version.availability = 'local'; });
+    localStorage.setItem('ual:test-assets', JSON.stringify(assets));
+    return { downloaded: 1 };
+  },
   favorites: async () => ({ favorites: [...favorites] }),
   setFavorite: async (key, enabled) => { if (enabled) favorites.add(key); else favorites.delete(key); return { favorites: [...favorites] }; },
   getTags: async () => ({ tags: [], assignments: {} }),
@@ -60,14 +72,17 @@ async function waitFor(expression) {
   }
   throw new Error(`Timed out: ${expression}`);
 }
-async function click(selector, modifiers = []) {
+async function click(selector, modifiers = [], button = 'left') {
+  if (selector.startsWith('[role=menuitem]')) await waitFor('document.querySelector(".asset-context-menu") && !document.querySelector(".asset-context-menu").getAnimations({ subtree: true }).some(animation => animation.playState === "running")');
   const bounds = await evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`);
-  win.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, modifiers, ...bounds });
-  win.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, modifiers, ...bounds });
+  win.webContents.sendInputEvent({ type: 'mouseDown', button, clickCount: 1, modifiers, ...bounds });
+  win.webContents.sendInputEvent({ type: 'mouseUp', button, clickCount: 1, modifiers, ...bounds });
   await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
 }
 async function key(keyCode, modifiers = []) {
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
+  // Chromium activates a native button on Enter's character event.
+  if (keyCode === 'Enter') win.webContents.sendInputEvent({ type: 'char', keyCode: '\r', modifiers });
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
   await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
 }
@@ -91,6 +106,112 @@ app.whenReady().then(async () => {
     win = new BrowserWindow({ show: false, width: 1200, height: 800, webPreferences: { preload, contextIsolation: true, sandbox: true } });
     await win.loadFile(path.join(__dirname, '../dist/renderer/index.html'));
     await waitFor('document.querySelector("img.brand-mark")?.naturalWidth > 0');
+    await waitFor('document.querySelectorAll(".asset-card").length === 4');
+    assert.equal(await evaluate('!!document.querySelector(".task-indicator")'), false, 'Task indicator is hidden when there are no tasks');
+    for (const view of ['Grid', 'List']) {
+      await click('[aria-label="' + view + ' view"]');
+      await click('[aria-label="Select City Audio for import"]');
+      await selection(['City Audio']);
+      await click('[data-asset-key=audio-favorite]', [], 'right');
+      await waitFor('document.querySelector("[role=menu]") && document.activeElement.dataset.action === "details"');
+      assert.equal(await evaluate('!!document.querySelector(".asset-context-menu__heading, .asset-context-menu__footer")'), false, 'Context menu contains action rows only');
+      assert.equal(await evaluate('getComputedStyle(document.querySelector(".asset-context-menu")).width'), '224px', 'Menu uses compact width');
+      assert.equal(await evaluate('getComputedStyle(document.querySelector(".asset-context-menu__surface")).paddingTop'), '4px', 'Menu uses compact outer padding');
+      assert.deepEqual(await evaluate('(() => { const s = getComputedStyle(document.querySelector(".asset-context-menu__item")); return [s.paddingTop, s.paddingLeft]; })()'), ['4px', '8px'], 'Action rows use compact padding');
+      await selection(['City Audio']);
+      assert.equal(await evaluate('document.querySelector("[role=menuitem][data-action=store]").getAttribute("aria-disabled")'), 'true');
+      await key('Down');
+      await waitFor('document.activeElement.dataset.action === "favorite"');
+      await key('Down');
+      await waitFor('document.activeElement.dataset.action === "reveal"');
+      await key('End');
+      await waitFor('document.activeElement.dataset.action === "download"');
+      await key('Escape');
+      await waitFor('!document.querySelector("[role=menu]") && document.activeElement.dataset.assetKey === "audio-favorite"');
+      await selection(['City Audio']);
+      await key('F10', ['shift']);
+      await waitFor('!!document.querySelector("[role=menu]")');
+      assert.equal(await evaluate('document.querySelector(".asset-context-menu").hasAttribute("data-instant")'), true, 'Keyboard menu opens without motion');
+      await key('Tab');
+      await waitFor('!document.querySelector("[role=menu]")');
+      await click('[data-asset-key=audio-favorite]', [], 'right');
+      if (view === 'Grid') {
+        for (const theme of ['dark', 'light']) {
+          await evaluate(`document.documentElement.dataset.theme = ${JSON.stringify(theme)}`);
+          await waitFor('!document.querySelector(".asset-context-menu").getAnimations({ subtree: true }).some(animation => animation.playState === "running")');
+          await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+          const rect = await evaluate('(() => { const r = document.querySelector(".asset-context-menu").getBoundingClientRect(); return { x: Math.floor(r.x), y: Math.floor(r.y), width: Math.ceil(r.width), height: Math.ceil(r.height) }; })()');
+          await win.webContents.capturePage(rect);
+          fs.writeFileSync(path.join(os.tmpdir(), 'ual-asset-menu-' + theme + '.png'), (await win.webContents.capturePage(rect)).toPNG());
+        }
+        await evaluate('document.documentElement.dataset.theme = "system"');
+        win.webContents.debugger.attach('1.3');
+        await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+        await waitFor('document.querySelector(".asset-context-menu").hasAttribute("data-instant")');
+        await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] });
+        win.webContents.debugger.detach();
+      }
+      await click('[role=menuitem][data-action=details]');
+      await waitFor('document.activeElement.getAttribute("aria-label") === "Close asset details"');
+      assert.equal(await evaluate('document.querySelector(".inspector-title h2").textContent'), 'Forest Audio');
+      await click('[aria-label="Close asset details"]');
+      await selection(['City Audio']);
+      await click('[data-asset-key=audio-other]', [], 'right');
+      assert.equal(await evaluate('!!document.querySelector("[role=menuitem][data-action=download]")'), false, 'Local package has no download action');
+      await click('[role=menuitem][data-action=favorite]');
+      await waitFor(`document.querySelector('[aria-label="Remove City Audio from favorites"]')`);
+      await click('[data-asset-key=audio-other]', [], 'right');
+      await click('[role=menuitem][data-action=favorite]');
+      await waitFor(`document.querySelector('[aria-label="Add City Audio to favorites"]')`);
+      await click('[data-asset-key=audio-other]', [], 'right');
+      await click('[role=menuitem][data-action=store]');
+      await waitFor('localStorage.getItem("ual:test-open-url") === "https://assetstore.unity.com/packages/city-audio"');
+      await click('[data-asset-key=audio-other]', [], 'right');
+      await click('[role=menuitem][data-action=reveal]');
+      await waitFor('localStorage.getItem("ual:test-reveal-file") === "City.unitypackage"');
+      await evaluate('document.querySelector("[data-asset-key=audio-favorite]").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: innerWidth - 1, clientY: innerHeight - 1 }))');
+      await waitFor('!!document.querySelector("[role=menu]")');
+      assert.equal(await evaluate('(() => { const r = document.querySelector(".asset-context-menu").getBoundingClientRect(); return r.left >= 8 && r.top >= 8 && r.right <= innerWidth - 7 && r.bottom <= innerHeight - 7; })()'), true, 'Menu stays inside viewport');
+      await click('[aria-label="Search library"]');
+      await waitFor('!document.querySelector("[role=menu]")');
+      await selection(['City Audio']);
+      await click('[aria-label="Deselect all packages"]');
+    }
+    await click('[aria-label="Grid view"]');
+    await click('[data-asset-key=audio-favorite]', [], 'right');
+    await click('[role=menuitem][data-action=download]');
+    await waitFor('localStorage.getItem("ual:test-download-key") === "audio-favorite" && document.querySelector(".task-indicator").dataset.status === "running"');
+    assert.equal(await evaluate('!!document.querySelector(".browser .download-status")'), false, 'Downloads never occupy the browser content');
+    await click('.task-indicator');
+    await waitFor('document.querySelector("#background-tasks .download-status")?.textContent.includes("Downloading")');
+    assert.equal(await evaluate(`document.querySelector('[aria-label="Select all packages in current results"]').disabled`), true, 'Download blocks importing');
+    assert.equal(await evaluate('localStorage.getItem("ual:test-request")'), null, 'Download never imports');
+    await key('Escape');
+    await waitFor('!document.querySelector(".task-details")');
+    await click('[data-asset-key=audio-favorite]', [], 'right');
+    assert.equal(await evaluate('document.querySelector("[role=menuitem][data-action=download]").getAttribute("aria-disabled")'), 'true', 'Repeated downloads are disabled');
+    await key('Escape');
+    await evaluate('localStorage.setItem("ual:test-download-release", "true")');
+    await waitFor('document.querySelector(".task-indicator").dataset.status === "completed"');
+    await click('.task-indicator');
+    await waitFor('document.querySelector("#background-tasks .download-status")?.textContent.includes("Downloaded 1 package")');
+    assert.equal(await evaluate('document.querySelector("[data-asset-key=audio-favorite] .availability").dataset.availability'), 'local', 'Download refreshes availability');
+    await click('[aria-label="Dismiss download status"]');
+    await evaluate('localStorage.clear()');
+    await win.reload();
+    await waitFor('document.querySelectorAll(".asset-card").length === 4');
+    await evaluate('localStorage.setItem("ual:test-download-fail", "true"); localStorage.setItem("ual:test-download-release", "true")');
+    await click('[data-asset-key=audio-favorite]', [], 'right');
+    await click('[role=menuitem][data-action=download]');
+    await waitFor('document.querySelector(".task-indicator").dataset.status === "failed"');
+    await click('.task-indicator');
+    await waitFor('document.querySelector("#background-tasks").textContent.includes("Cloud provider offline")');
+    assert.equal(await evaluate(`document.querySelector('[aria-label="Select all packages in current results"]').disabled`), false, 'Failure releases download busy state');
+    console.log('PASS: React Bits styled menu, grid/list right-click and Shift-F10, keyboard/disabled actions, Escape/Tab/outside dismissal, viewport bounds, preserved selection, downloads and no Unity import');
+    // Explicit scoped run for context-menu work; default execution still runs every browsing regression.
+    if (process.env.UAL_CONTEXT_MENU_ONLY === '1') return;
+    await evaluate('localStorage.clear()');
+    await win.reload();
     await waitFor('document.querySelectorAll(".asset-card").length === 4');
     for (const view of ['Grid', 'List']) {
       await click('[aria-label="' + view + ' view"]');
@@ -313,16 +434,17 @@ app.whenReady().then(async () => {
     console.log("PASS: explicit archive selection and replacement opt-out without Editor readiness");
     await evaluate(`localStorage.setItem("ual:test-import", JSON.stringify({ id: "preparation", kind: "import", status: "running", project: "/fixture/project", completed: 0, total: 1, results: [{ file: "Cloud.unitypackage", status: "downloading", bytes_completed: 50, bytes_total: 100 }] }))`);
     await win.reload();
-    await waitFor(`!!document.querySelector('[aria-label="Open import progress"]')`);
-    assert.equal(await evaluate(`document.querySelector(".task-details").hidden`), true);
+    await waitFor(`document.querySelector('.task-indicator')?.dataset.status === 'running'`);
+    assert.equal(await evaluate(`!!document.querySelector('.task-details')`), false);
     win.webContents.focus();
-    await evaluate(`document.querySelector(".topbar .task-indicator").focus()`);
-    await waitFor(`!document.querySelector(".task-details").hidden`);
-    await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
-    await waitFor(`document.querySelector(".task-details").hidden`);
-    const taskBounds = await evaluate(`(() => { const r = document.querySelector(".task-indicator").getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`);
-    win.webContents.sendInputEvent({ type: "mouseMove", ...taskBounds });
-    await waitFor(`!document.querySelector(".task-details").hidden`);
+    await evaluate(`document.querySelector('.topbar .task-indicator').focus()`);
+    await key('Enter');
+    await waitFor(`!!document.querySelector('.task-details')`);
+    await key('Escape');
+    await waitFor(`!document.querySelector('.task-details')`);
+    assert.equal(await evaluate(`document.activeElement.classList.contains('task-indicator')`), true, 'Escape restores trigger focus');
+    await click('.task-indicator');
+    await waitFor(`!!document.querySelector('[aria-label="Open import progress"]')`);
     await click('[aria-label="Open import progress"]');
     await waitFor(`!!document.querySelector('.import-dialog [role="progressbar"]')`);
     const progress = await evaluate(`(() => { const bar = document.querySelector('.import-dialog [role="progressbar"]'); return { value: Number(bar.getAttribute("aria-valuenow")), max: Number(bar.getAttribute("aria-valuemax")), width: bar.getBoundingClientRect().width, fill: bar.firstElementChild.getBoundingClientRect().width }; })()`);
@@ -339,11 +461,12 @@ app.whenReady().then(async () => {
     await waitFor(`!!document.querySelector('[title="Forest Audio"] [data-availability="local"]')`);
     console.log("PASS: terminal import refreshes hydrated archive availability");
     await click(".task-indicator");
-    await waitFor(`!document.querySelector(".task-details").hidden`);
+    await waitFor(`!!document.querySelector(".task-details")`);
 
     await click('[aria-label="Dismiss Import result"]');
-    await waitFor(`!document.querySelector(".task-indicator")`);
-    console.log("PASS: task hover, focus, Escape, review import, failure details and dismissal");
+    await waitFor(`!document.querySelector('.task-indicator') && !document.querySelector('.task-details')`);
+    await waitFor(`document.activeElement.getAttribute('aria-label') === 'Keyboard shortcuts'`);
+    console.log("PASS: unified task dropdown, keyboard opening, Escape/focus return, review import, failure details, dismissal and empty state");
     const batch = Array.from({ length: 14 }, (_, i) => ({ asset_key: `batch-${i}`, name: `Editor package ${String(i + 1).padStart(2, "0")}`, versions: [{ file: `Editor package ${i + 1} v1.2.3.unitypackage`, availability: "local" }] }));
     await evaluate(`localStorage.clear(); localStorage.setItem("ual:test-assets", ${JSON.stringify(JSON.stringify(batch))})`);
     await win.reload();
@@ -380,7 +503,7 @@ app.whenReady().then(async () => {
     await win.reload();
     await waitFor(`!!document.querySelector('.task-indicator[data-status="failed"]')`);
     await click(".task-indicator");
-    await waitFor(`!document.querySelector('.task-details').hidden`);
+    await waitFor(`!!document.querySelector('.task-details')`);
     await click('[aria-label="Open import progress"]');
     await waitFor(`!!document.querySelector('.import-dialog .import-inline-error')`);
     await click(".import-dialog .dialog-foot .primary");
@@ -403,7 +526,7 @@ app.whenReady().then(async () => {
     await win.reload();
     await waitFor(`!!document.querySelector('.task-indicator[data-status="failed"]')`);
     await click(".task-indicator");
-    await waitFor(`!document.querySelector('.task-details').hidden`);
+    await waitFor(`!!document.querySelector('.task-details')`);
     await click('[aria-label="Open import progress"]');
     await waitFor(`!!document.querySelector('.import-successes')`);
     assert.equal(await evaluate(`document.querySelector('.import-successes').open`), false);
@@ -432,7 +555,11 @@ app.whenReady().then(async () => {
     const packageJob = { id: "saved-install", kind: "packages", status: "running", project: "/fixture/project", completed: 0, total: 1, results: [{ id: "math", label: "Math", source: "com.unity.mathematics", status: "installing" }] };
     await evaluate('localStorage.setItem("ual:test-package-job", ' + JSON.stringify(JSON.stringify(packageJob)) + ')');
     await win.reload();
-    await waitFor('document.querySelector(".favorite-package-progress")?.textContent.includes("Installing packages")');
+    await waitFor('document.querySelector(".task-indicator")?.dataset.status === "running"');
+    await click('.task-indicator');
+    await waitFor('document.querySelector("#background-tasks .favorite-package-progress")?.textContent.includes("Installing packages")');
+    assert.equal(await evaluate('!!document.querySelector(".browser .favorite-package-progress")'), false);
+    await key('Escape');
     await click('[aria-label="Open Settings"]');
     await waitFor(`document.querySelector('[aria-label="Browse for library folder"]')?.disabled === true`);
     packageJob.status = "completed";
@@ -441,7 +568,10 @@ app.whenReady().then(async () => {
     await evaluate('localStorage.setItem("ual:test-package-job", ' + JSON.stringify(JSON.stringify(packageJob)) + ')');
     await waitFor(`document.querySelector('[aria-label="Browse for library folder"]')?.disabled === false`);
     await click('.storage-topbar .button');
-    await waitFor('document.querySelector(".favorite-package-progress")?.textContent.includes("Package installation complete")');
+    await click('.task-indicator');
+    await waitFor('document.querySelector("#background-tasks .favorite-package-progress")?.textContent.includes("Package installation complete")');
+    await click('[aria-label="Dismiss package installation result"]');
+    await waitFor('!document.querySelector(".task-indicator") && !document.querySelector(".task-details")');
     console.log("PASS: saved-package polling survives Settings navigation and releases library-change guards");
     await evaluate('localStorage.setItem("ual:test-package-favorites", JSON.stringify([{ id: "math", label: "Math", kind: "registry", source: "com.unity.mathematics", version: "1.3.2" }])); localStorage.setItem("ual:prefs", JSON.stringify({ filters: { quick: "favorites" } })); localStorage.setItem("ual:test-delay-inspection", "true")');
     await win.reload();
@@ -465,6 +595,7 @@ app.whenReady().then(async () => {
     console.log("PASS: cancelled project inspection cannot select a target in a new saved-package review");
   } catch (error) {
     console.error(error);
+    console.error('Renderer failure state:', await evaluate('({ menu: document.querySelector("[role=menu]")?.textContent, active: document.activeElement?.outerHTML?.slice(0, 250), downloadKey: localStorage.getItem("ual:test-download-key"), status: document.querySelector(".download-status")?.textContent, errors: [...document.querySelectorAll("[role=alert]")].map(element => element.textContent) })').catch(() => null));
     exitCode = 1;
   } finally {
     await fs.promises.rm(temporary, { recursive: true, force: true });

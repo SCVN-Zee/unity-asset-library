@@ -21,6 +21,7 @@ import {
   Input,
   InputField,
   Popover,
+  PopoverBackdrop,
   PopoverContent,
 
 } from "./components/ui";
@@ -34,7 +35,6 @@ import {
   CircleAlert,
   Cloud,
   HardDrive,
-  Package,
   ExternalLink,
   Folder,
   FolderOpen,
@@ -49,11 +49,13 @@ import {
   Search,
   Settings,
   Keyboard,
+  LoaderCircle,
   Sparkles,
   Star,
   X,
 } from "lucide-react";
-import FavoritePackages from "./components/FavoritePackages";
+import FavoritePackages, { PackageInstallProgress } from "./components/FavoritePackages";
+import AssetContextMenu, { type AssetContextAction } from "./components/asset-context-menu";
 import { ImportDialog, availabilityLabel, availabilitySummary, unityPackages } from "./components/ImportDialog";
 import SpotlightCard from "./components/react-bits/SpotlightCard";
 import GlideSelect from "./components/react-bits/GlideSelect";
@@ -213,7 +215,6 @@ type ProgressProps = {
   job: ProgressSnapshot & { id: string; status: string; kind?: string; phase?: string; remaining?: number | null; error?: string | null; error_code?: string | null; result?: ActionResult | null };
   onDismiss?: (id: string) => void;
   announce?: boolean;
-  compact?: boolean;
   onReview?: () => void;
 };
 
@@ -233,8 +234,7 @@ const PROGRESS_STAGE_LABELS: Record<string, string> = {
 
 const PROGRESS_COUNT_LABELS: Record<string, string> = { no_result: "no search match", unverified: "unverified matches", remaining: "still need enrichment", moved: "files moved", skipped: "files skipped", staged: "files staged", removed: "files deleted", rolled_back: "files rolled back", rollback_failed: "rollback failures", resolved: "resolved", failed: "failed", blocked: "blocked", installed: "packages installed", cancelled: "packages cancelled", index_added: "index entries added", index_removed: "index entries removed", index_resized: "index entries resized", inventory_examined: "inventory examined", inventory_found: "inventory found" };
 
-function ActionProgress({ job, onDismiss, announce = true, compact = false, onReview }: ProgressProps) {
-  const [detailsOpen, setDetailsOpen] = useState(false);
+function ActionProgress({ job, onDismiss, announce = true, onReview }: ProgressProps) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!["queued", "running"].includes(job.status) || !job.started_at) return;
@@ -275,17 +275,7 @@ function ActionProgress({ job, onDismiss, announce = true, compact = false, onRe
       {onReview && <Button type="button" className="button quiet task-review" onPress={onReview} aria-label="Open import progress">Review import</Button>}
     </section>
   );
-  if (!compact) return panel;
-  return (
-    <div className="header-task" onMouseEnter={() => setDetailsOpen(true)} onMouseLeave={() => setDetailsOpen(false)} onFocus={() => setDetailsOpen(true)} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setDetailsOpen(false); }} onKeyDown={(event) => { if (event.key === "Escape") { setDetailsOpen(false); event.stopPropagation(); } }}>
-      <Button type="button" className="task-indicator" data-status={job.status} aria-label={`${title}: ${outcome}${!terminal && percent !== undefined ? `, ${percent}%` : ""}. Show details`} aria-expanded={detailsOpen} aria-controls={`task-details-${job.id}`} onPress={() => setDetailsOpen(true)}>
-        <Icon as={job.status === "failed" || incompleteEnrichment ? CircleAlert : job.status === "completed" ? CircleCheck : job.status === "cancelled" ? CircleSlash : job.kind === "enrich" ? Sparkles : job.kind === "import" ? Package : RefreshCw} className="icon" aria-hidden="true" />
-        <span className="task-label">{actionLabel}</span>
-        {!terminal && (percent === undefined ? <LatticeLoader label="" decorative cellSize={3} gap={1} /> : <span className="task-percent">{percent}%</span>)}
-      </Button>
-      <div className="task-details" id={`task-details-${job.id}`} hidden={!detailsOpen}>{panel}</div>
-    </div>
-  );
+  return panel;
 }
 type StorageView = "loading" | "onboarding" | "settings" | "library";
 
@@ -472,6 +462,27 @@ function App() {
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState<DialogState>(null);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [tasksOpen, setTasksOpen] = useState(false);
+  const tasksTriggerRef = useRef<HTMLButtonElement>(null);
+  const keyboardGuideRef = useRef<HTMLButtonElement>(null);
+  const tasksContentRef = useRef<HTMLDivElement | null>(null);
+  const setTasksContentRef = useCallback((node: HTMLDivElement | null) => {
+    tasksContentRef.current = node;
+    // The overlay detaches after its focus scope; restore only if focus was lost.
+    if (!node) queueMicrotask(() => {
+      if (!tasksContentRef.current && document.activeElement === document.body) (tasksTriggerRef.current || keyboardGuideRef.current)?.focus();
+    });
+  }, []);
+  const [assetContext, setAssetContext] = useState<{ assetKey: string; trigger: HTMLElement; x: number; y: number; keyboard: boolean } | null>(null);
+  const closeAssetContextMenu = useCallback(() => {
+    if (assetContext?.trigger.isConnected) assetContext.trigger.focus();
+    setAssetContext(null);
+  }, [assetContext]);
+  useEffect(() => { setAssetContext(null); }, [storageEpoch, view]);
+  const [downloadingAsset, setDownloadingAsset] = useState<string | null>(null);
+  const [downloadMessage, setDownloadMessage] = useState("");
+  const [downloadFailed, setDownloadFailed] = useState(false);
+  useEffect(() => { setDownloadMessage(""); setDownloadFailed(false); setTasksOpen(false); }, [storageEpoch]);
   const [importSelection, setImportSelection] = useState<Set<string>>(() => new Set());
   const selectionAnchor = useRef<string | null>(null);
   useEffect(() => {
@@ -528,7 +539,7 @@ function App() {
     setPackageJobError("");
     return next;
   }
-  const importActive = packageInstallActive || Boolean(importJob && ["queued", "running"].includes(importJob.status));
+  const importActive = Boolean(downloadingAsset) || packageInstallActive || Boolean(importJob && ["queued", "running"].includes(importJob.status));
   useEffect(() => {
     setImportSelection((current) => {
       const next = new Set([...current].filter((key) => assets.some((asset) => asset.asset_key === key && unityPackages(asset).length > 0)));
@@ -1066,7 +1077,7 @@ function App() {
   useEffect(() => {
     if (storageView !== "library" || storage?.portRecovery || dialog || actionsOpen || importOpen || shortcutsOpen) return;
     const onShortcut = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing || event.altKey || event.repeat) return;
+      if (assetContext || event.defaultPrevented || event.isComposing || event.altKey || event.repeat) return;
       if (document.querySelector("[role=dialog], [role=alertdialog], [role=listbox], [role=menu]")) return;
       const key = event.key.toLowerCase();
       if ((event.metaKey || event.ctrlKey) && !event.shiftKey && key === "k") {
@@ -1090,14 +1101,20 @@ function App() {
     };
     document.addEventListener("keydown", onShortcut);
     return () => document.removeEventListener("keydown", onShortcut);
-  }, [storageView, storage?.portRecovery, dialog, actionsOpen, importOpen, shortcutsOpen, importSelection, importActive, loading, storageBusy, inspectorOpen]);
+  }, [storageView, storage?.portRecovery, dialog, actionsOpen, importOpen, shortcutsOpen, importSelection, importActive, loading, storageBusy, inspectorOpen, assetContext]);
   function onBrowserKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
-    if (event.defaultPrevented || event.nativeEvent.isComposing || event.altKey || isTextEditing(event.target) || dialog || actionsOpen || importOpen || shortcutsOpen) return;
+    if (assetContext || event.defaultPrevented || event.nativeEvent.isComposing || event.altKey || isTextEditing(event.target) || dialog || actionsOpen || importOpen || shortcutsOpen) return;
 
     const target = event.target as HTMLElement;
     if (!target.matches("[data-asset-key]")) return;
     const index = filtered.findIndex(asset => asset.asset_key === target.dataset.assetKey);
     if (index < 0) return;
+    if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) void openAssetContextMenu(filtered[index], target);
+      return;
+    }
     if (event.key === " " || event.key === "Enter") {
       event.preventDefault();
       event.stopPropagation();
@@ -1195,6 +1212,55 @@ function App() {
           return next;
         });
       }
+    }
+  }
+
+  function openAssetContextMenu(asset: Asset, trigger: HTMLElement, point?: { x: number; y: number }) {
+    if (storageBusy || loading || dialog || actionsOpen || importOpen || shortcutsOpen) return;
+    trigger.focus();
+    const bounds = trigger.getBoundingClientRect();
+    setAssetContext({ assetKey: asset.asset_key, trigger, x: point?.x ?? bounds.left, y: point?.y ?? bounds.bottom, keyboard: !point });
+  }
+
+  async function runAssetContextAction(asset: Asset, trigger: HTMLElement, action: AssetContextAction) {
+    closeAssetContextMenu();
+    const epoch = storageEpochRef.current;
+    try {
+      if (action === "details") {
+        inspectorReturnRef.current = trigger;
+        setSelectedKey(asset.asset_key);
+        setInspectorOpen(true);
+        requestAnimationFrame(() => detailsCloseRef.current?.focus());
+      } else if (action === "favorite" && !favPending.has(asset.asset_key) && !storageBusy && !importActive) {
+        await toggleFavorite(asset.asset_key, !favoriteSet.has(asset.asset_key));
+      } else if (action === "store" && asset.store) {
+        await api.openExternal(asset.store);
+      } else if (action === "reveal") {
+        const versions = asset.versions || [];
+        const version = versions.find(item => item.file && item.availability === "local") || versions.find(item => item.file && item.availability !== "missing");
+        if (version?.file) await api.revealItem(version.file);
+      } else if (action === "download" && !libraryActivity && !storageBusy) {
+        setDownloadingAsset(asset.asset_key);
+        setDownloadFailed(false);
+        setDownloadMessage(`Downloading cloud packages for ${asset.name}…`);
+        try {
+          const result = await api.downloadAsset(asset.asset_key);
+          if (epoch !== storageEpochRef.current) return;
+          await refreshAssets(true);
+          setDownloadMessage(result.downloaded ? `Downloaded ${result.downloaded} package${result.downloaded === 1 ? "" : "s"} for ${asset.name}.` : `${asset.name} is already available locally.`);
+        } catch (cause) {
+          if (epoch === storageEpochRef.current) {
+            setDownloadFailed(true);
+            setDownloadMessage(cause instanceof Error ? cause.message : "The download failed.");
+            // A partial download can still make some archives local.
+            await refreshAssets();
+          }
+        } finally {
+          setDownloadingAsset(null);
+        }
+      }
+    } catch (cause) {
+      if (epoch === storageEpochRef.current) setError(cause instanceof Error ? cause.message : "The asset action failed.");
     }
   }
 
@@ -1342,6 +1408,11 @@ function App() {
 
   const jobRunning =
     state?.job && ["queued", "running"].includes(state.job.status);
+  const visibleJobs = [actionStatus, state?.job, importJob, packageJob].filter((job) => job && !dismissedIds.has(job.id));
+  const taskCount = visibleJobs.length + Number(Boolean(downloadMessage)) + Number(Boolean(packageJobError));
+  const runningTasks = visibleJobs.filter((job) => job && ["queued", "running"].includes(job.status)).length + Number(Boolean(downloadingAsset));
+  const taskFailure = downloadFailed || Boolean(packageJobError) || visibleJobs.some((job) => job?.status === "failed");
+  useEffect(() => { if (taskCount === 0) setTasksOpen(false); }, [taskCount]);
   if (storage?.portRecovery) return <PortRecoveryScreen key={storage.portRecovery.id} request={storage.portRecovery} onStorage={setStorage} />;
   if (storageView !== "library") {
     return <StorageScreen mode={storageView} storage={storage} path={storagePath} error={storageError || (storage?.path === storagePath ? storage?.error || "" : "") || error} busy={storageBusy} blocked={storageChangeBlocked} onPathChange={(nextPath) => { setStoragePath(nextPath); setStorageError(""); }} onBrowse={() => void chooseStorageFolder()} onSave={() => void saveStorageRoot()} onCancel={cancelStorageChanges} onRetry={() => { setStorageError(""); setStorageView("loading"); void api.retryBackend().then(() => load()).catch((cause) => { setStorageView("settings"); setStorageError(String(cause)); }); }} />;
@@ -1372,12 +1443,22 @@ function App() {
             {query && <Button className="search-clear" aria-label="Clear search" onPress={() => setQuery("")}><Icon as={X} className="icon" aria-hidden="true" /></Button>}
           </Input>
         <div className="top-actions">
-          <Button type="button" className="icon-button" aria-label="Keyboard shortcuts" title={shortcutModifier + " /"} onPress={openShortcutHelp}><Icon as={Keyboard} className="icon" aria-hidden="true" /></Button>
-          <div className="header-tasks" role="group" aria-label="Background tasks">
-            {actionStatus && !dismissedIds.has(actionStatus.id) && <ActionProgress compact job={actionStatus} onDismiss={dismissAction} announce={!(dialog && actionStatus.phase === "apply")} />}
-            {state?.job && !dismissedIds.has(state.job.id) && <ActionProgress compact job={state.job} onDismiss={dismissEnrich} />}
-            {importJob && !dismissedIds.has(importJob.id) && <ActionProgress compact job={importJob} onDismiss={dismissImportJob} onReview={openImportReview} />}
-          </div>
+          {taskCount > 0 && <Popover isOpen={tasksOpen} onClose={() => setTasksOpen(false)} finalFocusRef={tasksTriggerRef} placement="bottom right" offset={10} trigger={(triggerProps) => (
+            <Button type="button" {...triggerProps} ref={(node) => { tasksTriggerRef.current = node; const ref = triggerProps.ref; if (typeof ref === "function") ref(node); else if (ref) ref.current = node; }} className="icon-button task-indicator" data-status={taskFailure ? "failed" : runningTasks ? "running" : "completed"} aria-label={`Background tasks: ${runningTasks} running, ${taskCount} total${taskFailure ? ", needs attention" : ""}`} aria-expanded={tasksOpen} aria-controls="background-tasks" onPress={() => { setActionsOpen(false); setTasksOpen((open) => !open); }}>
+              <Icon as={runningTasks ? LoaderCircle : taskFailure ? CircleAlert : CircleCheck} className={`icon${runningTasks ? " task-spinner" : ""}`} aria-hidden="true" />
+            </Button>
+          )}>
+            <PopoverBackdrop className="task-backdrop" />
+            <PopoverContent ref={setTasksContentRef} id="background-tasks" className="task-details" aria-label="Background tasks">
+              <div className="progress-heading"><h2>Background tasks</h2><span className="progress-status">{runningTasks ? `${runningTasks} running` : taskCount ? "No tasks running" : "No background tasks"}</span></div>
+              {actionStatus && !dismissedIds.has(actionStatus.id) && <ActionProgress job={actionStatus} onDismiss={dismissAction} announce={!(dialog && actionStatus.phase === "apply")} />}
+              {state?.job && !dismissedIds.has(state.job.id) && <ActionProgress job={state.job} onDismiss={dismissEnrich} />}
+              {importJob && !dismissedIds.has(importJob.id) && <ActionProgress job={importJob} onDismiss={dismissImportJob} onReview={() => { setTasksOpen(false); openImportReview(); }} />}
+              {downloadMessage && <section className={`download-status${downloadFailed ? " failed" : ""}`} role="status" aria-atomic="true"><span>{downloadMessage}</span>{!downloadingAsset && <Button className="icon-button" aria-label="Dismiss download status" onPress={() => { setDownloadMessage(""); setDownloadFailed(false); }}><Icon as={X} className="icon" aria-hidden="true" /></Button>}</section>}
+              <PackageInstallProgress job={packageJob && !dismissedIds.has(packageJob.id) ? packageJob : null} jobError={packageJobError} onDismiss={(id) => setDismissedIds((current) => new Set(current).add(id))} />
+            </PopoverContent>
+          </Popover>}
+          <Button ref={keyboardGuideRef} type="button" className="icon-button" aria-label="Keyboard shortcuts" title={shortcutModifier + " /"} onPress={openShortcutHelp}><Icon as={Keyboard} className="icon" aria-hidden="true" /></Button>
           <Button type="button" className="icon-button theme-toggle" title={`Theme: ${theme}. Switch to ${theme === "system" ? "light" : theme === "light" ? "dark" : "system"}`} aria-label={`Theme: ${theme}. Switch to ${theme === "system" ? "light" : theme === "light" ? "dark" : "system"}`} onPress={() => setTheme(theme === "system" ? "light" : theme === "light" ? "dark" : "system")}>
             <Icon as={theme === "system" ? Monitor : theme === "light" ? Sun : Moon} className="icon" aria-hidden="true" />
           </Button>
@@ -1398,7 +1479,7 @@ function App() {
                   else if (ref) ref.current = node;
                 }}
                 className="button quiet"
-                onPress={() => setActionsOpen((open) => !open)}
+                onPress={() => { setTasksOpen(false); setActionsOpen((open) => !open); }}
               >
                 Library actions{" "}
                 <Icon
@@ -1667,7 +1748,7 @@ function App() {
               />
             </div>
           </div>
-          <FavoritePackages disabled={storageBusy || loading || Boolean(busy) || tagBusy || Boolean(state?.job && ["queued", "running"].includes(state.job.status)) || Boolean(actionStatus && ["queued", "running"].includes(actionStatus.status)) || Boolean(importJob && ["queued", "running"].includes(importJob.status))} job={packageJob} jobError={packageJobError} onInstall={startSavedPackageInstall} storageEpoch={storageEpoch} hidden={quick !== "favorites"} />
+          <FavoritePackages disabled={Boolean(downloadingAsset) || storageBusy || loading || Boolean(busy) || tagBusy || Boolean(state?.job && ["queued", "running"].includes(state.job.status)) || Boolean(actionStatus && ["queued", "running"].includes(actionStatus.status)) || Boolean(importJob && ["queued", "running"].includes(importJob.status))} job={packageJob} onInstall={startSavedPackageInstall} storageEpoch={storageEpoch} hidden={quick !== "favorites"} />
           {quick === "favorites" && <h2 className="starred-assets-heading">Starred assets</h2>}
           <div className="browser-actions">
           {(query || category !== "All assets" || quick !== "all" || author || untagged || selectedTags.length > 0) && <div className="filter-context" aria-label="Active filters">
@@ -1706,7 +1787,11 @@ function App() {
             <div className={view === "grid" ? "asset-grid" : "asset-list"}>
               {view === "list" && <div className="list-heading" aria-hidden="true"><span>Asset</span><span>Author</span><span>Category</span><span>Version</span><span /></div>}
               {filtered.map((asset) => (
-                <SpotlightCard className="asset-cell" key={asset.asset_key} enabled={view === "grid"}>
+                <SpotlightCard className="asset-cell" key={asset.asset_key} enabled={view === "grid"} onContextMenu={(event) => {
+                  event.preventDefault();
+                  const trigger = event.currentTarget.querySelector<HTMLElement>("[data-asset-key]");
+                  if (trigger) openAssetContextMenu(asset, trigger, { x: event.clientX, y: event.clientY });
+                }}>
                   {unityPackages(asset).length > 0 && (
                     <SpringCheck className="import-check" boxSize={20} boxRadius={5} strike="none"
                       checked={importSelection.has(asset.asset_key)} onChange={(_, event) => selectAsset(asset, event.nativeEvent as MouseEvent, true)}
@@ -1779,6 +1864,14 @@ function App() {
           )}
         </aside>
       </main>
+      {assetContext && assets.find(asset => asset.asset_key === assetContext.assetKey) && <AssetContextMenu
+        asset={assets.find(asset => asset.asset_key === assetContext.assetKey)!}
+        favorited={favoriteSet.has(assetContext.assetKey)} favoritePending={favPending.has(assetContext.assetKey)}
+        busy={libraryActivity || storageBusy || tagBusy} downloading={downloadingAsset === assetContext.assetKey}
+        x={assetContext.x} y={assetContext.y} keyboard={assetContext.keyboard}
+        onClose={closeAssetContextMenu}
+        onAction={action => void runAssetContextAction(assets.find(asset => asset.asset_key === assetContext.assetKey)!, assetContext.trigger, action)}
+      />}
       {shortcutsOpen && <AlertDialog isOpen onClose={() => setShortcutsOpen(false)} initialFocusRef={shortcutCloseRef} finalFocusRef={shortcutReturnRef} isKeyboardDismissable className="dialog-overlay">
         <AlertDialogBackdrop className="dialog-backdrop" />
         <AlertDialogContent className="action-dialog shortcuts-dialog" aria-labelledby="shortcuts-title">
@@ -1791,6 +1884,7 @@ function App() {
               <div><dt><kbd>Arrows · Home · End</kbd></dt><dd>Move focus without changing selection</dd></div>
               <div><dt><kbd>Space · Shift Arrows</kbd></dt><dd>Toggle a package · extend a selection range</dd></div>
               <div><dt><kbd>Enter</kbd></dt><dd>Open focused package details</dd></div>
+              <div><dt><kbd>Shift F10</kbd></dt><dd>Open the focused asset’s context menu</dd></div>
             </dl>
             <h3>Library</h3>
             <dl className="shortcut-list">

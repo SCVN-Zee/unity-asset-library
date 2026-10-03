@@ -4,6 +4,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
+const { hydrateAsset } = require("./asset-actions.cjs");
 
 // Preserve existing libraries and preferences across the rename to Unity Asset
 // Library: keep each environment on its historical userData directory.
@@ -33,6 +34,8 @@ let importCancelFile = null;
 let packageInstallJob = null;
 let packageInstallPromise = Promise.resolve();
 let packageInstallLibrary = null;
+let downloadController = null;
+let downloadPromise = Promise.resolve();
 const storageState = {
   path: null,
   ready: false,
@@ -584,6 +587,7 @@ function importActive() {
 function assertImportIdle() {
   if (importActive()) throw new Error("Wait for the import to finish, or stop after the current package.");
   if (packageInstallActive()) throw new Error("Wait for saved-package installation to finish.");
+  if (downloadController) throw new Error("Wait for the package download to finish.");
 }
 
 function importSnapshot() {
@@ -762,6 +766,31 @@ function startPackageInstall(request) {
   return packageInstallSnapshot();
 }
 
+function downloadAsset(assetKey) {
+  if (typeof assetKey !== "string" || !assetKey) throw new Error("Choose an indexed asset.");
+  assertImportIdle();
+  if (quitting) throw new Error("The application is closing.");
+  const guard = assertBackendRequestAllowed();
+  const controller = new AbortController();
+  downloadController = controller;
+  const timeout = setTimeout(() => controller.abort(new Error("Package download timed out. Check your cloud provider and try again.")), 30 * 60 * 1000);
+  downloadPromise = (async () => {
+    try {
+      const state = await backendRequest("/api/state", { signal: controller.signal });
+      if ([state.job, state.action].some(job => job && ["queued", "running"].includes(job.status))) throw new Error("Wait for the library operation to finish.");
+      const index = await backendRequest("/api/assets", { signal: controller.signal });
+      if (guard.session !== backendSession || guard.generation !== backendGeneration) throw new Error("The library changed. Try again.");
+      const asset = index.assets.find(item => item.asset_key === assetKey);
+      if (!asset) throw new Error("This asset is no longer indexed.");
+      return await hydrateAsset(guard.session.vaultRoot, asset, controller.signal);
+    } finally {
+      clearTimeout(timeout);
+      downloadController = null;
+    }
+  })();
+  return downloadPromise;
+}
+
 function registerIpc() {
   if (registered) return;
   ipcMain.handle("import:projects", () => importCli("projects"));
@@ -779,6 +808,7 @@ function registerIpc() {
   ipcMain.handle("packages:save", (_event, packageEntry) => postJson("/api/package-favorites/save", { package: packageEntry }));
   ipcMain.handle("packages:remove", (_event, id) => postJson("/api/package-favorites/remove", { id }));
   ipcMain.handle("packages:reorder", (_event, ids) => postJson("/api/package-favorites/reorder", { ids }));
+  ipcMain.handle("assets:download", (_event, assetKey) => downloadAsset(assetKey));
   ipcMain.handle("backend:assets", () => backendRequest("/api/assets"));
   ipcMain.handle("backend:tags", () => backendRequest("/api/tags"));
   ipcMain.handle("backend:mutate-tags", (_event, change) => {
@@ -867,7 +897,7 @@ function createWindow() {
   );
   window.once("ready-to-show", () => window.show());
   window.on("close", (event) => {
-    if (!quitReady && (importActive() || packageInstallActive())) {
+    if (!quitReady && (importActive() || packageInstallActive() || downloadController)) {
       event.preventDefault();
       app.quit();
     }
@@ -912,8 +942,9 @@ app.on("before-quit", (event) => {
     if (choice !== 1) { updateRestart = false; return; }
   }
   quitting = true;
+  downloadController?.abort(new Error("Package download cancelled because the application is closing."));
   if (pendingPortChoice) answerPortChoice(pendingPortChoice.id, { action: "cancel" });
-  void Promise.allSettled([startupPromise, saveQueue, importPromise, packageInstallPromise, transitionPromise || Promise.resolve()])
+  void Promise.allSettled([startupPromise, saveQueue, importPromise, packageInstallPromise, downloadPromise, transitionPromise || Promise.resolve()])
     .then(() => stopOwnedBackend())
     .then(async () => {
       if (updateRestart) await updates.install();

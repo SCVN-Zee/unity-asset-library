@@ -260,6 +260,8 @@ export const Popover = CorePopover as unknown as Component<
   HTMLDivElement,
   PopoverProps
 >;
+// SAFETY: createPopover wires Backdrop to ViewHost, which forwards DOM props and a div ref.
+export const PopoverBackdrop = CorePopover.Backdrop as unknown as Component<HTMLDivElement, PartProps>;
 export const PopoverContent = CorePopover.Content as unknown as Component<
   HTMLDivElement,
   PartProps

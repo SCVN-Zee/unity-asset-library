@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld("ual", {
   stopImport: (id) => ipcRenderer.invoke("import:stop", id),
   getState: () => ipcRenderer.invoke("backend:state"),
   getAssets: () => ipcRenderer.invoke("backend:assets"),
+  downloadAsset: (assetKey) => ipcRenderer.invoke("assets:download", assetKey),
   getTags: () => ipcRenderer.invoke("backend:tags"),
   mutateTags: (change) => ipcRenderer.invoke("backend:mutate-tags", change),
   favorites: () => ipcRenderer.invoke("backend:favorites"),

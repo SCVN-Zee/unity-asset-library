@@ -1,0 +1,17 @@
+.asset-context-menu { position: fixed; z-index: 1000; width: 224px; max-width: calc(100vw - 16px); color: var(--text); transform-origin: top left; transition: opacity var(--duration) var(--ease-out), transform var(--duration) var(--ease-out); }
+@starting-style { .asset-context-menu:not([data-instant]) { opacity: 0; transform: scale(.97); } }
+.asset-context-menu__surface { padding: calc(var(--space-2) / 2); border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--panel); box-shadow: var(--shadow); max-height: calc(100dvh - 16px); overflow-y: auto; }
+.asset-context-menu ul { margin: 0; padding: 0; list-style: none; outline: none; }
+.asset-context-menu__item { position: relative; isolation: isolate; display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: var(--control-height); padding: calc(var(--space-2) / 2) var(--space-2); border-radius: var(--radius-control); background: transparent; text-align: left; font-size: 12px; color: var(--muted); outline: none; }
+.asset-context-menu__item[data-focused] { color: var(--accent-text); }
+.asset-context-menu__item:focus-visible { box-shadow: inset 0 0 0 1px var(--accent-border); }
+.asset-context-menu__item[aria-disabled="true"] { color: var(--faint); opacity: .5; cursor: not-allowed; }
+.asset-context-menu__glide { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--accent-soft); }
+.asset-context-menu__glide::before { content: ""; position: absolute; left: 0; top: var(--space-2); bottom: var(--space-2); width: 2px; border-radius: 2px; background: var(--accent); }
+.asset-context-menu__icon { display: inline-flex; flex: none; }
+.asset-context-menu__icon svg { width: 16px; height: 16px; stroke-width: 1.7; }
+.asset-context-menu__label { flex: 1; }
+.asset-context-menu__hint { font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.asset-context-menu[data-instant] { transition: none; }
+@media (pointer: coarse) { .asset-context-menu__item { min-height: 44px; } }
+@media (prefers-reduced-motion: reduce) { .asset-context-menu { transition: none; } }

@@ -1,6 +1,6 @@
 {
   "name": "unity-asset-library",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "releaseRepository": "SCVN-Zee/unity-asset-library",
   "private": true,
   "description": "A focused desktop library for Unity assets",

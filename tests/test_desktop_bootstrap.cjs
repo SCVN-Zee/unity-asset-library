@@ -3,6 +3,10 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const vm = require("node:vm");
+const { createRequire } = require("node:module");
+
+const entry = path.resolve(__dirname, "../electron/main.cjs");
+const localRequire = createRequire(entry);
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "ual-bootstrap-"));
 (async () => {
@@ -32,14 +36,14 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), "ual-bootstrap-"));
     const context = vm.createContext({
       require: (name) => name === "electron"
         ? { app, dialog, ipcMain, BrowserWindow: class {}, shell: { openExternal() {}, showItemInFolder: (p) => (revealed.push(p), p) } }
-        : name === "./port-recovery.cjs" ? require("../electron/port-recovery.cjs") : require(name),
+        : localRequire(name),
       process: { ...process, resourcesPath: resources },
       __dirname: path.join(temp, "dev", "electron"),
       console, AbortSignal,
       setTimeout,
       clearTimeout,
     });
-    vm.runInContext(fs.readFileSync(path.join(__dirname, "../electron/main.cjs"), "utf8"), context);
+    vm.runInContext(fs.readFileSync(entry, "utf8"), context);
 
     // A compatible external backend is surfaced but never made mutable by this desktop shell.
     const externalState = {

@@ -447,6 +447,14 @@ button:disabled, input:disabled, select:disabled {
 }
 .source-badge.availability[data-availability="cloud_only"],
 .source-badge.availability[data-availability="mixed"] {
+.source-badge.availability .lucide-circle-check {
+  color: var(--green);
+}
+.source-badge.availability .icon {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
   color: var(--accent);
 }
 .list-row .source-badge {

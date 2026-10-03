@@ -32,6 +32,8 @@ import {
   CircleSlash,
   CircleCheck,
   CircleAlert,
+  Cloud,
+  HardDrive,
   Package,
   ExternalLink,
   Folder,
@@ -1843,7 +1845,11 @@ function AssetCard({
   onClick: (event: { metaKey: boolean; shiftKey: boolean }) => void;
   tabIndex: number;
 }) {
-  const availability = availabilitySummary(asset.versions || []);
+  const availability = asset.non_store
+    ? { label: "Local only", short: "LOCAL", kind: "local" }
+    : availabilitySummary(asset.versions || []);
+  const availabilityIcon = asset.non_store ? HardDrive : availability?.kind === "cloud_only" ? Cloud : availability?.kind === "local" ? CircleCheck : null;
+  const availabilityLabel = !asset.non_store && availability?.kind === "local" ? "Ready" : availability?.label;
   const flagged = (asset.flags || []).length > 0;
   if (view === "list")
     return (
@@ -1863,7 +1869,7 @@ function AssetCard({
         <span>{asset.author || "Unknown author"}</span>
         <span>{asset.category?.path || "Uncategorized"}</span>
         <span>{asset.upstream_version || "Not available"}</span>
-        <span>{flagged ? <span className="flag-dot" /> : ""}{availability && <span className="source-badge availability" data-availability={availability.kind} title={availability.label}>{availability.short}</span>}</span>
+        <span>{flagged ? <span className="flag-dot" /> : ""}{availability && <span className="source-badge availability" data-availability={availability.kind} title={availabilityLabel} aria-label={availabilityLabel}>{availabilityIcon ? <Icon as={availabilityIcon} className="icon" aria-hidden="true" /> : availability.short}</span>}</span>
       </Button>
     );
   return (
@@ -1882,8 +1888,7 @@ function AssetCard({
         ) : (
           <span>{initials(asset)}</span>
         )}
-        {asset.non_store && <span className="source-badge">LOCAL</span>}
-        {availability && <span className="source-badge availability" data-availability={availability.kind} title={availability.label}>{availability.short}</span>}
+        {availability && <span className="source-badge availability" data-availability={availability.kind} title={availabilityLabel} aria-label={availabilityLabel}>{availabilityIcon ? <Icon as={availabilityIcon} className="icon" aria-hidden="true" /> : availability.short}</span>}
       </div>
       <div className="card-copy">
         <div className="card-title">{asset.name}</div>

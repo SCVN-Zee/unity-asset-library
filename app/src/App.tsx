@@ -1690,7 +1690,7 @@ function App() {
             <span className="import-selection-count" role="status" aria-atomic="true">{importSelection.size > 0 ? <>{importSelection.size.toLocaleString()} selected{selectionSummary.hidden > 0 && <span className="selection-hidden"> · {selectionSummary.hidden.toLocaleString()} outside filters</span>}</> : "Select packages to import"}</span>
             <Button type="button" className="button quiet selection-action" onPress={selectVisibleImport} isDisabled={loading || importActive || selectionSummary.selectable === selectionSummary.selected} aria-label="Select all packages in current results" title="Add every importable package in the current results to your selection">Select all</Button>
             {importSelection.size > 0 && <Button type="button" className="button quiet selection-action" onPress={clearSelection} isDisabled={importActive} aria-label="Deselect all packages">Clear selection</Button>}
-            {importSelection.size > 0 && <Button type="button" className="button primary" onPress={openImportReview} isDisabled={importActive} aria-label={`Import ${importSelection.size} selected package${importSelection.size === 1 ? "" : "s"}`}>Review import</Button>}
+            {importSelection.size > 0 && <Button type="button" className="button primary" onPress={openImportReview} isDisabled={importActive} aria-label={`Import ${importSelection.size} selected package${importSelection.size === 1 ? "" : "s"}`}>Import</Button>}
           </div>
           </div>
           {loading ? (

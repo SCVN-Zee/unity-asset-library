@@ -191,7 +191,7 @@ export default function FavoritePackages({ disabled, storageEpoch, hidden = fals
       <div className="favorite-packages-heading">
         <div className="favorite-package-actions">
           <Button type="button" className="button quiet" aria-label="Add package" onPress={() => { setDraft({ id: "", label: "", source: "", version: "" }); setError(""); }} isDisabled={blocked}><Icon as={Plus} className="icon" />Add</Button>
-          <Button ref={reviewRef} type="button" className="button primary" onPress={() => openReview(packages.map(item => item.id))} isDisabled={blocked || !packages.length}>Review import</Button>
+          <Button ref={reviewRef} type="button" className="button primary" onPress={() => openReview(packages.map(item => item.id))} isDisabled={blocked || !packages.length}>Import</Button>
         </div>
       </div>
       {loadError && <div className="favorite-packages-error" role="alert"><p>{loadError}</p><Button type="button" className="button quiet" onPress={() => void loadFavorites()}>Retry saved packages</Button></div>}

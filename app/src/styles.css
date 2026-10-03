@@ -372,6 +372,14 @@ button:disabled, input:disabled, select:disabled {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
+/* Keep text-entry focus visible, but ignore modifier-only app shortcuts. */
+html[data-focus-visible="false"] :focus-visible:not(input, textarea, [contenteditable="true"]),
+html[data-focus-visible="false"] input:is([type="checkbox"], [type="radio"]):focus-visible,
+html[data-focus-visible="false"] .spring-check:has(input:focus-visible) .spring-check__press,
+html[data-focus-visible="false"] .squish-switch:has(input:focus-visible) .squish-switch__track {
+  outline: none !important;
+}
+html[data-focus-visible="false"] .asset-context-menu__item:focus-visible { box-shadow: none; }
 .summary-strip {
   min-height: 68px; padding: 14px; border: 1px solid var(--line-soft); border-radius: var(--radius-control);
   background: var(--bg); display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 14px;
